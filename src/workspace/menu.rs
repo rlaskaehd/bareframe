@@ -121,7 +121,7 @@ impl WorkspaceView {
                 MenuAction::CloseTabs(targets),
             )]);
         } else {
-            if let Some(pane) = self.pane(pane) {
+            if let Some(pane) = self.terminal(pane) {
                 let pane = pane.read(cx);
                 sections.push(vec![
                     ("Copy pane title".into(), MenuAction::CopyText(pane.title())),

@@ -1,5 +1,5 @@
 //! The vertical tabs sidebar: search, groups, tab cards, renaming and drag and drop.
-use super::{RenameTarget, WorkspaceView, icon_button};
+use super::{PaneView, RenameTarget, WorkspaceView, icon_button};
 use crate::{
     rename::{RenameEvent, RenameInput},
     theme::{self, Theme, hsla},
@@ -22,6 +22,7 @@ struct DraggedTab {
     subtitle: Option<String>,
     width: f32,
     theme: &'static Theme,
+    settings: bool,
 }
 
 impl Render for DraggedTab {
@@ -43,7 +44,7 @@ impl Render for DraggedTab {
                 .opacity(0.92)
                 .font_family(theme::UI_FONT)
                 .text_color(hsla(theme.text))
-                .child(terminal_icon(theme, true, None))
+                .child(terminal_icon(theme, true, None, self.settings))
                 .child(
                     div()
                         .flex_1()
@@ -256,13 +257,13 @@ impl WorkspaceView {
     fn tab_title(&self, tab: &Tab, cx: &Context<Self>) -> String {
         tab.title.clone().unwrap_or_else(|| {
             self.pane(tab.active_pane)
-                .map_or_else(String::new, |pane| pane.read(cx).name())
+                .map_or_else(String::new, |pane| pane.name(cx))
         })
     }
 
     /// The second line of a tab row: the active pane's `~` path.
     fn tab_subtitle(&self, tab: &Tab, cx: &Context<Self>) -> Option<String> {
-        Some(self.pane(tab.active_pane)?.read(cx).display_cwd())
+        self.pane(tab.active_pane)?.location(cx)
     }
 
     pub(super) fn render_sidebar(&self, width: f32, cx: &mut Context<Self>) -> impl IntoElement {
@@ -519,6 +520,7 @@ impl WorkspaceView {
             .and_then(|group| self.model.group(group))
             .map(|group| hsla(theme.group_colors[group.color]));
         let tint = tab.color.map(|color| hsla(theme.group_colors[color]));
+        let settings = matches!(self.pane(tab.active_pane), Some(PaneView::Settings(_)));
         let hover = format!("tab-{index}");
         let dragged = DraggedTab {
             title: if selected {
@@ -534,6 +536,7 @@ impl WorkspaceView {
             },
             width,
             theme,
+            settings,
         };
         let lifted = self.dragging.contains(&tab.id);
         let weak = cx.entity().downgrade();
@@ -568,7 +571,7 @@ impl WorkspaceView {
             .when_some(group_color, |this, color| {
                 this.child(div().w(px(3.0)).h(px(26.0)).rounded_sm().bg(color))
             })
-            .child(terminal_icon(theme, active, tint))
+            .child(terminal_icon(theme, active, tint, settings))
             .child(match self.rename_field(RenameTarget::Tab(tab.id)) {
                 Some(field) => field,
                 None => div()
@@ -687,8 +690,15 @@ impl WorkspaceView {
     }
 }
 
-/// Warp's session icon: a prompt glyph in a circle, in the tab's color if any.
-fn terminal_icon(theme: &Theme, active: bool, tint: Option<Hsla>) -> impl IntoElement {
+/// Warp's session icon: a prompt glyph (or a gear for Settings) in a circle, in the tab's
+/// color if any.
+fn terminal_icon(
+    theme: &Theme,
+    active: bool,
+    tint: Option<Hsla>,
+    settings: bool,
+) -> impl IntoElement {
+    let color = tint.unwrap_or(hsla(theme.text));
     div()
         .flex_none()
         .size(px(28.0))
@@ -706,8 +716,19 @@ fn terminal_icon(theme: &Theme, active: bool, tint: Option<Hsla>) -> impl IntoEl
         })
         .text_size(px(11.0))
         .font_weight(gpui::FontWeight::BOLD)
-        .text_color(tint.unwrap_or(hsla(theme.text)))
-        .child(">_")
+        .text_color(color)
+        .map(|this| {
+            if settings {
+                this.child(
+                    gpui::svg()
+                        .path("icons/gear.svg")
+                        .size(px(14.0))
+                        .text_color(color),
+                )
+            } else {
+                this.child(">_")
+            }
+        })
 }
 
 fn pin_mark(theme: &Theme) -> impl IntoElement {

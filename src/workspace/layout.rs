@@ -1,5 +1,5 @@
 //! The active tab's split layout and the pane headers.
-use super::{Resize, WorkspaceView, icon_button};
+use super::{PaneView, Resize, WorkspaceView, icon_button};
 use crate::theme::{self, hsla};
 use bareframe_core::workspace::{Axis, Layout, PaneId};
 use gpui::{AnyElement, Context, CursorStyle, MouseButton, canvas, div, prelude::*, px, relative};
@@ -77,7 +77,8 @@ impl WorkspaceView {
             Layout::Pane(id) => {
                 let id = *id;
                 let split = self.model.active().layout.panes().len() > 1;
-                let pane = self.pane(id).cloned();
+                let pane = self.pane(id).map(PaneView::view);
+                let terminal = self.terminal(id).is_some();
                 div()
                     .size_full()
                     .min_w_0()
@@ -99,7 +100,7 @@ impl WorkspaceView {
                             .min_w_0()
                             .min_h_0()
                             // Breathing room around the text; the surface can't be padded from GPUI.
-                            .p(px(6.0))
+                            .when(terminal, |this| this.p(px(6.0)))
                             .children(pane),
                     )
                     .into_any_element()

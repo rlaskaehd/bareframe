@@ -2,6 +2,7 @@ use crate::{
     app::{self, *},
     pane::{PaneEvent, TerminalPane},
     rename::RenameInput,
+    settings_pane::SettingsPane,
     theme::{Theme, hsla},
 };
 use bareframe_core::{
@@ -10,8 +11,8 @@ use bareframe_core::{
     workspace::{Axis, Closed, Direction, GroupId, Layout, PaneId, TabId, Workspace},
 };
 use gpui::{
-    Bounds, Context, CursorStyle, Entity, FocusHandle, MouseButton, MouseMoveEvent, Pixels,
-    Subscription, Window, WindowControlArea, div, prelude::*, px,
+    AnyView, App, Bounds, Context, CursorStyle, Entity, FocusHandle, MouseButton, MouseMoveEvent,
+    Pixels, Subscription, Window, WindowControlArea, div, prelude::*, px,
 };
 use gpui_libghostty::TerminalTheme;
 use menu::ContextMenu;
@@ -28,6 +29,58 @@ enum RenameTarget {
     Group(GroupId),
 }
 
+/// What a pane shows. The layout model only knows `PaneId`s; native surfaces exist only
+/// for terminals, so hiding and freezing apply to them alone.
+#[derive(Clone)]
+enum PaneView {
+    Terminal(Entity<TerminalPane>),
+    Settings(Entity<SettingsPane>),
+}
+
+impl PaneView {
+    fn terminal(&self) -> Option<&Entity<TerminalPane>> {
+        match self {
+            Self::Terminal(pane) => Some(pane),
+            Self::Settings(_) => None,
+        }
+    }
+
+    /// The pane header and window title.
+    fn title(&self, cx: &App) -> String {
+        match self {
+            Self::Terminal(pane) => pane.read(cx).title(),
+            Self::Settings(_) => "Settings".into(),
+        }
+    }
+
+    /// The sidebar card's first line.
+    fn name(&self, cx: &App) -> String {
+        match self {
+            Self::Terminal(pane) => pane.read(cx).name(),
+            Self::Settings(_) => "Settings".into(),
+        }
+    }
+
+    /// The sidebar card's second line.
+    fn location(&self, cx: &App) -> Option<String> {
+        self.terminal().map(|pane| pane.read(cx).display_cwd())
+    }
+
+    fn focus(&self, window: &mut Window, cx: &mut App) {
+        match self {
+            Self::Terminal(pane) => pane.update(cx, |pane, cx| pane.focus(window, cx)),
+            Self::Settings(pane) => pane.update(cx, |pane, cx| pane.focus(window, cx)),
+        }
+    }
+
+    fn view(&self) -> AnyView {
+        match self {
+            Self::Terminal(pane) => pane.clone().into(),
+            Self::Settings(pane) => pane.clone().into(),
+        }
+    }
+}
+
 struct Resize {
     tab: usize,
     path: Vec<bool>,
@@ -37,7 +90,7 @@ struct Resize {
 /// Owns tabs, layout and the panes; never a PTY or native surface directly.
 pub struct WorkspaceView {
     model: Workspace,
-    panes: HashMap<PaneId, (Entity<TerminalPane>, Subscription)>,
+    panes: HashMap<PaneId, (PaneView, Option<Subscription>)>,
     config: LaunchConfig,
     settings: Settings,
     /// `Cmd+0` returns here: the size from the config file, not a hard-coded one.
@@ -130,22 +183,51 @@ impl WorkspaceView {
                     PaneEvent::TitleChanged => cx.notify(),
                 },
             );
-        self.panes.insert(id, (pane, subscription));
+        self.panes
+            .insert(id, (PaneView::Terminal(pane), Some(subscription)));
     }
 
-    fn pane(&self, id: PaneId) -> Option<&Entity<TerminalPane>> {
+    fn pane(&self, id: PaneId) -> Option<&PaneView> {
         self.panes.get(&id).map(|(pane, _)| pane)
+    }
+
+    fn terminal(&self, id: PaneId) -> Option<&Entity<TerminalPane>> {
+        self.pane(id)?.terminal()
+    }
+
+    fn terminals(&self) -> impl Iterator<Item = (&PaneId, &Entity<TerminalPane>)> {
+        self.panes
+            .iter()
+            .filter_map(|(id, (pane, _))| Some((id, pane.terminal()?)))
     }
 
     fn pane_title(&self, id: PaneId, cx: &Context<Self>) -> String {
         self.pane(id)
-            .map_or_else(String::new, |pane| pane.read(cx).title())
+            .map_or_else(String::new, |pane| pane.title(cx))
+    }
+
+    /// Warp keeps one Settings tab per window: open it, or go back to it.
+    fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let existing = self
+            .panes
+            .iter()
+            .find(|(_, (pane, _))| matches!(pane, PaneView::Settings(_)))
+            .map(|(id, _)| *id);
+        if let Some(id) = existing {
+            self.model.focus(id);
+        } else {
+            let id = self.model.new_tab();
+            let theme = self.theme();
+            let pane = cx.new(|cx| SettingsPane::new(theme, cx));
+            self.panes.insert(id, (PaneView::Settings(pane), None));
+        }
+        self.sync(window, cx);
     }
 
     /// The active pane's cwd comes from OSC 7, which any local program's output can send
     /// (Ghostty already rejects remote hosts), so only an existing directory is trusted.
     fn active_cwd(&self, cx: &Context<Self>) -> std::path::PathBuf {
-        self.pane(self.model.active_pane())
+        self.terminal(self.model.active_pane())
             .and_then(|pane| pane.read(cx).cwd().canonicalize().ok())
             .filter(|cwd| cwd.is_dir())
             .unwrap_or_else(|| self.config.cwd.clone())
@@ -164,7 +246,7 @@ impl WorkspaceView {
     fn set_frozen(&mut self, frozen: bool, cx: &mut Context<Self>) {
         self.frozen = frozen;
         for id in self.shown_panes() {
-            if let Some(pane) = self.pane(id) {
+            if let Some(pane) = self.terminal(id) {
                 pane.update(cx, |pane, cx| pane.set_frozen(frozen, cx));
             }
         }
@@ -176,12 +258,12 @@ impl WorkspaceView {
             self.dismiss_menu(cx);
         }
         let visible = self.shown_panes();
-        for (id, (pane, _)) in &self.panes {
+        for (id, pane) in self.terminals() {
             let shown = visible.contains(id);
             pane.update(cx, |pane, cx| pane.set_visible(shown, cx));
         }
-        if let Some(pane) = self.pane(self.model.active_pane()) {
-            pane.update(cx, |pane, cx| pane.focus(window, cx));
+        if let Some(pane) = self.pane(self.model.active_pane()).cloned() {
+            pane.focus(window, cx);
         }
         self.split_bounds.clear();
         cx.notify();
@@ -202,7 +284,7 @@ impl WorkspaceView {
     }
 
     fn close_pane(&mut self, id: PaneId, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some((pane, _)) = self.panes.remove(&id) {
+        if let Some((PaneView::Terminal(pane), _)) = self.panes.remove(&id) {
             pane.update(cx, |pane, cx| pane.shutdown(cx));
         }
         match self.model.close(id) {
@@ -253,8 +335,14 @@ impl WorkspaceView {
 
     fn apply_settings(&mut self, cx: &mut Context<Self>) {
         let theme = self.terminal_theme();
+        let ui = self.theme();
         for (pane, _) in self.panes.values() {
-            pane.update(cx, |pane, cx| pane.apply_theme(&theme, cx));
+            match pane {
+                PaneView::Terminal(pane) => {
+                    pane.update(cx, |pane, cx| pane.apply_theme(&theme, cx))
+                }
+                PaneView::Settings(pane) => pane.update(cx, |pane, cx| pane.set_theme(ui, cx)),
+            }
         }
         cx.notify();
     }
@@ -303,7 +391,9 @@ impl WorkspaceView {
 
     pub fn shutdown(&mut self, cx: &mut Context<Self>) {
         for (_, (pane, _)) in self.panes.drain() {
-            pane.update(cx, |pane, cx| pane.shutdown(cx));
+            if let PaneView::Terminal(pane) = pane {
+                pane.update(cx, |pane, cx| pane.shutdown(cx));
+            }
         }
     }
 
@@ -364,6 +454,27 @@ impl WorkspaceView {
                         theme.text_muted
                     })),
             )
+            .child(div().flex_1())
+            .child(
+                div()
+                    .id("open-settings")
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .size(px(26.0))
+                    .rounded_md()
+                    .hover(|style| style.bg(hsla(theme.tab_hover)))
+                    .on_click(cx.listener(|view, _, window, cx| {
+                        cx.stop_propagation();
+                        view.open_settings(window, cx)
+                    }))
+                    .child(
+                        gpui::svg()
+                            .path("icons/gear.svg")
+                            .size(px(15.0))
+                            .text_color(hsla(theme.text_muted)),
+                    ),
+            )
     }
 
     fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
@@ -414,6 +525,9 @@ impl Render for WorkspaceView {
                 }),
             )
             .on_action(cx.listener(|view, _: &ToggleSidebar, _, cx| view.toggle_sidebar(cx)))
+            .on_action(
+                cx.listener(|view, _: &OpenSettings, window, cx| view.open_settings(window, cx)),
+            )
             .on_action(cx.listener(|view, _: &CloseWindow, window, cx| {
                 view.shutdown(cx);
                 window.remove_window();
@@ -424,7 +538,7 @@ impl Render for WorkspaceView {
             }))
             .on_action(cx.listener(|view, _: &RestartSession, window, cx| {
                 let theme = view.terminal_theme();
-                if let Some(pane) = view.pane(view.model.active_pane()) {
+                if let Some(pane) = view.terminal(view.model.active_pane()) {
                     pane.update(cx, |pane, cx| pane.retry(&theme, window, cx));
                 }
             }))

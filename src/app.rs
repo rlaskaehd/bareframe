@@ -45,6 +45,7 @@ actions!(
         GroupTab,
         UngroupTab,
         ToggleSidebar,
+        OpenSettings,
     ]
 );
 
@@ -66,7 +67,7 @@ pub fn name() -> &'static str {
 /// Icons compiled into the binary; GPUI renders them as masks in the text color.
 struct Assets;
 
-const ICONS: [(&str, &[u8]); 3] = [
+const ICONS: [(&str, &[u8]); 4] = [
     ("icons/pin.svg", include_bytes!("../assets/icons/pin.svg")),
     (
         "icons/corner.svg",
@@ -76,6 +77,7 @@ const ICONS: [(&str, &[u8]); 3] = [
         "icons/search.svg",
         include_bytes!("../assets/icons/search.svg"),
     ),
+    ("icons/gear.svg", include_bytes!("../assets/icons/gear.svg")),
 ];
 
 impl gpui::AssetSource for Assets {
@@ -177,9 +179,14 @@ pub fn run(config: LaunchConfig) {
                 // Warp's tabs panel key, plus the earlier Cmd+Shift+B.
                 KeyBinding::new("cmd-b", ToggleSidebar, None),
                 KeyBinding::new("cmd-shift-b", ToggleSidebar, None),
+                KeyBinding::new("cmd-,", OpenSettings, None),
             ]);
             cx.set_menus(vec![
-                Menu::new("bareframe").items([MenuItem::action("Quit bareframe", Quit)]),
+                Menu::new("bareframe").items([
+                    MenuItem::action("Settings…", OpenSettings),
+                    MenuItem::separator(),
+                    MenuItem::action("Quit bareframe", Quit),
+                ]),
                 Menu::new("Shell").items([
                     MenuItem::action("New Tab", NewTab),
                     MenuItem::action("Split Right", SplitRight),
