@@ -33,5 +33,6 @@ if [[ "$bundle_name" == bareframe-validation ]]; then
         -c 'Add :LSEnvironment dict' \
         -c 'Add :LSEnvironment:BAREFRAME_VALIDATION string 1' "$bundle_dir/Info.plist"
 fi
+install_shell_integration "$bundle_dir/Resources"
 codesign --force --sign - "$CARGO_TARGET_DIR/$bundle_name.app"
 echo "$CARGO_TARGET_DIR/$bundle_name.app"

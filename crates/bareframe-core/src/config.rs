@@ -89,6 +89,33 @@ impl LaunchConfig {
         }))
     }
 
+    /// Environment that loads the zsh integration in `integration_dir` through
+    /// ZDOTDIR. Empty means the session runs without integration: clean shells,
+    /// shells other than zsh, and values a C environment cannot carry.
+    pub fn shell_integration_environment(
+        &self,
+        integration_dir: Option<&Path>,
+        original_zdotdir: Option<&std::ffi::OsStr>,
+    ) -> Vec<(String, String)> {
+        if self.clean_shell || self.shell.file_name().and_then(|n| n.to_str()) != Some("zsh") {
+            return Vec::new();
+        }
+        let Some(dir) = integration_dir.and_then(Path::to_str) else {
+            return Vec::new();
+        };
+        let mut environment = vec![("ZDOTDIR".to_owned(), dir.to_owned())];
+        // The integration's .zshenv restores GHOSTTY_ZSH_ZDOTDIR when it is set,
+        // even to an empty value, and otherwise unsets ZDOTDIR.
+        match original_zdotdir.filter(|value| !value.is_empty()) {
+            None => {}
+            Some(value) => match value.to_str() {
+                Some(value) => environment.push(("GHOSTTY_ZSH_ZDOTDIR".into(), value.into())),
+                None => return Vec::new(),
+            },
+        }
+        environment
+    }
+
     /// Only the shell executable enters the command parser. Cwd has its own field.
     pub fn command(&self) -> String {
         let shell = self.shell.to_str().expect("validated UTF-8 shell");
@@ -132,6 +159,70 @@ mod tests {
         };
         assert_eq!(config.command(), "'/bin/zsh' -l -i");
         assert!(!config.command().contains("unsafe"));
+    }
+    #[test]
+    fn zdotdir_is_kept_only_when_the_user_set_one() {
+        let config = LaunchConfig {
+            cwd: "/tmp".into(),
+            shell: "/bin/zsh".into(),
+            clean_shell: false,
+        };
+        let dir = Path::new("/App/Contents/Resources/shell-integration/zsh");
+        let zdotdir = ("ZDOTDIR".to_owned(), dir.to_str().unwrap().to_owned());
+        assert_eq!(
+            config.shell_integration_environment(Some(dir), None),
+            std::slice::from_ref(&zdotdir)
+        );
+        // An empty value would make .zshenv export ZDOTDIR="" instead of unsetting it.
+        assert_eq!(
+            config.shell_integration_environment(Some(dir), Some("".as_ref())),
+            std::slice::from_ref(&zdotdir)
+        );
+        assert_eq!(
+            config.shell_integration_environment(Some(dir), Some("/home/u/.zsh".as_ref())),
+            [
+                zdotdir,
+                ("GHOSTTY_ZSH_ZDOTDIR".to_owned(), "/home/u/.zsh".to_owned())
+            ]
+        );
+    }
+    #[test]
+    fn sessions_without_integration_get_no_environment() {
+        let dir = Path::new("/integration/zsh");
+        let clean = LaunchConfig {
+            cwd: "/tmp".into(),
+            shell: "/bin/zsh".into(),
+            clean_shell: true,
+        };
+        assert!(
+            clean
+                .shell_integration_environment(Some(dir), None)
+                .is_empty()
+        );
+        let bash = LaunchConfig {
+            shell: "/bin/bash".into(),
+            clean_shell: false,
+            ..clean.clone()
+        };
+        assert!(
+            bash.shell_integration_environment(Some(dir), None)
+                .is_empty()
+        );
+        let zsh = LaunchConfig {
+            shell: "/bin/zsh".into(),
+            ..bash
+        };
+        assert!(zsh.shell_integration_environment(None, None).is_empty());
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            let invalid = std::ffi::OsStr::from_bytes(b"/home/\xff");
+            assert!(
+                zsh.shell_integration_environment(Some(dir), Some(invalid))
+                    .is_empty(),
+                "a ZDOTDIR that cannot be restored disables integration"
+            );
+        }
     }
     #[test]
     fn shell_path_is_quoted_and_clean_mode_disables_user_rc() {

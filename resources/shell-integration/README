@@ -1,0 +1,12 @@
+bareframe zsh shell integration
+
+zsh/.zshenv and zsh/ghostty-integration are copied unchanged from Ghostty's
+shell integration (vendor/gpui-libghostty/crates/gpui-ghostty/vendor/ghostty/
+src/shell-integration/zsh). They are based on Kitty's zsh integration and are
+distributed under the GNU General Public License, version 3 or later. The full
+license text is in COPYING next to this file.
+
+bareframe starts zsh with ZDOTDIR pointing at the zsh directory. The .zshenv
+there restores the user's ZDOTDIR, sources the user's own startup files and
+loads ghostty-integration, which reports prompts and command boundaries with
+OSC 133 and the working directory with OSC 7.

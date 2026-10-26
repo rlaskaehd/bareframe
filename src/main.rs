@@ -8,10 +8,29 @@ mod workspace;
 use bareframe_core::config::{HELP, LaunchConfig, LaunchRequest};
 
 fn main() {
+    // These describe the terminal bareframe was started from. Inherited, they
+    // point Ghostty and the shell at that app's resources and integration
+    // features, so a session started inside cmux or Ghostty would differ from
+    // one started with `open`. Ghostty leaves GHOSTTY_SHELL_FEATURES alone when
+    // every feature is off, so it has to go here.
+    for name in [
+        "GHOSTTY_RESOURCES_DIR",
+        "GHOSTTY_SHELL_FEATURES",
+        "GHOSTTY_ZSH_ZDOTDIR",
+        "TERMINFO",
+    ] {
+        // SAFETY: nothing else has started yet, so no thread reads the environment.
+        #[allow(unsafe_code)]
+        unsafe {
+            std::env::remove_var(name)
+        };
+    }
     let mut args = Vec::new();
     if app::is_validation_instance() {
+        if app::validation_uses_clean_shell() {
+            args.push("--clean-shell".into());
+        }
         args.extend([
-            "--clean-shell".into(),
             "--cwd".into(),
             concat!(env!("CARGO_MANIFEST_DIR"), "/target/validation").into(),
         ]);

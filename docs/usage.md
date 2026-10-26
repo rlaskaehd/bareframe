@@ -23,6 +23,18 @@ clean shell은 사용자의 zsh 초기화 파일을 읽지 않아 프롬프트 �
 
 MVP 1의 셸 실행 모드는 zsh를 기준으로 한다. 다른 셸을 지정한 경우에도 `-l -i` 플래그를 사용하므로 해당 셸의 호환성을 확인해야 한다.
 
+## 셸 통합
+
+일반 zsh 실행은 앱이 배포한 zsh 통합을 `ZDOTDIR`로 불러온다. 통합 스크립트가 원래 `ZDOTDIR`을 복원한 뒤 사용자 초기화 파일을 평소처럼 읽고, 명령 경계(OSC 133)와 작업 디렉터리(OSC 7)를 앱에 알린다.
+커서 모양, 창 제목 설정, `PATH` 추가 기능은 끈다. Ghostty 자체의 셸 감지·주입은 쓰지 않는다.
+
+- 통합 파일은 `./script/bundle`이 `Contents/Resources/shell-integration`에, `./script/run`이 `target/debug/shell-integration`에 설치한다. GPLv3 파일이며 같은 디렉터리의 `COPYING`, `README`에 출처와 라이선스를 둔다.
+- `--clean-shell`, zsh가 아닌 셸, 통합 디렉터리가 없는 실행은 통합 없이 일반 터미널로 동작한다.
+- 앱을 실행한 터미널에서 상속한 `GHOSTTY_RESOURCES_DIR`, `GHOSTTY_SHELL_FEATURES`, `GHOSTTY_ZSH_ZDOTDIR`, `TERMINFO`는 시작할 때 지운다. cmux나 Ghostty 안에서 실행해도 `open`으로 실행한 것과 같게 동작하도록 하기 위해서다.
+
+디버그 빌드에서 `BAREFRAME_VALIDATION=1`(검증 번들의 기본값, clean shell) 또는 `login`(사용자 로그인 셸)을 주면 `target/validation/`에 입력 trace와 TerminalEvent trace(`terminal-events.txt`)를 남긴다.
+검증 번들을 로그인 셸로 띄우려면 `open -n target/bareframe-validation.app --env BAREFRAME_VALIDATION=login`을 쓴다.
+
 ## 단축키와 종료
 
 | 키 | 동작 |
