@@ -1672,14 +1672,14 @@ impl Render for WorkspaceView {
                     .flex_row()
                     .when(self.sidebar_open, |this| {
                         this.child(self.render_sidebar(cx)).child(
-                            // Drag handle on the sidebar's right edge.
+                            // Drag handle on the sidebar's right edge. The line sits flush with
+                            // the sidebar so cards keep equal left and right margins.
                             div()
                                 .flex_none()
                                 .w(px(5.0))
                                 .h_full()
                                 .flex()
-                                .justify_center()
-                                .bg(hsla(theme.chrome))
+                                .bg(hsla(theme.terminal_background))
                                 .cursor(CursorStyle::ResizeLeftRight)
                                 .child(div().w(px(1.0)).h_full().bg(hsla(theme.border)))
                                 .on_mouse_down(
