@@ -86,6 +86,10 @@ impl RenameInput {
         }
     }
 
+    pub fn focus(&self, window: &mut Window, cx: &mut Context<Self>) {
+        self.focus.focus(window, cx);
+    }
+
     pub fn text(&self) -> &str {
         &self.content
     }
@@ -246,8 +250,14 @@ impl RenameInput {
         }
     }
 
-    fn on_mouse_down(&mut self, event: &MouseDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+    fn on_mouse_down(
+        &mut self,
+        event: &MouseDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         cx.stop_propagation();
+        self.focus.focus(window, cx);
         let (Some(bounds), Some(line)) = (self.last_bounds, self.last_layout.as_ref()) else {
             return;
         };

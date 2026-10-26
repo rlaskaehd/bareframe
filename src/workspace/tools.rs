@@ -3,6 +3,7 @@
 use super::{WorkspaceView, icon_button, menu::MenuAction};
 use crate::{
     explorer::ExplorerEvent,
+    search::SearchEvent,
     theme::{Theme, hsla},
 };
 use gpui::{
@@ -14,6 +15,12 @@ pub(super) const TOOLS_DEFAULT_WIDTH: f32 = 260.0;
 const TOOLS_MIN_WIDTH: f32 = 180.0;
 const TOOLS_MAX_SHARE: f32 = 0.4;
 
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum Tool {
+    Explorer,
+    Search,
+}
+
 impl WorkspaceView {
     pub(super) fn toggle_tools(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.tools_open = !self.tools_open;
@@ -21,12 +28,54 @@ impl WorkspaceView {
             .update(cx, |explorer, cx| explorer.set_active(self.tools_open, cx));
         if self.tools_open {
             self.refresh_explorer_roots(cx);
-            self.explorer
-                .update(cx, |explorer, cx| explorer.focus(window, cx));
+            self.focus_tool(window, cx);
         } else {
             self.sync(window, cx);
         }
         cx.notify();
+    }
+
+    /// Warp's rule for a tool's shortcut: if that tool is already showing, close the
+    /// panel; otherwise open the panel on it and focus it.
+    pub(super) fn show_tool(&mut self, tool: Tool, window: &mut Window, cx: &mut Context<Self>) {
+        if self.tools_open && self.tool == tool {
+            return self.toggle_tools(window, cx);
+        }
+        self.open_tool(tool, window, cx);
+    }
+
+    pub(super) fn open_tool(&mut self, tool: Tool, window: &mut Window, cx: &mut Context<Self>) {
+        self.tool = tool;
+        if self.tools_open {
+            self.focus_tool(window, cx);
+            cx.notify();
+        } else {
+            self.toggle_tools(window, cx);
+        }
+    }
+
+    fn focus_tool(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match self.tool {
+            Tool::Explorer => self
+                .explorer
+                .update(cx, |explorer, cx| explorer.focus(window, cx)),
+            Tool::Search => self
+                .global_search
+                .update(cx, |search, cx| search.focus(window, cx)),
+        }
+    }
+
+    pub(super) fn on_search_event(
+        &mut self,
+        event: &SearchEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            // ponytail: the line is dropped until bareframe has its own editor (3b).
+            SearchEvent::Open(path, _line) => open_externally(path),
+            SearchEvent::Dismiss => self.sync(window, cx),
+        }
     }
 
     /// Warp's roots: the working directories of the active tab's terminals, the focused
@@ -61,6 +110,8 @@ impl WorkspaceView {
             .cloned()
             .collect();
         roots.retain(|root| !nested.contains(root));
+        self.global_search
+            .update(cx, |search, cx| search.set_roots(roots.clone(), cx));
         self.explorer
             .update(cx, |explorer, cx| explorer.set_roots(roots, cx));
     }
@@ -179,7 +230,28 @@ impl WorkspaceView {
                     .px_2()
                     .border_b_1()
                     .border_color(hsla(theme.border))
-                    .child(tool_tab(theme, "icons/file.svg", true))
+                    .child(
+                        tool_tab(
+                            theme,
+                            "tool-explorer",
+                            "icons/file.svg",
+                            self.tool == Tool::Explorer,
+                        )
+                        .on_click(cx.listener(|view, _, window, cx| {
+                            view.open_tool(Tool::Explorer, window, cx)
+                        })),
+                    )
+                    .child(
+                        tool_tab(
+                            theme,
+                            "tool-search",
+                            "icons/search.svg",
+                            self.tool == Tool::Search,
+                        )
+                        .on_click(cx.listener(|view, _, window, cx| {
+                            view.open_tool(Tool::Search, window, cx)
+                        })),
+                    )
                     .child(div().flex_1())
                     .child(icon_button("close-tools", "×", theme).on_click(cx.listener(
                         |view, _, window, cx| {
@@ -188,7 +260,10 @@ impl WorkspaceView {
                         },
                     ))),
             )
-            .child(div().flex_1().min_h_0().pt_1().child(self.explorer.clone()))
+            .child(div().flex_1().min_h_0().pt_1().map(|this| match self.tool {
+                Tool::Explorer => this.child(self.explorer.clone()),
+                Tool::Search => this.child(self.global_search.clone()),
+            }))
     }
 
     pub(super) fn render_tools_edge(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -211,14 +286,23 @@ impl WorkspaceView {
     }
 }
 
-fn tool_tab(theme: &Theme, icon: &'static str, selected: bool) -> impl IntoElement {
+fn tool_tab(
+    theme: &Theme,
+    id: &'static str,
+    icon: &'static str,
+    selected: bool,
+) -> gpui::Stateful<gpui::Div> {
     div()
+        .id(id)
         .flex()
         .items_center()
         .justify_center()
         .size(px(26.0))
         .rounded_md()
         .when(selected, |this| this.bg(hsla(theme.tab_active)))
+        .when(!selected, |this| {
+            this.hover(|style| style.bg(hsla(theme.tab_hover)))
+        })
         .child(
             gpui::svg()
                 .path(icon)
@@ -232,46 +316,37 @@ fn tool_tab(theme: &Theme, icon: &'static str, selected: bool) -> impl IntoEleme
 }
 
 /// Opens a file with its default macOS application until bareframe has its own viewers.
-/// Anything that would run code when opened is revealed in Finder instead, so a click in
-/// the tree never executes a script or app.
+/// Only plain documents are opened, by their resolved path so a symlink can't disguise a
+/// script or app; everything else is revealed in Finder, so a click never runs code.
 pub(super) fn open_externally(path: &Path) {
-    if launches_code(path) {
-        return reveal_in_finder(path);
-    }
-    if let Err(error) = std::process::Command::new("/usr/bin/open")
-        .arg(path)
-        .spawn()
-    {
-        eprintln!("bareframe: opening {}: {error}", path.display());
+    match std::fs::canonicalize(path) {
+        Ok(target) if is_document(&target) => {
+            if let Err(error) = std::process::Command::new("/usr/bin/open")
+                .arg(&target)
+                .spawn()
+            {
+                eprintln!("bareframe: opening {}: {error}", target.display());
+            }
+        }
+        _ => reveal_in_finder(path),
     }
 }
 
-fn launches_code(path: &Path) -> bool {
+/// A regular, non-executable file with an extension known to open in a viewer or editor.
+fn is_document(path: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
-    const LAUNCHERS: [&str; 16] = [
-        "app",
-        "command",
-        "tool",
-        "terminal",
-        "workflow",
-        "action",
-        "scpt",
-        "scptd",
-        "applescript",
-        "pkg",
-        "mpkg",
-        "jar",
-        "webloc",
-        "inetloc",
-        "fileloc",
-        "url",
+    const DOCUMENTS: [&str; 38] = [
+        "md", "markdown", "txt", "log", "csv", "tsv", "json", "jsonl", "toml", "yaml", "yml",
+        "xml", "ini", "conf", "rs", "c", "h", "cc", "cpp", "hpp", "m", "swift", "zig", "go", "py",
+        "js", "ts", "tsx", "css", "png", "jpg", "jpeg", "gif", "svg", "webp", "pdf", "lock",
+        "patch",
     ];
-    let executable = std::fs::metadata(path)
-        .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0);
+    let plain = std::fs::metadata(path)
+        .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 == 0);
     let extension = path
         .extension()
         .map(|extension| extension.to_string_lossy().to_lowercase());
-    executable || extension.is_some_and(|extension| LAUNCHERS.contains(&extension.as_str()))
+    plain && extension.is_some_and(|extension| DOCUMENTS.contains(&extension.as_str()))
 }
 
 pub(super) fn reveal_in_finder(path: &Path) {
@@ -291,21 +366,28 @@ fn shell_quote(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{launches_code, shell_quote};
+    use super::{is_document, shell_quote};
 
     #[test]
-    fn launchers_and_executables_are_not_opened() {
+    fn only_plain_documents_are_opened() {
         let dir = std::env::temp_dir().join(format!("bareframe-launch-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let script = dir.join("run");
-        std::fs::write(&script, "#!/bin/sh\n").unwrap();
-        std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755))
-            .unwrap();
         let note = dir.join("notes.md");
         std::fs::write(&note, "").unwrap();
-        assert!(launches_code(&script));
-        assert!(launches_code(&dir.join("Deploy.COMMAND")));
-        assert!(!launches_code(&note));
+        let script = dir.join("run.py");
+        std::fs::write(&script, "").unwrap();
+        std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .unwrap();
+        let command = dir.join("deploy.command");
+        std::fs::write(&command, "").unwrap();
+        // A link named like a document resolves to what it points at.
+        let disguised = dir.join("readme.md");
+        let _ = std::fs::remove_file(&disguised);
+        std::os::unix::fs::symlink(&command, &disguised).unwrap();
+        assert!(is_document(&note));
+        assert!(!is_document(&script), "executable bit");
+        assert!(!is_document(&command), "not on the list");
+        assert!(!is_document(&std::fs::canonicalize(&disguised).unwrap()));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

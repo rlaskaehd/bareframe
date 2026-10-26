@@ -5,6 +5,7 @@ mod app;
 mod explorer;
 mod pane;
 mod rename;
+mod search;
 mod settings_pane;
 mod terminal;
 mod theme;

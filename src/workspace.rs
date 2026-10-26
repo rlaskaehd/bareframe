@@ -3,6 +3,7 @@ use crate::{
     explorer::Explorer,
     pane::{PaneEvent, TerminalPane},
     rename::RenameInput,
+    search::SearchPanel,
     settings_pane::SettingsPane,
     theme::{Theme, hsla},
 };
@@ -110,8 +111,11 @@ pub struct WorkspaceView {
     /// The tools panel's left edge, recorded on render for resizing.
     tools_left: f32,
     resizing_tools: bool,
+    tool: tools::Tool,
     explorer: Entity<Explorer>,
     _explorer_events: Subscription,
+    global_search: Entity<SearchPanel>,
+    _search_events: Subscription,
     /// Tabs being dragged in the sidebar; their rows show an empty slot meanwhile.
     dragging: Vec<TabId>,
     menu: Option<ContextMenu>,
@@ -145,6 +149,11 @@ impl WorkspaceView {
         let explorer_events = cx.subscribe_in(&explorer, window, |view, _, event, window, cx| {
             view.on_explorer_event(event, window, cx)
         });
+        let global_search = cx.new(|cx| SearchPanel::new(theme, window, cx));
+        let search_events =
+            cx.subscribe_in(&global_search, window, |view, _, event, window, cx| {
+                view.on_search_event(event, window, cx)
+            });
         let mut view = Self {
             model,
             panes: HashMap::new(),
@@ -161,8 +170,11 @@ impl WorkspaceView {
             tools_width: tools::TOOLS_DEFAULT_WIDTH,
             tools_left: 0.0,
             resizing_tools: false,
+            tool: tools::Tool::Explorer,
             explorer,
             _explorer_events: explorer_events,
+            global_search,
+            _search_events: search_events,
             dragging: Vec::new(),
             menu: None,
             frozen: false,
@@ -489,6 +501,8 @@ impl WorkspaceView {
         }
         self.explorer
             .update(cx, |explorer, cx| explorer.set_theme(ui, cx));
+        self.global_search
+            .update(cx, |search, cx| search.set_theme(ui, cx));
         cx.notify();
     }
 
@@ -732,12 +746,13 @@ impl Render for WorkspaceView {
                 cx.listener(|view, _: &ToggleToolsPanel, window, cx| view.toggle_tools(window, cx)),
             )
             .on_action(cx.listener(|view, _: &ShowProjectExplorer, window, cx| {
-                if view.tools_open {
-                    view.explorer
-                        .update(cx, |explorer, cx| explorer.focus(window, cx));
-                } else {
-                    view.toggle_tools(window, cx)
-                }
+                view.show_tool(tools::Tool::Explorer, window, cx)
+            }))
+            .on_action(cx.listener(|view, _: &ShowGlobalSearch, window, cx| {
+                view.show_tool(tools::Tool::Search, window, cx)
+            }))
+            .on_action(cx.listener(|view, _: &FindInFiles, window, cx| {
+                view.open_tool(tools::Tool::Search, window, cx)
             }))
             .on_action(cx.listener(|view, _: &CloseWindow, window, cx| {
                 view.shutdown(cx);

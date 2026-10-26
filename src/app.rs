@@ -49,6 +49,8 @@ actions!(
         OpenSettings,
         ToggleToolsPanel,
         ShowProjectExplorer,
+        ShowGlobalSearch,
+        FindInFiles,
     ]
 );
 
@@ -232,6 +234,8 @@ pub fn run(config: LaunchConfig, restore: bool) {
                 KeyBinding::new("cmd-,", OpenSettings, None),
                 KeyBinding::new("cmd-\\", ToggleToolsPanel, None),
                 KeyBinding::new("ctrl-1", ShowProjectExplorer, None),
+                KeyBinding::new("ctrl-3", ShowGlobalSearch, None),
+                KeyBinding::new("cmd-shift-f", FindInFiles, None),
             ]);
             cx.set_menus(vec![
                 Menu::new("bareframe").items([
@@ -261,6 +265,7 @@ pub fn run(config: LaunchConfig, restore: bool) {
                     MenuItem::action("Toggle Tabs Sidebar", ToggleSidebar),
                     MenuItem::action("Toggle Tools Panel", ToggleToolsPanel),
                     MenuItem::action("Project Explorer", ShowProjectExplorer),
+                    MenuItem::action("Global Search", ShowGlobalSearch),
                     MenuItem::separator(),
                     MenuItem::action("Dark Theme", UseDarkTheme),
                     MenuItem::action("Light Theme", UseLightTheme),
