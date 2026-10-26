@@ -44,6 +44,8 @@ pub struct RenameInput {
     marked_range: Option<Range<usize>>,
     last_layout: Option<ShapedLine>,
     last_bounds: Option<Bounds<Pixels>>,
+    /// How far the text is shifted left so the cursor stays inside the field.
+    scroll: Pixels,
     accent: u32,
     finished: bool,
     _blur: Subscription,
@@ -68,6 +70,7 @@ impl RenameInput {
             marked_range: None,
             last_layout: None,
             last_bounds: None,
+            scroll: Pixels::ZERO,
             accent,
             finished: false,
             _blur: blur,
@@ -231,7 +234,7 @@ impl RenameInput {
         let (Some(bounds), Some(line)) = (self.last_bounds, self.last_layout.as_ref()) else {
             return;
         };
-        let offset = line.closest_index_for_x(event.position.x - bounds.left());
+        let offset = line.closest_index_for_x(event.position.x - bounds.left() + self.scroll);
         self.move_to(offset, cx);
     }
 }
@@ -325,11 +328,11 @@ impl EntityInputHandler for RenameInput {
         let range = self.range_from_utf16(&range_utf16);
         Some(Bounds::from_corners(
             point(
-                bounds.left() + layout.x_for_index(range.start),
+                bounds.left() + layout.x_for_index(range.start) - self.scroll,
                 bounds.top(),
             ),
             point(
-                bounds.left() + layout.x_for_index(range.end),
+                bounds.left() + layout.x_for_index(range.end) - self.scroll,
                 bounds.bottom(),
             ),
         ))
@@ -345,7 +348,7 @@ impl EntityInputHandler for RenameInput {
         let index = self
             .last_layout
             .as_ref()?
-            .index_for_x(point.x - bounds.left())?;
+            .index_for_x(point.x - bounds.left() + self.scroll)?;
         Some(self.offset_to_utf16(index))
     }
 }
@@ -356,6 +359,7 @@ struct TextElement {
 
 struct PrepaintState {
     line: Option<ShapedLine>,
+    scroll: Pixels,
     cursor: Option<PaintQuad>,
     selection: Option<PaintQuad>,
 }
@@ -444,13 +448,17 @@ impl Element for TextElement {
                 .shape_line(input.content.clone().into(), font_size, &runs, None);
         let accent = crate::theme::hsla(input.accent);
         let selected = input.selected_range.clone();
+        // Keep the cursor visible: shift the text left once it passes the right edge.
+        let cursor_x = line.x_for_index(input.cursor_offset());
+        let scroll = (cursor_x - bounds.size.width + px(2.0)).max(Pixels::ZERO);
+        let left = bounds.left() - scroll;
         let (selection, cursor) = if selected.is_empty() {
-            let x = line.x_for_index(input.cursor_offset());
+            let x = cursor_x;
             (
                 None,
                 Some(fill(
                     Bounds::new(
-                        point(bounds.left() + x, bounds.top()),
+                        point(left + x, bounds.top()),
                         size(px(1.5), bounds.size.height),
                     ),
                     accent,
@@ -460,14 +468,8 @@ impl Element for TextElement {
             (
                 Some(fill(
                     Bounds::from_corners(
-                        point(
-                            bounds.left() + line.x_for_index(selected.start),
-                            bounds.top(),
-                        ),
-                        point(
-                            bounds.left() + line.x_for_index(selected.end),
-                            bounds.bottom(),
-                        ),
+                        point(left + line.x_for_index(selected.start), bounds.top()),
+                        point(left + line.x_for_index(selected.end), bounds.bottom()),
                     ),
                     accent.opacity(0.35),
                 )),
@@ -476,6 +478,7 @@ impl Element for TextElement {
         };
         PrepaintState {
             line: Some(line),
+            scroll,
             cursor,
             selection,
         }
@@ -497,30 +500,35 @@ impl Element for TextElement {
             ElementInputHandler::new(bounds, self.input.clone()),
             cx,
         );
-        if let Some(selection) = prepaint.selection.take() {
-            window.paint_quad(selection);
-        }
+        let scroll = prepaint.scroll;
         let Some(line) = prepaint.line.take() else {
             return;
         };
-        if let Err(error) = line.paint(
-            bounds.origin,
-            window.line_height(),
-            gpui::TextAlign::Left,
-            None,
-            window,
-            cx,
-        ) {
-            eprintln!("bareframe: painting rename field: {error}");
-        }
-        if focus.is_focused(window)
-            && let Some(cursor) = prepaint.cursor.take()
-        {
-            window.paint_quad(cursor);
-        }
+        // Long names would otherwise paint over the row's buttons.
+        window.with_content_mask(Some(gpui::ContentMask { bounds }), |window| {
+            if let Some(selection) = prepaint.selection.take() {
+                window.paint_quad(selection);
+            }
+            if let Err(error) = line.paint(
+                point(bounds.left() - scroll, bounds.top()),
+                window.line_height(),
+                gpui::TextAlign::Left,
+                None,
+                window,
+                cx,
+            ) {
+                eprintln!("bareframe: painting rename field: {error}");
+            }
+            if focus.is_focused(window)
+                && let Some(cursor) = prepaint.cursor.take()
+            {
+                window.paint_quad(cursor);
+            }
+        });
         self.input.update(cx, |input, _| {
             input.last_layout = Some(line);
             input.last_bounds = Some(bounds);
+            input.scroll = scroll;
         });
     }
 }

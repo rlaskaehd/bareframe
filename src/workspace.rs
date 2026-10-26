@@ -1338,9 +1338,9 @@ fn sidebar_icon(color: u32) -> impl IntoElement {
 }
 
 fn pin_mark(theme: &Theme) -> impl IntoElement {
-    div()
+    gpui::svg()
+        .path("icons/pin.svg")
         .flex_shrink_0()
-        .text_size(px(10.0))
+        .size(px(12.0))
         .text_color(hsla(theme.text_muted))
-        .child("📌")
 }
