@@ -11,7 +11,7 @@ MVP 1(단일 창·단일 zsh 터미널)을 완료했다. 남은 한계는 [검�
 - [구현 순서와 완료 기준](roadmap.md): 기술 검증부터 MVP 1–4까지의 범위.
 - [MVP 1 구현 계획](mvp-1-plan.md): 의존성 고정, 단일 zsh 터미널 구현 단계와 수용 검증.
 - [빌드 안내](build.md), [사용 안내](usage.md), [검증 기록](mvp-1-validation.md).
-- [MVP 2 구현 계획](mvp-2-plan.md): 탭·분할, 테마·타이포그래피의 단계와 수용 시나리오.
+- [MVP 2 구현 계획](mvp-2-plan.md): 탭·분할, 테마·타이포그래피의 단계와 수용 시나리오. 결과는 [MVP 2 검증 기록](mvp-2-validation.md).
 - [명령 Block 확장 경계(보류)](block-boundary.md): 이벤트, 실행 세대, 명령 종료와 출력 보존의 책임.
 - [오픈소스 참조 안내](../reference/README.md): 내려받은 저장소의 역할, 주요 경로, 라이선스 표시.
 - [소스 잠금 정보](../reference/sources.lock.json): 공식 URL, 커밋, 소스 압축 파일의 SHA-256, 무결성 검증 기록.

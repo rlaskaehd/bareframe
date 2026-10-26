@@ -1,6 +1,6 @@
 # MVP 2 구현 계획 — Warp 스타일 UI
 
-기준: `mvp-1` 태그(2026-10-26). 로드맵의 범위는 [MVP 2](roadmap.md#mvp-2--warp-스타일-ui)를 따른다.
+기준: `mvp-1` 태그(2026-10-26). 상태: U1–U6 구현과 검증 완료, 결과는 [MVP 2 검증 기록](mvp-2-validation.md). 로드맵의 범위는 [MVP 2](roadmap.md#mvp-2--warp-스타일-ui)를 따른다.
 
 ## 범위
 
@@ -18,7 +18,7 @@
 | --- | --- |
 | `Cmd+T` | 새 탭(현재 Pane의 작업 디렉터리에서 시작) |
 | `Cmd+W` | 현재 Pane 닫기. 탭의 마지막 Pane이면 탭을, 마지막 탭이면 창을 닫는다 |
-| `Cmd+Shift+[` / `Cmd+Shift+]`, `Cmd+1`–`Cmd+9` | 이전·다음 탭, 번호로 탭 선택 |
+| `Cmd+Shift+[` / `Cmd+Shift+]`, `Cmd+1`–`Cmd+8`, `Cmd+9` | 이전·다음 탭, 번호로 탭 선택, 마지막 탭 |
 | `Cmd+D` / `Cmd+Shift+D` | 오른쪽 / 아래로 분할 |
 | `Cmd+Option+방향키` | 해당 방향의 Pane으로 포커스 이동 |
 | `Cmd+=` / `Cmd+-` / `Cmd+0` | 모든 Pane의 터미널 폰트 크기 키우기·줄이기·기본값 |
