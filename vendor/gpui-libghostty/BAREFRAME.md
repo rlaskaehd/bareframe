@@ -17,6 +17,11 @@ Local changes are limited to macOS embedding:
   AppKit view does. GPUI drops the text while Control is held, and without it
   Ghostty's encoder emitted nothing for chords such as ctrl+shift+a or ctrl+@
   instead of CSI u.
+- `TerminalTheme` carries an optional `font_family` and `font_size`, written to
+  the same generated config file as the colors, so the app's typography reaches
+  every surface at spawn and through `TerminalThemeState::apply`. A family name
+  containing a newline is dropped rather than allowed to start another key.
+  The struct is no longer `Copy`/`Eq` because of these fields.
 
 The application implements the GPUI view and text input handler in
 `src/terminal/adapter.rs`. The upstream GPUI macro is retained for provenance but

@@ -30,12 +30,15 @@ impl fmt::Display for TerminalColor {
     }
 }
 
-/// Colors applied to a terminal before its process starts.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Colors and font applied to a terminal before its process starts.
+#[derive(Clone, Debug, PartialEq)]
 pub struct TerminalTheme {
     pub background: TerminalColor,
     pub foreground: TerminalColor,
     pub palette: [TerminalColor; 16],
+    /// Ghostty's built-in font is used when absent.
+    pub font_family: Option<String>,
+    pub font_size: Option<f32>,
 }
 
 impl TerminalTheme {
@@ -48,12 +51,14 @@ impl TerminalTheme {
             background,
             foreground,
             palette,
+            font_family: None,
+            font_size: None,
         }
     }
 }
 
 /// Selects the source of terminal configuration.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum TerminalConfiguration {
     /// Use Ghostty's built-in defaults without reading user configuration.
     #[default]
@@ -99,10 +104,18 @@ fn theme_config_contents(theme: &TerminalTheme) -> String {
         .enumerate()
         .map(|(index, color)| format!("palette = {index}=#{color}\n"))
         .collect::<String>();
-    format!(
+    let mut contents = format!(
         "background = #{}\nforeground = #{}\n{}palette-generate = true\n",
         theme.background, theme.foreground, palette
-    )
+    );
+    // Ghostty's config syntax has no quoting; a newline would start another key.
+    if let Some(family) = theme.font_family.as_deref().filter(|f| !f.contains('\n')) {
+        contents.push_str(&format!("font-family = {family}\n"));
+    }
+    if let Some(size) = theme.font_size {
+        contents.push_str(&format!("font-size = {size}\n"));
+    }
+    contents
 }
 
 fn write_theme_config(theme: &TerminalTheme) -> Result<tempfile::NamedTempFile, String> {
@@ -821,6 +834,18 @@ mod tests {
         assert!(config.contains("palette = 15=#0f1011\n"));
         assert_eq!(config.matches("palette = ").count(), 16);
         assert!(config.ends_with("palette-generate = true\n"));
+    }
+
+    #[test]
+    fn terminal_theme_font_is_appended_and_cannot_inject_keys() {
+        let mut theme = theme(TerminalColor::new(0, 0, 0), TerminalColor::new(1, 1, 1));
+        theme.font_family = Some("JetBrains Mono".into());
+        theme.font_size = Some(13.5);
+        let config = theme_config_contents(&theme);
+        assert!(config.ends_with("font-family = JetBrains Mono\nfont-size = 13.5\n"));
+
+        theme.font_family = Some("Menlo\nbackground = #ff0000".into());
+        assert!(!theme_config_contents(&theme).contains("font-family"));
     }
 
     #[test]
