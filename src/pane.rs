@@ -1,0 +1,162 @@
+use crate::{terminal::adapter::GhosttyAdapter, theme};
+use bareframe_core::{
+    config::LaunchConfig,
+    session::{SessionId, SessionState, SessionStatus, TerminalEvent, TerminalEventKind},
+    workspace::PaneId,
+};
+use gpui::{Context, Entity, EventEmitter, FocusHandle, Subscription, Window, div, prelude::*};
+use gpui_libghostty::TerminalTheme;
+
+pub enum PaneEvent {
+    /// The shell ended; the pane should close.
+    Exited,
+    TitleChanged,
+}
+
+/// One terminal session and the native surface showing it.
+pub struct TerminalPane {
+    config: LaunchConfig,
+    session: SessionState,
+    terminal: Option<Entity<GhosttyAdapter>>,
+    backend: Option<Subscription>,
+    focus: FocusHandle,
+}
+
+impl EventEmitter<PaneEvent> for TerminalPane {}
+
+impl TerminalPane {
+    pub fn new(
+        id: PaneId,
+        config: LaunchConfig,
+        theme: &TerminalTheme,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let mut pane = Self {
+            session: SessionState::new(SessionId(id.0), config.cwd.clone()),
+            config,
+            terminal: None,
+            backend: None,
+            focus: cx.focus_handle(),
+        };
+        pane.start(theme, window, cx);
+        pane
+    }
+
+    fn start(&mut self, theme: &TerminalTheme, window: &mut Window, cx: &mut Context<Self>) {
+        match GhosttyAdapter::spawn(&self.config, self.session.key, theme, window, cx) {
+            Ok(terminal) => {
+                self.backend = Some(cx.subscribe(
+                    &terminal,
+                    |pane, _, event: &TerminalEvent, cx| {
+                        if !pane.session.apply(event) {
+                            return;
+                        }
+                        match event.kind {
+                            TerminalEventKind::Exited { .. } => cx.emit(PaneEvent::Exited),
+                            TerminalEventKind::TitleChanged(_)
+                            | TerminalEventKind::WorkingDirectoryChanged(_) => {
+                                cx.emit(PaneEvent::TitleChanged)
+                            }
+                            _ => {}
+                        }
+                        cx.notify();
+                    },
+                ));
+                self.terminal = Some(terminal);
+            }
+            Err(error) => {
+                self.focus.focus(window, cx);
+                self.session.apply(&TerminalEvent {
+                    key: self.session.key,
+                    kind: TerminalEventKind::Failed(error),
+                });
+            }
+        }
+    }
+
+    /// Only a pane whose shell could not start is restarted; an exited pane closes.
+    pub fn retry(&mut self, theme: &TerminalTheme, window: &mut Window, cx: &mut Context<Self>) {
+        if !matches!(self.session.status, SessionStatus::Failed(_))
+            || self.session.restart(self.config.cwd.clone()).is_err()
+        {
+            return;
+        }
+        self.release(cx);
+        self.start(theme, window, cx);
+        cx.notify();
+    }
+
+    pub fn title(&self) -> String {
+        match &self.session.status {
+            SessionStatus::Failed(_) => "Could not start".into(),
+            _ if self.session.title != "Terminal" => self.session.title.clone(),
+            _ => self
+                .session
+                .cwd
+                .file_name()
+                .map_or_else(|| "/".into(), |name| name.to_string_lossy().into_owned()),
+        }
+    }
+
+    /// Where a tab opened from this pane starts. Known only if the shell reports it.
+    pub fn cwd(&self) -> &std::path::Path {
+        &self.session.cwd
+    }
+
+    pub fn focus(&self, window: &mut Window, cx: &mut Context<Self>) {
+        match &self.terminal {
+            Some(terminal) => terminal.update(cx, |terminal, cx| terminal.focus(window, cx)),
+            None => self.focus.focus(window, cx),
+        }
+    }
+
+    /// Native surfaces sit above GPUI and stay on screen unless hidden explicitly.
+    pub fn set_visible(&self, visible: bool, cx: &mut Context<Self>) {
+        if let Some(terminal) = &self.terminal {
+            terminal.update(cx, |terminal, _| terminal.set_visible(visible));
+        }
+    }
+
+    pub fn apply_theme(&self, theme: &TerminalTheme, cx: &mut Context<Self>) {
+        if let Some(terminal) = &self.terminal
+            && let Err(error) = terminal.update(cx, |terminal, _| terminal.apply_theme(theme))
+        {
+            eprintln!("bareframe: {error}");
+        }
+    }
+
+    fn release(&mut self, cx: &mut Context<Self>) {
+        self.backend.take();
+        if let Some(terminal) = self.terminal.take() {
+            terminal.update(cx, |terminal, _| terminal.shutdown());
+        }
+    }
+
+    pub fn shutdown(&mut self, cx: &mut Context<Self>) {
+        self.release(cx);
+        self.session.close();
+    }
+}
+
+impl Render for TerminalPane {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let error = match &self.session.status {
+            SessionStatus::Failed(error) => Some(format!(
+                "Could not start terminal: {error}\nCmd+Shift+R to retry"
+            )),
+            _ => None,
+        };
+        div()
+            .track_focus(&self.focus)
+            .size_full()
+            .min_h_0()
+            .children(self.terminal.clone())
+            .when_some(error, |this, error| {
+                this.p_4()
+                    .font_family(theme::UI_FONT)
+                    .text_sm()
+                    .child(error)
+            })
+    }
+}

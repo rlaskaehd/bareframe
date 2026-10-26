@@ -17,7 +17,7 @@ use gpui_libghostty::{
         KeyAction, Modifiers, MouseButton, MouseState, NativeEvent, NativeSurface,
         TerminalThemeState, spawn_surface,
     },
-    ClipboardOperation, TerminalOptions,
+    ClipboardOperation, TerminalConfiguration, TerminalOptions, TerminalTheme,
 };
 use std::{ffi::CString, ops::Range};
 
@@ -27,7 +27,7 @@ pub struct GhosttyAdapter {
     tick_task: Option<Task<()>>,
     subscriptions: Vec<Subscription>,
     surface: Option<NativeSurface>,
-    _theme: TerminalThemeState,
+    theme_state: TerminalThemeState,
     focus: FocusHandle,
     bounds: Bounds<Pixels>,
     composition: Composition,
@@ -41,18 +41,20 @@ impl GhosttyAdapter {
     pub fn spawn<T: 'static>(
         config: &LaunchConfig,
         key: SessionKey,
+        theme: &TerminalTheme,
         window: &mut Window,
         cx: &mut Context<T>,
     ) -> Result<Entity<Self>, String> {
         let mut options = TerminalOptions::new(config.command(), config.cwd.clone());
         options.quiet_login = true;
+        options.configuration = TerminalConfiguration::Custom(theme.clone());
         options.clipboard_approval = Some(std::sync::Arc::new(|request| {
             request.operation == ClipboardOperation::Paste
         }));
         // SAFETY: This entity creates, services and drops its child on GPUI's UI
         // thread. WorkspaceView releases it before its parent NSView is closed.
         #[allow(unsafe_code)]
-        let (surface, theme) =
+        let (surface, theme_state) =
             unsafe { spawn_surface(options, window, f64::from(window.scale_factor()))? };
         let focus = cx.focus_handle();
         focus.focus(window, cx);
@@ -74,7 +76,7 @@ impl GhosttyAdapter {
                 tick_task: None,
                 subscriptions,
                 surface: Some(surface),
-                _theme: theme,
+                theme_state,
                 focus,
                 bounds: Bounds::default(),
                 composition: Composition::default(),
@@ -157,6 +159,23 @@ impl GhosttyAdapter {
         self.composition.clear();
         if let Some(surface) = &mut self.surface {
             surface.preedit(c"");
+        }
+    }
+
+    pub fn focus(&self, window: &mut Window, cx: &mut Context<Self>) {
+        self.focus.focus(window, cx);
+    }
+
+    pub fn set_visible(&mut self, visible: bool) {
+        if let Some(surface) = &mut self.surface {
+            surface.set_visible(visible);
+        }
+    }
+
+    pub fn apply_theme(&mut self, theme: &TerminalTheme) -> Result<(), String> {
+        match &mut self.surface {
+            Some(surface) => self.theme_state.apply(surface, theme),
+            None => Ok(()),
         }
     }
 

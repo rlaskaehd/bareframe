@@ -126,20 +126,22 @@ impl Layout {
     }
 
     /// Removes `target`; its sibling takes the parent split's place.
-    /// Returns false when `target` is absent or is the only pane.
-    fn remove(&mut self, target: PaneId) -> bool {
+    /// Returns the pane nearest the gap, or `None` when `target` is absent or the only pane.
+    fn remove(&mut self, target: PaneId) -> Option<PaneId> {
         let Self::Split { first, second, .. } = self else {
-            return false;
+            return None;
         };
-        let survivor = if **first == Self::Pane(target) {
-            second
+        let (survivor, nearest) = if **first == Self::Pane(target) {
+            let nearest = second.panes().first().copied();
+            (second, nearest)
         } else if **second == Self::Pane(target) {
-            first
+            let nearest = first.panes().last().copied();
+            (first, nearest)
         } else {
-            return first.remove(target) || second.remove(target);
+            return first.remove(target).or_else(|| second.remove(target));
         };
         *self = std::mem::replace(survivor.as_mut(), Self::Pane(target));
-        true
+        nearest
     }
 
     /// Addresses a split by the child choices from the root (`false` = first).
@@ -272,9 +274,9 @@ impl Workspace {
     pub fn close(&mut self, pane: PaneId) -> Option<Closed> {
         let index = self.tab_of(pane)?;
         let tab = &mut self.tabs[index];
-        if tab.layout.remove(pane) {
+        if let Some(nearest) = tab.layout.remove(pane) {
             if tab.active_pane == pane {
-                tab.active_pane = tab.layout.panes()[0];
+                tab.active_pane = nearest;
             }
             return Some(Closed::Pane);
         }
@@ -342,6 +344,10 @@ mod tests {
 
         assert_eq!(ws.close(right), Some(Closed::Pane));
         assert_eq!(ws.active().layout.panes(), [first, below]);
+        assert_eq!(ws.active_pane(), below);
+        // Closing the active pane focuses the one that filled its place, not the tab's first.
+        let right = ws.split(Axis::Vertical);
+        assert_eq!(ws.close(right), Some(Closed::Pane));
         assert_eq!(ws.active_pane(), below);
         assert_eq!(ws.close(below), Some(Closed::Pane));
         assert_eq!(ws.active().layout, Layout::Pane(first));

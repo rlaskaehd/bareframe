@@ -3,4 +3,5 @@
 pub mod config;
 pub mod ime;
 pub mod session;
+pub mod settings;
 pub mod workspace;

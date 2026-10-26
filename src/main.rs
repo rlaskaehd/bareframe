@@ -1,8 +1,10 @@
 #[cfg(not(target_os = "macos"))]
-compile_error!("bareframe MVP 1 currently targets macOS");
+compile_error!("bareframe currently targets macOS");
 
 mod app;
+mod pane;
 mod terminal;
+mod theme;
 mod workspace;
 
 use bareframe_core::config::{HELP, LaunchConfig, LaunchRequest};
