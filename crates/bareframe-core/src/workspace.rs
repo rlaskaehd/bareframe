@@ -320,7 +320,7 @@ impl Workspace {
     }
 
     pub fn rename_group(&mut self, id: GroupId, name: &str) {
-        if let Some(group) = self.groups.iter_mut().find(|group| group.id == id) {
+        if let Some(group) = self.group_mut(id) {
             let name = name.trim();
             group.name = (!name.is_empty()).then(|| name.to_owned());
         }
@@ -366,7 +366,7 @@ impl Workspace {
     }
 
     pub fn set_group_pinned(&mut self, id: GroupId, pinned: bool) {
-        if let Some(group) = self.groups.iter_mut().find(|group| group.id == id) {
+        if let Some(group) = self.group_mut(id) {
             group.pinned = pinned;
             self.normalize();
         }
@@ -408,6 +408,10 @@ impl Workspace {
 
     pub fn group(&self, id: GroupId) -> Option<&Group> {
         self.groups.iter().find(|group| group.id == id)
+    }
+
+    fn group_mut(&mut self, id: GroupId) -> Option<&mut Group> {
+        self.groups.iter_mut().find(|group| group.id == id)
     }
 
     /// Opens a tab after the active one, in the same group, and selects it.
@@ -641,7 +645,7 @@ impl Workspace {
     }
 
     pub fn toggle_group(&mut self, id: GroupId) {
-        if let Some(group) = self.groups.iter_mut().find(|group| group.id == id) {
+        if let Some(group) = self.group_mut(id) {
             group.collapsed = !group.collapsed;
         }
     }
