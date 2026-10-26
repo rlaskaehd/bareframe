@@ -26,6 +26,8 @@ pub struct TerminalPane {
     focus: FocusHandle,
     /// Shown in place of the hidden surface while a popup overlaps it.
     frozen: Option<Arc<RenderImage>>,
+    /// Snapshots no longer shown; GPUI keeps their textures until the window drops them.
+    stale: Vec<Arc<RenderImage>>,
     /// The running or last finished command, from the shell integration's titles.
     last_command: Option<String>,
 }
@@ -47,6 +49,7 @@ impl TerminalPane {
             backend: None,
             focus: cx.focus_handle(),
             frozen: None,
+            stale: Vec::new(),
             last_command: None,
         };
         pane.start(theme, window, cx);
@@ -154,7 +157,7 @@ impl TerminalPane {
         let Some(terminal) = &self.terminal else {
             return;
         };
-        self.frozen = None;
+        self.stale.extend(self.frozen.take());
         if frozen {
             match terminal.update(cx, |terminal, _| terminal.snapshot()) {
                 Ok(image) => self.frozen = Some(image),
@@ -187,7 +190,12 @@ impl TerminalPane {
 }
 
 impl Render for TerminalPane {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        for image in self.stale.drain(..) {
+            if let Err(error) = window.drop_image(image) {
+                eprintln!("bareframe: releasing a terminal snapshot: {error}");
+            }
+        }
         let error = match &self.session.status {
             SessionStatus::Failed(error) => Some(format!(
                 "Could not start terminal: {error}\nCmd+Shift+R to retry"

@@ -17,7 +17,7 @@ use gpui_libghostty::{
         KeyAction, Modifiers, MouseButton, MouseState, NativeEvent, NativeSurface,
         TerminalThemeState, spawn_surface,
     },
-    ClipboardOperation, TerminalConfiguration, TerminalOptions, TerminalTheme,
+    TerminalConfiguration, TerminalOptions, TerminalTheme,
 };
 use std::{ffi::CString, ops::Range};
 
@@ -53,9 +53,10 @@ impl GhosttyAdapter {
         let mut options = TerminalOptions::new(command, config.cwd.clone());
         options.quiet_login = true;
         options.configuration = TerminalConfiguration::Custom(theme.clone());
-        options.clipboard_approval = Some(std::sync::Arc::new(|request| {
-            request.operation == ClipboardOperation::Paste
-        }));
+        // Ghostty asks only for unsafe pastes (a newline outside bracketed paste, or text
+        // that would end bracketed paste early) and OSC 52 reads. Both are refused until
+        // there is a confirmation prompt; ordinary pastes never reach this callback.
+        options.clipboard_approval = Some(std::sync::Arc::new(|_| false));
         // SAFETY: This entity creates, services and drops its child on GPUI's UI
         // thread. WorkspaceView releases it before its parent NSView is closed.
         #[allow(unsafe_code)]

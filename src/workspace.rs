@@ -55,6 +55,8 @@ pub struct WorkspaceView {
     renaming: Option<(RenameTarget, Entity<RenameInput>, Subscription)>,
     /// The sidebar's tab filter: the field plus its event and change subscriptions.
     search: Option<(Entity<RenameInput>, [Subscription; 2])>,
+    /// Set only when it changes; render runs every frame.
+    window_title: String,
     focus: FocusHandle,
     _quit: Subscription,
 }
@@ -83,6 +85,7 @@ impl WorkspaceView {
             frozen: false,
             renaming: None,
             search: None,
+            window_title: String::new(),
             focus: cx.focus_handle(),
             _quit: cx.on_app_quit(|view, cx| {
                 view.shutdown(cx);
@@ -369,8 +372,15 @@ impl WorkspaceView {
 impl Render for WorkspaceView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = self.theme();
-        let title = self.pane_title(self.model.active_pane(), cx);
-        window.set_window_title(&format!("{title} — {}", app::name()));
+        let title = format!(
+            "{} — {}",
+            self.pane_title(self.model.active_pane(), cx),
+            app::name()
+        );
+        if title != self.window_title {
+            window.set_window_title(&title);
+            self.window_title = title;
+        }
         let tab = self.model.active();
         let layout = if tab.maximized {
             Layout::Pane(tab.active_pane)
@@ -471,15 +481,25 @@ impl Render for WorkspaceView {
             .on_action(
                 cx.listener(|view, _: &UseLightTheme, _, cx| view.set_theme(ThemeName::Light, cx)),
             )
-            .on_action(cx.listener(|view, _: &GroupTab, _, cx| {
+            // Both reorder tabs, so `sync` also closes any menu holding tab indices.
+            .on_action(cx.listener(|view, _: &GroupTab, window, cx| {
                 let tabs = view.model.target_tabs();
                 view.model.new_group(&tabs);
-                cx.notify()
+                view.sync(window, cx)
             }))
-            .on_action(cx.listener(|view, _: &UngroupTab, _, cx| {
+            .on_action(cx.listener(|view, _: &UngroupTab, window, cx| {
                 let tabs = view.model.target_tabs();
                 view.model.remove_from_group(&tabs);
-                cx.notify()
+                view.sync(window, cx)
+            }))
+            // The terminal keeps focus under a menu, so Esc is caught on the way down.
+            // Opening a menu from the sidebar moves focus off the terminal; `sync` closes
+            // the menu and gives focus back.
+            .capture_key_down(cx.listener(|view, event: &gpui::KeyDownEvent, window, cx| {
+                if view.menu.is_some() && event.keystroke.key == "escape" {
+                    cx.stop_propagation();
+                    view.sync(window, cx);
+                }
             }))
             .when_some(self.menu.as_ref(), |this, menu| {
                 this.child(self.render_menu(menu, cx))
@@ -492,7 +512,13 @@ impl Render for WorkspaceView {
                     .flex()
                     .flex_row()
                     .when(self.sidebar_open, |this| {
-                        this.child(self.render_sidebar(cx)).child(
+                        // Re-clamped here too, so shrinking the window can't squeeze the
+                        // terminals behind a sidebar sized for a wider one.
+                        let width = self
+                            .sidebar_width
+                            .min(f32::from(window.viewport_size().width) * SIDEBAR_MAX_SHARE)
+                            .max(SIDEBAR_MIN_WIDTH);
+                        this.child(self.render_sidebar(width, cx)).child(
                             // Drag handle on the sidebar's right edge. The line sits flush with
                             // the sidebar so cards keep equal left and right margins.
                             div()

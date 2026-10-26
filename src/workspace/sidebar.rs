@@ -4,7 +4,7 @@ use crate::{
     rename::{RenameEvent, RenameInput},
     theme::{self, Theme, hsla},
 };
-use bareframe_core::workspace::{GroupId, Tab};
+use bareframe_core::workspace::{GroupId, Tab, TabId};
 use gpui::{AnyElement, Context, Hsla, MouseButton, MouseDownEvent, Window, div, prelude::*, px};
 
 /// Sidebar width bounds follow Warp's vertical tabs panel.
@@ -15,7 +15,8 @@ pub(super) const SIDEBAR_MAX_SHARE: f32 = 0.5;
 /// Tabs being dragged in the sidebar (the selection, or one tab); also renders the preview.
 #[derive(Clone)]
 struct DraggedTab {
-    indices: Vec<usize>,
+    /// Ids, not indices: a shell can exit and close a tab while the drag is under way.
+    tabs: Vec<TabId>,
     title: String,
     background: u32,
     text: u32,
@@ -45,7 +46,12 @@ impl WorkspaceView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.model.move_tabs(&dragged.indices, to, group);
+        let indices: Vec<usize> = dragged
+            .tabs
+            .iter()
+            .filter_map(|&id| self.model.tab_index(id))
+            .collect();
+        self.model.move_tabs(&indices, to, group);
         self.sync(window, cx);
     }
 
@@ -135,6 +141,11 @@ impl WorkspaceView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Replacing the field drops its subscription, so its blur commit would be lost.
+        if let Some((current, input, _)) = self.renaming.take() {
+            let text = input.read(cx).text().to_owned();
+            self.apply_rename(current, &text, cx);
+        }
         let text = match target {
             RenameTarget::Tab(id) => match self.model.tab_index(id) {
                 Some(index) => self.tab_title(&self.model.tabs[index], cx),
@@ -166,12 +177,26 @@ impl WorkspaceView {
         }
         self.renaming = None;
         if let RenameEvent::Confirm(text) = event {
-            match target {
-                RenameTarget::Tab(id) => self.model.rename_tab(id, text),
-                RenameTarget::Group(id) => self.model.rename_group(id, text),
-            }
+            self.apply_rename(target, text, cx);
         }
         self.sync(window, cx);
+    }
+
+    /// Leaving the shell's title as it was keeps the tab following the shell, so an
+    /// accidental double-click doesn't pin today's title forever.
+    fn apply_rename(&mut self, target: RenameTarget, text: &str, cx: &Context<Self>) {
+        match target {
+            RenameTarget::Tab(id) => {
+                let Some(index) = self.model.tab_index(id) else {
+                    return;
+                };
+                let tab = &self.model.tabs[index];
+                if tab.title.is_some() || text != self.tab_title(tab, cx) {
+                    self.model.rename_tab(id, text);
+                }
+            }
+            RenameTarget::Group(id) => self.model.rename_group(id, text),
+        }
     }
 
     /// The rename field for `target`, if it is being renamed.
@@ -207,7 +232,7 @@ impl WorkspaceView {
         Some(self.pane(tab.active_pane)?.read(cx).display_cwd())
     }
 
-    pub(super) fn render_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(super) fn render_sidebar(&self, width: f32, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = self.theme();
         let mut rows = Vec::new();
         if let Some(matches) = self.search_matches(cx) {
@@ -258,7 +283,7 @@ impl WorkspaceView {
             .as_ref()
             .is_some_and(|input| !input.read(cx).text().is_empty());
         div()
-            .w(px(self.sidebar_width))
+            .w(px(width))
             .flex_shrink_0()
             .h_full()
             .flex()
@@ -462,10 +487,10 @@ impl WorkspaceView {
             } else {
                 title.clone()
             },
-            indices: if selected {
-                selection.clone()
+            tabs: if selected {
+                selection.iter().map(|&i| self.model.tabs[i].id).collect()
             } else {
-                vec![index]
+                vec![tab.id]
             },
             background: theme.tab_active,
             text: theme.text,

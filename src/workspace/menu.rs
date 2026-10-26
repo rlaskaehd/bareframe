@@ -358,7 +358,7 @@ impl WorkspaceView {
                     .font_family(theme::UI_FONT)
                     .text_size(px(12.5))
                     .text_color(hsla(theme.text))
-                    .on_mouse_down_out(cx.listener(|view, _, _, cx| view.dismiss_menu(cx)))
+                    .on_mouse_down_out(cx.listener(|view, _, window, cx| view.sync(window, cx)))
                     .children(items),
             ),
         )
