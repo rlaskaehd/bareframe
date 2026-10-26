@@ -27,7 +27,39 @@ MVP 2부터 적용한다. 원격 저장소는 `git@github.com:rlaskaehd/barefram
 | `docs` | 문서만 변경 | `docs/mvp2-plan` |
 | `chore` | 스크립트, 도구, 의존성 | `chore/ci-check-core` |
 
-merge 전에 `main` 위로 rebase하고 `./script/check`를 다시 실행한다. merge된 브랜치는 GitHub이 자동으로 삭제한다.
+브랜치를 최신 `main`에 맞출 때는 rebase 대신 `git merge origin/main`을 쓰고 `./script/check`를 다시 실행한다.
+squash merge라서 `main` 히스토리에는 차이가 없고, force-push가 필요 없다. merge된 브랜치는 GitHub이 자동으로 삭제한다.
+
+### 쌓인 PR
+
+앞 PR이 merge되기 전에 다음 작업을 시작해야 하면, 앞 PR의 브랜치에서 새 브랜치를 만들고 PR의 base를 앞 브랜치로 둔다(예: vendor PR 위의 앱 PR).
+
+1. 앞 PR을 먼저 merge한다. 앞 브랜치가 삭제되면 GitHub이 뒤 PR의 base를 `main`으로 바꾼다.
+2. Worker가 뒤 브랜치에서 `git fetch origin && git merge origin/main`을 실행한다. 양쪽의 같은 변경은 충돌 없이 합쳐진다.
+3. `git diff origin/main...HEAD --name-only`에 뒤 PR의 파일만 남았는지 확인하고, push한 뒤 새 head SHA로 재승인을 받는다.
+
+## 작업 폴더
+
+세션들이 한 체크아웃을 공유하면, 한 세션이 브랜치를 바꿀 때 다른 세션의 작업이 영향을 받는다. 그래서 역할별로 고정 worktree를 쓴다.
+
+| 폴더 | 사용 | 체크아웃 |
+| --- | --- | --- |
+| 프로젝트 루트 | 오케스트레이터 세션, 사용자 | 항상 `main` |
+| `.worktrees/worker` | Worker | 작업 브랜치 |
+| `.worktrees/review` | Reviewer | 리뷰할 PR head(detached) |
+
+`.worktrees/`는 추적하지 않는다. 최초 한 번 프로젝트 루트에서 만든다.
+
+```sh
+git worktree add --detach .worktrees/worker origin/main
+ln -s ../../.cache .worktrees/worker/.cache
+ln -s ../../.tools .worktrees/worker/.tools
+```
+
+- `.cache`(Cargo 캐시)와 `.tools`(Zig, htop, SSH fixture)는 루트의 것을 symlink로 공유한다.
+- `target/`은 worktree마다 따로 두므로, 각 worktree의 첫 `./script/bootstrap`은 전체 빌드를 한다.
+- Reviewer는 `.worktrees/review`에서 `git fetch origin && git switch --detach <head SHA>`로 리뷰할 커밋을 꺼낸다.
+- 같은 브랜치를 두 worktree에서 동시에 체크아웃할 수 없다. Worker의 브랜치는 Worker worktree에서만 체크아웃한다.
 
 ## 커밋
 
@@ -55,7 +87,7 @@ scope는 `core`, `app`, `adapter`, `vendor`, `script`, `test`, `docs`에서 고�
 그래서 승인은 Reviewer 코멘트의 첫 줄로 판단한다. 첫 줄은 `결론: 승인 (<head SHA>)` 또는 `결론: 수정 필요 (<head SHA>)` 형식으로 쓴다.
 승인 뒤에 커밋이 추가되면 그 승인은 무효이고, 다시 리뷰를 받는다.
 
-- 작업 브랜치에 커밋하고 rebase·force-push하는 것은 그 브랜치를 맡은 Worker만 한다. Reviewer는 지적을 코멘트로 돌려보낸다.
+- 작업 브랜치에 커밋하고 push하는 것은 그 브랜치를 맡은 Worker만 한다. force-push는 쓰지 않는다. Reviewer는 지적을 코멘트로 돌려보낸다.
 - Reviewer 세션에 `gh pr review`·`gh pr comment` 권한이 없으면, 리뷰 전문을 파일로 남기고 결론을 오케스트레이터에게 메시지로 보낸다. 이때 PR 게시와 merge 여부는 사용자가 정한다.
 
 ## vendor 변경
