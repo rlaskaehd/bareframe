@@ -98,11 +98,14 @@ impl WorkspaceView {
         self.panes.insert(id, (pane, subscription));
     }
 
+    /// The active pane's cwd comes from OSC 7, which any local program's output can send
+    /// (Ghostty already rejects remote hosts), so only an existing directory is trusted.
     fn active_cwd(&self, cx: &Context<Self>) -> std::path::PathBuf {
-        self.panes.get(&self.model.active_pane()).map_or_else(
-            || self.config.cwd.clone(),
-            |(pane, _)| pane.read(cx).cwd().to_path_buf(),
-        )
+        self.panes
+            .get(&self.model.active_pane())
+            .and_then(|(pane, _)| pane.read(cx).cwd().canonicalize().ok())
+            .filter(|cwd| cwd.is_dir())
+            .unwrap_or_else(|| self.config.cwd.clone())
     }
 
     /// Shows only the active tab's surfaces and gives the active pane keyboard focus.
