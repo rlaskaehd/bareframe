@@ -57,11 +57,11 @@ vendored Ghostty(`vendor/gpui-libghostty/crates/gpui-ghostty/vendor/ghostty`)를
   - export 개수는 고정하지 않는다. 이 요구를 만족하는 가장 작은 vendor 변경을 고른다.
 - **읽기 상한.** 출력은 행 수와 바이트 수 상한 안에서만 읽는다. 상한을 넘으면 `truncated`로 표시한다.
 - **시작 시각.** 시작 시각은 종료 시각에서 duration을 빼서 구한다.
-- **cwd.** Block의 cwd는 명령을 시작할 때의 위치, 즉 직전 D 이후 마지막으로 받은 OSC 7 값이다. 명령 안에서 `cd`로 바뀐 값은 다음 Block의 cwd가 된다.
+- **cwd.** Block의 cwd는 명령을 시작할 때의 위치, 즉 C(`133;C`)를 받기 전 마지막으로 받은 OSC 7 값이다. 명령 안의 `cd`가 보내는 OSC 7은 D보다 먼저 오므로, D 시점의 값은 실행한 뒤의 위치다. 그래서 IO 스레드가 C를 처리할 때의 pwd를 기록해 스냅샷에 싣는다.
 - **TUI 사용.** TUI는 종료하기 전에 primary 화면으로 돌아오므로, D 시점의 Alternate Screen 상태로는 판정할 수 없다.
   - 그래서 "직전 D 이후 Alternate Screen에 들어간 적이 있는가"를 sticky 플래그로 기록하고 D에서 초기화한다.
   - 1차 방법은 vendor에서 화면 전환 시 플래그를 세우는 것이다. 막히면 getter를 tick마다 확인한다.
-- **재실행 가능 여부.** `cursorIsAtPrompt` getter를 노출해 판단한다. 커서가 프롬프트에 없거나 입력 중인 글자가 남아 있으면 재실행을 거부하고 이유를 표시한다.
+- **재실행 가능 여부.** 두 getter를 노출해 판단한다. 하나는 `cursorIsAtPrompt`이고, 다른 하나는 현재 프롬프트의 input 영역이 비었는지 확인한다. 커서가 프롬프트에 없거나 입력 중인 글자가 남아 있으면 재실행을 거부하고 이유를 표시한다.
 
 ### 표시와 불완전 처리
 
@@ -78,7 +78,7 @@ vendored Ghostty(`vendor/gpui-libghostty/crates/gpui-ghostty/vendor/ghostty`)를
 | 단계 | 브랜치(예) | 목표 | 완료 기준 |
 | --- | --- | --- | --- |
 | B0 | `feat/mvp2-shell-integration` | `shell-integration = none`, `ZDOTDIR` 주입, 번들 배포와 라이선스 표시, validation instance의 TerminalEvent trace 파일 | 일반 실행의 trace에 명령마다 `CommandFinished`가 기록되고 사용자 rc가 로드됨. `open` 실행과 cmux의 `./script/run` 실행 결과가 같음. clean shell과 통합 디렉터리가 없는 경우는 기존처럼 동작 |
-| B1 | `vendor/command-boundary-api` | D와 원자적인 명령·출력 스냅샷, sticky Alternate Screen 플래그, `cursorIsAtPrompt` getter, 큐의 가변 길이 텍스트 | 붙여넣은 여러 명령을 연속 실행해도 각 이벤트의 명령·출력이 해당 명령과 일치함. 상한을 넘으면 `truncated`. vendor 테스트와 `BAREFRAME.md` 기록 |
+| B1 | `vendor/command-boundary-api` | D와 원자적인 명령·출력 스냅샷, C 시점의 pwd 기록, sticky Alternate Screen 플래그, `cursorIsAtPrompt`와 입력 비었는지 확인하는 getter, 큐의 가변 길이 텍스트 | 붙여넣은 여러 명령을 연속 실행해도 각 이벤트의 명령·출력이 해당 명령과 일치함. 상한을 넘으면 `truncated`. vendor 테스트와 `BAREFRAME.md` 기록 |
 | B2 | `feat/mvp2-block-model` | `bareframe-core`의 Block 모델(GPUI 비의존) | 연속·실패·여러 줄·긴 출력·취소(130)·gap·TUI 사용·cwd 귀속의 상태 전이를 단위 테스트로 확인 |
 | B3 | `feat/mvp2-block-panel` | Block 목록 패널과 접기·복사·재실행 | 재실행은 위 조건을 지키고 새 Block을 만듦. Pane 포커스와 터미널 입력이 서로 간섭하지 않음 |
 | B4 | `feat/mvp2-edge-cases` | TUI, SSH, 중첩 셸, 통합 없는 세션, 사용자 프롬프트 프레임워크 | 원격 셸이나 hook이 없는 세션에서는 Block 없이 터미널이 정상 동작. precmd에서 출력하는 프레임워크(pure 등)에서는 귀속 오류를 기록하거나 막음 |
