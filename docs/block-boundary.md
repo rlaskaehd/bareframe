@@ -1,4 +1,6 @@
-# MVP 2 확장 경계
+# 명령 Block 확장 경계 (보류)
+
+> 명령 Block은 현재 로드맵에서 제외했다. 다시 다룰 때 참고하도록 MVP 1 시점의 조사를 남긴다.
 
 MVP 1은 일반 터미널을 구현하면서 Workspace, 세션 상태와 native backend의 의존성을 나눈다.
 후속 Block Engine은 Ghostty의 화면 위젯 내부에 저장하지 않고, 별도 모델과 출력 보존 규약으로 구성한다.

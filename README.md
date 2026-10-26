@@ -1,7 +1,7 @@
 # bareframe
 
 Rust + GPUI + libghostty 기반의 모듈형 개발 워크스페이스 터미널.
-macOS arm64용 MVP 1(단일 창·단일 zsh 터미널)을 완료했고, 다음 단계는 MVP 2 명령 Block이다.
+macOS arm64용 MVP 1(단일 창·단일 zsh 터미널)을 완료했고, MVP 2(Warp 스타일 UI: 탭·분할, 테마·타이포그래피)를 구현 중이다.
 
 ## 개발 실행
 
@@ -33,4 +33,4 @@ Rust 1.98.1은 `rust-toolchain.toml`로 선택하며 전역 기본 toolchain을 
 - `vendor/gpui-libghostty`: 고정된 upstream 사본과 macOS 통합 수정.
 - `reference/`: 변경하지 않는 upstream 참조 자료.
 
-후속 Block Engine과의 연결 범위는 [MVP 2 확장 경계](docs/mvp-2-boundary.md)에 정리했다.
+MVP 2 계획은 [MVP 2 구현 계획](docs/mvp-2-plan.md)에 있다. 보류한 명령 Block 조사는 [명령 Block 확장 경계](docs/block-boundary.md)에 남겼다.
