@@ -301,10 +301,13 @@ impl WorkspaceView {
         }
     }
 
-    /// Stands in for the hidden system title bar: drag moves the window, double-click zooms.
-    fn title_bar(&self, id: &'static str, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
+    /// Full-width bar under the traffic lights. The middle is reserved for a search box.
+    /// It stands in for the hidden system title bar: drag moves the window, double-click zooms.
+    fn render_top_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = self.theme();
+        let open = self.sidebar_open;
         div()
-            .id(id)
+            .id("top-bar")
             .window_control_area(WindowControlArea::Drag)
             .on_mouse_down(
                 MouseButton::Left,
@@ -325,13 +328,6 @@ impl WorkspaceView {
                     window.titlebar_double_click();
                 }
             })
-    }
-
-    /// Full-width bar under the traffic lights. The middle is reserved for a search box.
-    fn render_top_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = self.theme();
-        let open = self.sidebar_open;
-        self.title_bar("top-bar", cx)
             .flex()
             .flex_shrink_0()
             .items_center()

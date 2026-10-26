@@ -66,30 +66,28 @@ pub fn name() -> &'static str {
 /// Icons compiled into the binary; GPUI renders them as masks in the text color.
 struct Assets;
 
+const ICONS: [(&str, &[u8]); 3] = [
+    ("icons/pin.svg", include_bytes!("../assets/icons/pin.svg")),
+    (
+        "icons/corner.svg",
+        include_bytes!("../assets/icons/corner.svg"),
+    ),
+    (
+        "icons/search.svg",
+        include_bytes!("../assets/icons/search.svg"),
+    ),
+];
+
 impl gpui::AssetSource for Assets {
     fn load(&self, path: &str) -> gpui::Result<Option<std::borrow::Cow<'static, [u8]>>> {
-        Ok(match path {
-            "icons/pin.svg" => Some(include_bytes!("../assets/icons/pin.svg").as_slice().into()),
-            "icons/search.svg" => Some(
-                include_bytes!("../assets/icons/search.svg")
-                    .as_slice()
-                    .into(),
-            ),
-            "icons/corner.svg" => Some(
-                include_bytes!("../assets/icons/corner.svg")
-                    .as_slice()
-                    .into(),
-            ),
-            _ => None,
-        })
+        Ok(ICONS
+            .iter()
+            .find(|(name, _)| *name == path)
+            .map(|(_, bytes)| (*bytes).into()))
     }
 
     fn list(&self, _: &str) -> gpui::Result<Vec<gpui::SharedString>> {
-        Ok(vec![
-            "icons/pin.svg".into(),
-            "icons/corner.svg".into(),
-            "icons/search.svg".into(),
-        ])
+        Ok(ICONS.iter().map(|(name, _)| (*name).into()).collect())
     }
 }
 
@@ -117,11 +115,11 @@ fn load_settings() -> Settings {
     if is_validation_instance() {
         return Settings::default();
     }
-    let Some(home) = std::env::var_os("HOME") else {
+    let Some(home) = home_dir() else {
         return Settings::default();
     };
     let xdg = std::env::var_os("XDG_CONFIG_HOME");
-    let path = config_path(xdg.as_deref().map(Path::new), Path::new(&home));
+    let path = config_path(xdg.as_deref().map(Path::new), &home);
     let text = match std::fs::read_to_string(&path) {
         Ok(text) => text,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Settings::default(),

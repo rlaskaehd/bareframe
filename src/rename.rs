@@ -29,7 +29,7 @@ actions!(
 );
 
 /// Keys only apply while a rename field has focus, so the terminal keeps its own.
-pub const KEY_CONTEXT: &str = "RenameInput";
+const KEY_CONTEXT: &str = "RenameInput";
 
 pub enum RenameEvent {
     Confirm(String),

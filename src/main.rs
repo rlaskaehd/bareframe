@@ -23,7 +23,7 @@ fn main() {
     let request = std::env::current_dir()
         .map_err(|error| error.to_string())
         .and_then(|cwd| {
-            let home = std::env::var_os("HOME").map_or_else(|| cwd.clone(), Into::into);
+            let home = app::home_dir().unwrap_or_else(|| cwd.clone());
             LaunchConfig::parse(args, &cwd, &home)
         });
     match request {
