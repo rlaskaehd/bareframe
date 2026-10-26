@@ -6,7 +6,8 @@ use std::{
 use super::wayland::WaylandGlSurface;
 use super::{
     ClipboardRead, ClipboardWrite, KeyAction, Modifiers, MouseButton, MouseState, NativeFrame,
-    NativeSnapshot, NativeSurfaceState, NativeWakeup, native_clipboard_approval, native_wakeup,
+    NativeSnapshot, NativeSurfaceState, NativeWakeup, RawEnvVar, native_clipboard_approval,
+    native_wakeup, raw_environment,
 };
 
 #[repr(C)]
@@ -24,7 +25,10 @@ unsafe extern "C" {
         command: *const c_char,
         load_user_config: bool,
         theme_config_path: *const c_char,
+        extra_config_path: *const c_char,
         quiet_login: bool,
+        extra_env: *const RawEnvVar,
+        extra_env_count: usize,
         scale_factor: f64,
         wakeup_userdata: *mut c_void,
         wakeup: unsafe extern "C" fn(*mut c_void),
@@ -127,8 +131,11 @@ impl NativeSurface {
         command: CString,
         load_user_config: bool,
         theme_config_path: Option<&CStr>,
+        extra_config_path: Option<&CStr>,
         quiet_login: bool,
+        environment: &[(CString, CString)],
     ) -> Result<Self, String> {
+        let environment = raw_environment(environment);
         let display = display.ok_or_else(|| "Wayland display handle is unavailable".to_owned())?;
         let wakeup = NativeWakeup::new();
         let mut platform =
@@ -146,7 +153,10 @@ impl NativeSurface {
                 command.as_ptr(),
                 load_user_config,
                 theme_config_path.map_or(std::ptr::null(), CStr::as_ptr),
+                extra_config_path.map_or(std::ptr::null(), CStr::as_ptr),
                 quiet_login,
+                environment.as_ptr(),
+                environment.len(),
                 scale_factor,
                 wakeup.userdata(),
                 native_wakeup,
