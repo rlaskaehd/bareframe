@@ -414,14 +414,15 @@ impl Workspace {
         self.groups.iter_mut().find(|group| group.id == id)
     }
 
-    /// Opens a tab after the active one, in the same group, and selects it.
+    /// Opens a tab after the active one, in the same group, and selects it. A pin is not
+    /// inherited: from a pinned tab the new one lands first after the pinned region.
     pub fn new_tab(&mut self) -> PaneId {
         let pane = self.allocate();
         let mut tab = self.fresh_tab(pane);
         tab.group = self.active().group;
-        tab.pinned = self.active().group.is_none() && self.active().pinned;
         self.active_tab += 1;
         self.tabs.insert(self.active_tab, tab);
+        self.normalize();
         pane
     }
 
@@ -920,6 +921,25 @@ mod tests {
         ws.remove_from_group(&[1]);
         assert_eq!(order(&ws), [c, d, b, a]);
         assert!(!ws.tab_pinned(2));
+    }
+
+    #[test]
+    fn new_tab_from_a_pinned_tab_is_not_pinned() {
+        let (mut ws, a) = Workspace::new();
+        let b = ws.new_tab();
+        ws.select_tab(0);
+        ws.set_tab_pinned(0, true);
+        let c = ws.new_tab();
+        let order = |ws: &Workspace| ws.tabs.iter().map(|t| t.active_pane).collect::<Vec<_>>();
+        assert_eq!(order(&ws), [a, c, b]);
+        assert!(!ws.tab_pinned(1));
+        assert_eq!(ws.active_pane(), c);
+        // A pinned group's new tab joins the group, so it shares the group's pin.
+        let group = ws.new_group(&[1]).unwrap();
+        ws.set_group_pinned(group, true);
+        ws.focus(c);
+        ws.new_tab();
+        assert!(ws.tab_pinned(ws.active_tab));
     }
 
     #[test]

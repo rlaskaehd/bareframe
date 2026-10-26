@@ -12,27 +12,59 @@ pub(super) const SIDEBAR_DEFAULT_WIDTH: f32 = 248.0;
 pub(super) const SIDEBAR_MIN_WIDTH: f32 = 200.0;
 pub(super) const SIDEBAR_MAX_SHARE: f32 = 0.5;
 
-/// Tabs being dragged in the sidebar (the selection, or one tab); also renders the preview.
+/// Tabs being dragged in the sidebar (the selection, or one tab); renders as the whole
+/// card following the cursor, as in Warp.
 #[derive(Clone)]
 struct DraggedTab {
     /// Ids, not indices: a shell can exit and close a tab while the drag is under way.
     tabs: Vec<TabId>,
     title: String,
-    background: u32,
-    text: u32,
+    subtitle: Option<String>,
+    width: f32,
+    theme: &'static Theme,
 }
 
 impl Render for DraggedTab {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .px_3()
-            .py_1()
-            .rounded_md()
-            .bg(hsla(self.background))
-            .text_color(hsla(self.text))
-            .font_family(theme::UI_FONT)
-            .text_size(px(12.5))
-            .child(self.title.clone())
+        let theme = self.theme;
+        // Same padding as a row, so the card stays where it was grabbed.
+        div().w(px(self.width)).p(px(6.0)).child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(10.0))
+                .px(px(10.0))
+                .py(px(8.0))
+                .rounded_md()
+                .bg(hsla(theme.tab_active))
+                .border_1()
+                .border_color(hsla(theme.accent).opacity(0.6))
+                .shadow_lg()
+                .opacity(0.92)
+                .font_family(theme::UI_FONT)
+                .text_color(hsla(theme.text))
+                .child(terminal_icon(theme, true, None))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .child(
+                            div()
+                                .truncate()
+                                .text_size(px(13.0))
+                                .child(self.title.clone()),
+                        )
+                        .children(self.subtitle.clone().map(|subtitle| {
+                            div()
+                                .truncate()
+                                .text_size(px(11.5))
+                                .text_color(hsla(theme.text_muted))
+                                .child(subtitle)
+                        })),
+                ),
+        )
     }
 }
 
@@ -52,6 +84,7 @@ impl WorkspaceView {
             .filter_map(|&id| self.model.tab_index(id))
             .collect();
         self.model.move_tabs(&indices, to, group);
+        self.dragging.clear();
         self.sync(window, cx);
     }
 
@@ -248,7 +281,7 @@ impl WorkspaceView {
                 );
             }
             for index in matches {
-                rows.push(self.render_tab_row(index, &self.model.tabs[index], cx));
+                rows.push(self.render_tab_row(index, &self.model.tabs[index], width, cx));
             }
         } else {
             let mut previous = None;
@@ -273,7 +306,7 @@ impl WorkspaceView {
                     .and_then(|group| self.model.group(group))
                     .is_some_and(|group| group.collapsed);
                 if !collapsed {
-                    rows.push(self.render_tab_row(index, tab, cx));
+                    rows.push(self.render_tab_row(index, tab, width, cx));
                 }
             }
         }
@@ -467,7 +500,13 @@ impl WorkspaceView {
 
     /// A Warp-style session card: terminal icon, title and path, separated by lines, with
     /// a menu and close button floating on hover.
-    fn render_tab_row(&self, index: usize, tab: &Tab, cx: &mut Context<Self>) -> AnyElement {
+    fn render_tab_row(
+        &self,
+        index: usize,
+        tab: &Tab,
+        width: f32,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = self.theme();
         let active = index == self.model.active_tab;
         let title = self.tab_title(tab, cx);
@@ -487,14 +526,17 @@ impl WorkspaceView {
             } else {
                 title.clone()
             },
+            subtitle: (!selected).then(|| subtitle.clone()).flatten(),
             tabs: if selected {
                 selection.iter().map(|&i| self.model.tabs[i].id).collect()
             } else {
                 vec![tab.id]
             },
-            background: theme.tab_active,
-            text: theme.text,
+            width,
+            theme,
         };
+        let lifted = self.dragging.contains(&tab.id);
+        let weak = cx.entity().downgrade();
         let card = div()
             .flex()
             .items_center()
@@ -569,14 +611,47 @@ impl WorkspaceView {
                     view.open_tab_menu(index, event.position, cx)
                 }),
             )
-            .on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
-            .drag_over::<DraggedTab>(move |style, _, _, _| {
-                style.border_t_2().border_color(hsla(theme.accent))
+            .on_drag(dragged, move |dragged, _, _, cx| {
+                let tabs = dragged.tabs.clone();
+                if let Err(error) = weak.update(cx, |view, cx| {
+                    view.dragging = tabs;
+                    cx.notify();
+                }) {
+                    eprintln!("bareframe: starting a tab drag: {error}");
+                }
+                cx.new(|_| dragged.clone())
             })
             .on_drop(cx.listener(move |view, dragged: &DraggedTab, window, cx| {
                 view.drop_tab(dragged, index, group, window, cx)
             }))
-            .child(card)
+            // The lifted card leaves an empty slot behind, as in Warp.
+            .map(|this| {
+                if lifted {
+                    this.child(
+                        div()
+                            .rounded_md()
+                            .bg(hsla(theme.text).opacity(0.05))
+                            .child(card.invisible()),
+                    )
+                } else {
+                    this.child(card)
+                }
+            })
+            // Drop marker: a line where the tab will land, before this row.
+            .child(
+                div()
+                    .absolute()
+                    .top(px(-1.0))
+                    .left_0()
+                    .right_0()
+                    .h(px(2.0))
+                    // GPUI styles group drag-over only on elements with a hitbox; an empty
+                    // group hover gives this one a hitbox.
+                    .group_hover(hover.clone(), |style| style)
+                    .group_drag_over::<DraggedTab>(hover.clone(), move |style| {
+                        style.bg(hsla(theme.accent))
+                    }),
+            )
             .child(
                 div()
                     .absolute()

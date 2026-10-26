@@ -49,6 +49,8 @@ pub struct WorkspaceView {
     sidebar_open: bool,
     sidebar_width: f32,
     resizing_sidebar: bool,
+    /// Tabs being dragged in the sidebar; their rows show an empty slot meanwhile.
+    dragging: Vec<TabId>,
     menu: Option<ContextMenu>,
     /// The shown surfaces are swapped for snapshots while a pane menu covers them.
     frozen: bool,
@@ -81,6 +83,7 @@ impl WorkspaceView {
             sidebar_open: true,
             sidebar_width: SIDEBAR_DEFAULT_WIDTH,
             resizing_sidebar: false,
+            dragging: Vec::new(),
             menu: None,
             frozen: false,
             renaming: None,
@@ -400,9 +403,14 @@ impl Render for WorkspaceView {
             )
             .on_mouse_up(
                 MouseButton::Left,
-                cx.listener(|view, _, _, _| {
+                // Also ends a tab drag that was dropped outside any drop target.
+                cx.listener(|view, _, _, cx| {
                     view.resize = None;
                     view.resizing_sidebar = false;
+                    if !view.dragging.is_empty() {
+                        view.dragging.clear();
+                        cx.notify();
+                    }
                 }),
             )
             .on_action(cx.listener(|view, _: &ToggleSidebar, _, cx| view.toggle_sidebar(cx)))
