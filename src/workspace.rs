@@ -10,9 +10,9 @@ use bareframe_core::{
     workspace::{Axis, Closed, Direction, GroupId, Layout, PaneId, Tab, TabId, Workspace},
 };
 use gpui::{
-    AnyElement, Bounds, Context, CursorStyle, Entity, FocusHandle, MouseButton, MouseDownEvent,
-    MouseMoveEvent, Pixels, Point, Subscription, Window, WindowControlArea, anchored, canvas,
-    deferred, div, prelude::*, px, relative,
+    AnyElement, Bounds, Context, CursorStyle, Entity, FocusHandle, Hsla, MouseButton,
+    MouseDownEvent, MouseMoveEvent, Pixels, Point, Subscription, Window, WindowControlArea,
+    anchored, canvas, deferred, div, prelude::*, px, relative,
 };
 use gpui_libghostty::TerminalTheme;
 use std::collections::HashMap;
@@ -1266,7 +1266,7 @@ impl WorkspaceView {
             .when_some(group_color, |this, color| {
                 this.child(div().w(px(3.0)).h(px(26.0)).rounded_sm().bg(color))
             })
-            .child(terminal_icon(theme, active))
+            .child(terminal_icon(theme, active, tint))
             .child(match self.rename_field(RenameTarget::Tab(tab.id)) {
                 Some(field) => field,
                 None => div()
@@ -1726,23 +1726,29 @@ fn sidebar_icon(color: u32) -> impl IntoElement {
         .child(div().w(px(4.5)).h_full().bg(hsla(color)))
 }
 
-/// Warp's session icon: a prompt glyph in a circle.
-fn terminal_icon(theme: &Theme, active: bool) -> impl IntoElement {
+/// The session icon: a prompt glyph in a rounded square frame, in the tab's color if any.
+fn terminal_icon(theme: &Theme, active: bool, tint: Option<Hsla>) -> impl IntoElement {
+    let frame = tint.unwrap_or(hsla(theme.text_muted));
     div()
         .flex_none()
         .size(px(28.0))
-        .rounded_full()
+        .rounded(px(6.0))
+        .border_1()
+        .border_color(frame.opacity(if active { 0.7 } else { 0.4 }))
         .flex()
         .items_center()
         .justify_center()
-        .bg(hsla(if active {
-            theme.border
-        } else {
-            theme.tab_active
-        }))
+        .bg(match tint {
+            Some(tint) => tint.opacity(0.18),
+            None => hsla(if active {
+                theme.border
+            } else {
+                theme.tab_active
+            }),
+        })
         .text_size(px(11.0))
         .font_weight(gpui::FontWeight::BOLD)
-        .text_color(hsla(theme.text))
+        .text_color(tint.unwrap_or(hsla(theme.text)))
         .child(">_")
 }
 
