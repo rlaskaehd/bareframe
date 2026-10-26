@@ -159,10 +159,26 @@ impl Layout {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct GroupId(pub u64);
+
+/// A named set of adjacent tabs, like a browser tab group.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Group {
+    pub id: GroupId,
+    pub name: String,
+    /// Index into the UI's group color list.
+    pub color: usize,
+    pub collapsed: bool,
+}
+
+pub const GROUP_COLORS: usize = 6;
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Tab {
     pub layout: Layout,
     pub active_pane: PaneId,
+    pub group: Option<GroupId>,
 }
 
 impl Tab {
@@ -170,6 +186,7 @@ impl Tab {
         Self {
             layout: Layout::Pane(pane),
             active_pane: pane,
+            group: None,
         }
     }
 
@@ -214,14 +231,18 @@ impl Tab {
 pub enum Closed {
     Pane,
     Tab,
-    LastTab,
+    /// The window keeps one tab: the last one is replaced by a fresh pane.
+    Replaced(PaneId),
 }
 
+/// Tabs of one group are always adjacent; every public mutation restores that.
 #[derive(Clone, Debug)]
 pub struct Workspace {
     pub tabs: Vec<Tab>,
     pub active_tab: usize,
+    pub groups: Vec<Group>,
     next_pane: u64,
+    next_group: u64,
 }
 
 impl Workspace {
@@ -230,7 +251,9 @@ impl Workspace {
         let workspace = Self {
             tabs: vec![Tab::new(pane)],
             active_tab: 0,
+            groups: Vec::new(),
             next_pane: 2,
+            next_group: 1,
         };
         (workspace, pane)
     }
@@ -253,11 +276,17 @@ impl Workspace {
         self.tabs.iter().position(|tab| tab.layout.contains(pane))
     }
 
-    /// Opens a tab after the active one and selects it.
+    pub fn group(&self, id: GroupId) -> Option<&Group> {
+        self.groups.iter().find(|group| group.id == id)
+    }
+
+    /// Opens a tab after the active one, in the same group, and selects it.
     pub fn new_tab(&mut self) -> PaneId {
         let pane = self.allocate();
+        let mut tab = Tab::new(pane);
+        tab.group = self.active().group;
         self.active_tab += 1;
-        self.tabs.insert(self.active_tab, Tab::new(pane));
+        self.tabs.insert(self.active_tab, tab);
         pane
     }
 
@@ -281,13 +310,99 @@ impl Workspace {
             return Some(Closed::Pane);
         }
         if self.tabs.len() == 1 {
-            return Some(Closed::LastTab);
+            let fresh = self.allocate();
+            self.tabs[0] = Tab::new(fresh);
+            self.normalize();
+            return Some(Closed::Replaced(fresh));
         }
         self.tabs.remove(index);
         if self.active_tab > index || self.active_tab == self.tabs.len() {
             self.active_tab -= 1;
         }
+        self.normalize();
         Some(Closed::Tab)
+    }
+
+    /// Puts `tab` in a new group and returns it.
+    pub fn create_group(&mut self, tab: usize) -> Option<GroupId> {
+        self.tabs.get(tab)?;
+        let id = GroupId(self.next_group);
+        self.next_group += 1;
+        self.groups.push(Group {
+            id,
+            name: format!("Group {}", id.0),
+            color: (id.0 as usize - 1) % GROUP_COLORS,
+            collapsed: false,
+        });
+        self.tabs[tab].group = Some(id);
+        self.normalize();
+        Some(id)
+    }
+
+    /// Takes `tab` out of its group and places it right after the group's other tabs.
+    pub fn ungroup(&mut self, tab: usize) {
+        let Some(group) = self.tabs.get(tab).and_then(|tab| tab.group) else {
+            return;
+        };
+        let end = self
+            .tabs
+            .iter()
+            .rposition(|t| t.group == Some(group))
+            .unwrap_or(tab);
+        self.move_tab(tab, end + 1, None);
+    }
+
+    /// Moves the tab at `from` to sit before index `to` (`to == len` appends) and sets its group.
+    pub fn move_tab(&mut self, from: usize, to: usize, group: Option<GroupId>) {
+        if from >= self.tabs.len() || to > self.tabs.len() {
+            return;
+        }
+        let active = self.active_pane();
+        let mut tab = self.tabs.remove(from);
+        tab.group = group.filter(|id| self.group(*id).is_some());
+        let to = if from < to { to - 1 } else { to };
+        self.tabs.insert(to, tab);
+        self.active_tab = self.tab_of(active).unwrap_or(0);
+        self.normalize();
+    }
+
+    pub fn toggle_group(&mut self, id: GroupId) {
+        if let Some(group) = self.groups.iter_mut().find(|group| group.id == id) {
+            group.collapsed = !group.collapsed;
+        }
+    }
+
+    pub fn group_tabs(&self, id: GroupId) -> Vec<usize> {
+        (0..self.tabs.len())
+            .filter(|&index| self.tabs[index].group == Some(id))
+            .collect()
+    }
+
+    /// Gathers each group's tabs at its first tab's position and drops empty groups.
+    fn normalize(&mut self) {
+        let active = self.active_pane();
+        let mut remaining: Vec<Option<Tab>> = std::mem::take(&mut self.tabs)
+            .into_iter()
+            .map(Some)
+            .collect();
+        for index in 0..remaining.len() {
+            let Some(tab) = remaining[index].take() else {
+                continue;
+            };
+            let group = tab.group;
+            self.tabs.push(tab);
+            if group.is_some() {
+                for later in remaining.iter_mut().skip(index + 1) {
+                    if later.as_ref().is_some_and(|tab| tab.group == group) {
+                        self.tabs.extend(later.take());
+                    }
+                }
+            }
+        }
+        self.active_tab = self.tab_of(active).unwrap_or(0);
+        let tabs = &self.tabs;
+        self.groups
+            .retain(|group| tabs.iter().any(|tab| tab.group == Some(group.id)));
     }
 
     pub fn select_tab(&mut self, index: usize) -> bool {
@@ -352,7 +467,8 @@ mod tests {
         assert_eq!(ws.close(below), Some(Closed::Pane));
         assert_eq!(ws.active().layout, Layout::Pane(first));
         assert_eq!(ws.active_pane(), first);
-        assert_eq!(ws.close(first), Some(Closed::LastTab));
+        assert_eq!(ws.close(first), Some(Closed::Replaced(PaneId(5))));
+        assert_eq!(ws.active().layout, Layout::Pane(PaneId(5)));
         assert_eq!(ws.close(PaneId(99)), None);
     }
 
@@ -370,6 +486,46 @@ mod tests {
         assert_eq!(ws.close(c), Some(Closed::Tab));
         assert_eq!((ws.active_tab, ws.active_pane()), (0, a));
         assert!(!ws.select_tab(3));
+    }
+
+    #[test]
+    fn groups_stay_contiguous_and_empty_groups_disappear() {
+        let (mut ws, a) = Workspace::new();
+        let b = ws.new_tab();
+        let c = ws.new_tab();
+        let group = ws.create_group(0).unwrap();
+        // c joins by being dropped onto the group; it moves next to a.
+        ws.move_tab(2, 3, Some(group));
+        let order = |ws: &Workspace| ws.tabs.iter().map(|t| t.active_pane).collect::<Vec<_>>();
+        assert_eq!(order(&ws), [a, c, b]);
+        assert_eq!(ws.active_pane(), c);
+        // A new tab from a grouped tab joins the group.
+        let d = ws.new_tab();
+        assert_eq!(ws.active().group, Some(group));
+        assert_eq!(ws.group_tabs(group).len(), 3);
+        // Ungrouping places the tab after the group's block.
+        ws.ungroup(0);
+        assert_eq!(order(&ws), [c, d, a, b]);
+        assert_eq!(ws.tabs[2].group, None);
+        // Closing the last tabs of a group removes the group.
+        assert_eq!(ws.close(c), Some(Closed::Tab));
+        assert_eq!(ws.close(d), Some(Closed::Tab));
+        assert!(ws.groups.is_empty());
+        ws.toggle_group(group);
+        assert_eq!(order(&ws), [a, b]);
+    }
+
+    #[test]
+    fn last_tab_is_replaced_instead_of_closing_the_window() {
+        let (mut ws, a) = Workspace::new();
+        ws.create_group(0);
+        let Some(Closed::Replaced(fresh)) = ws.close(a) else {
+            panic!("the last tab must be replaced");
+        };
+        assert_eq!(ws.tabs.len(), 1);
+        assert_eq!(ws.active_pane(), fresh);
+        assert_eq!(ws.active().group, None);
+        assert!(ws.groups.is_empty());
     }
 
     #[test]

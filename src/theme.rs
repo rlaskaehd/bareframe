@@ -1,5 +1,8 @@
 //! A theme is one set of colors for both the window chrome and every terminal.
-use bareframe_core::settings::{Settings, ThemeName};
+use bareframe_core::{
+    settings::{Settings, ThemeName},
+    workspace::GROUP_COLORS,
+};
 use gpui::{Hsla, rgb};
 use gpui_libghostty::{TerminalColor, TerminalTheme};
 
@@ -13,6 +16,8 @@ pub struct Theme {
     pub text: u32,
     pub text_muted: u32,
     pub accent: u32,
+    /// Indexed by `Group::color`.
+    pub group_colors: [u32; GROUP_COLORS],
     pub terminal_background: u32,
     pub terminal_foreground: u32,
     pub palette: [u32; 16],
@@ -26,6 +31,7 @@ const DARK: Theme = Theme {
     text: 0xd6dbe4,
     text_muted: 0x7d8596,
     accent: 0x5aa9ff,
+    group_colors: [0x5aa9ff, 0xb48cf2, 0x7cc97f, 0xf0a35e, 0xf27fb0, 0x56c2c6],
     terminal_background: 0x15171c,
     terminal_foreground: 0xd6dbe4,
     palette: [
@@ -42,6 +48,7 @@ const LIGHT: Theme = Theme {
     text: 0x2f323a,
     text_muted: 0x6b7280,
     accent: 0x2f6fe4,
+    group_colors: [0x2f6fe4, 0x8a5cd6, 0x3f9d4a, 0xd27a1e, 0xd2477f, 0x1f97a0],
     terminal_background: 0xfafafa,
     terminal_foreground: 0x383a42,
     palette: [

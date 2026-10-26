@@ -41,11 +41,13 @@ actions!(
         ResetFontSize,
         UseDarkTheme,
         UseLightTheme,
+        GroupTab,
+        UngroupTab,
     ]
 );
 
-/// Height of the tab bar that replaces the system title bar.
-pub const TAB_BAR_HEIGHT: f32 = 38.0;
+/// Height of the sidebar header that replaces the system title bar.
+pub const TITLE_BAR_HEIGHT: f32 = 38.0;
 
 pub fn is_validation_instance() -> bool {
     cfg!(debug_assertions) && std::env::var("BAREFRAME_VALIDATION").as_deref() == Ok("1")
@@ -117,6 +119,8 @@ pub fn run(config: LaunchConfig) {
             KeyBinding::new("cmd-+", IncreaseFontSize, None),
             KeyBinding::new("cmd--", DecreaseFontSize, None),
             KeyBinding::new("cmd-0", ResetFontSize, None),
+            KeyBinding::new("cmd-g", GroupTab, None),
+            KeyBinding::new("cmd-shift-g", UngroupTab, None),
         ]);
         cx.set_menus(vec![
             Menu::new("bareframe").items([MenuItem::action("Quit bareframe", Quit)]),
@@ -124,6 +128,9 @@ pub fn run(config: LaunchConfig) {
                 MenuItem::action("New Tab", NewTab),
                 MenuItem::action("Split Right", SplitRight),
                 MenuItem::action("Split Down", SplitDown),
+                MenuItem::separator(),
+                MenuItem::action("Add Tab to New Group", GroupTab),
+                MenuItem::action("Remove Tab from Group", UngroupTab),
                 MenuItem::separator(),
                 MenuItem::action("Restart Failed Session", RestartSession),
                 MenuItem::separator(),

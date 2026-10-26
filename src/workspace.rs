@@ -6,7 +6,7 @@ use crate::{
 use bareframe_core::{
     config::LaunchConfig,
     settings::{Settings, ThemeName},
-    workspace::{Axis, Closed, Direction, Layout, PaneId, Workspace},
+    workspace::{Axis, Closed, Direction, GroupId, Layout, PaneId, Tab, Workspace},
 };
 use gpui::{
     AnyElement, Bounds, Context, CursorStyle, Entity, FocusHandle, MouseButton, MouseMoveEvent,
@@ -14,6 +14,31 @@ use gpui::{
 };
 use gpui_libghostty::TerminalTheme;
 use std::collections::HashMap;
+
+const SIDEBAR_WIDTH: f32 = 220.0;
+
+/// A tab being dragged in the sidebar; also renders the drag preview.
+#[derive(Clone)]
+struct DraggedTab {
+    index: usize,
+    title: String,
+    background: u32,
+    text: u32,
+}
+
+impl Render for DraggedTab {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .px_3()
+            .py_1()
+            .rounded_md()
+            .bg(hsla(self.background))
+            .text_color(hsla(self.text))
+            .font_family(theme::UI_FONT)
+            .text_size(px(12.5))
+            .child(self.title.clone())
+    }
+}
 
 struct Resize {
     tab: usize,
@@ -141,9 +166,10 @@ impl WorkspaceView {
             pane.update(cx, |pane, cx| pane.shutdown(cx));
         }
         match self.model.close(id) {
-            Some(Closed::LastTab) => {
-                self.shutdown(cx);
-                window.remove_window();
+            Some(Closed::Replaced(fresh)) => {
+                let cwd = self.config.cwd.clone();
+                self.open_pane(fresh, cwd, window, cx);
+                self.sync(window, cx);
             }
             Some(_) => self.sync(window, cx),
             None => {}
@@ -157,6 +183,38 @@ impl WorkspaceView {
         for pane in tab.layout.panes() {
             self.close_pane(pane, window, cx);
         }
+    }
+
+    fn close_group(&mut self, group: GroupId, window: &mut Window, cx: &mut Context<Self>) {
+        let panes: Vec<PaneId> = self
+            .model
+            .group_tabs(group)
+            .into_iter()
+            .flat_map(|index| self.model.tabs[index].layout.panes())
+            .collect();
+        for pane in panes {
+            self.close_pane(pane, window, cx);
+        }
+    }
+
+    fn new_tab_in_group(&mut self, group: GroupId, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(&last) = self.model.group_tabs(group).last() {
+            self.model.select_tab(last);
+            self.new_tab(window, cx);
+        }
+    }
+
+    /// Drops `dragged` before the tab at `to`, joining `group`.
+    fn drop_tab(
+        &mut self,
+        dragged: &DraggedTab,
+        to: usize,
+        group: Option<GroupId>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.model.move_tab(dragged.index, to, group);
+        self.sync(window, cx);
     }
 
     fn select_tab(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
@@ -221,73 +279,93 @@ impl WorkspaceView {
         }
     }
 
-    fn render_tab_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn tab_title(&self, tab: &Tab, cx: &Context<Self>) -> String {
+        self.panes
+            .get(&tab.active_pane)
+            .map_or_else(String::new, |(pane, _)| pane.read(cx).title())
+    }
+
+    fn render_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = self.theme();
-        let tabs = self.model.tabs.iter().enumerate().map(|(index, tab)| {
-            let active = index == self.model.active_tab;
-            let title = self
-                .panes
-                .get(&tab.active_pane)
-                .map_or_else(String::new, |(pane, _)| pane.read(cx).title());
-            let group = format!("tab-{index}");
-            div()
-                .id(("tab", index))
-                .group(group.clone())
-                .flex()
-                .items_center()
-                .gap_1()
-                .h(px(28.0))
-                .min_w(px(96.0))
-                .max_w(px(220.0))
-                .flex_1()
-                .pl_3()
-                .pr_1()
-                .rounded_md()
-                .text_color(hsla(if active { theme.text } else { theme.text_muted }))
-                .when(active, |this| this.bg(hsla(theme.tab_active)))
-                .when(!active, |this| {
-                    this.hover(|style| style.bg(hsla(theme.tab_hover)))
-                })
-                .on_click(
-                    cx.listener(move |view, _, window, cx| view.select_tab(index, window, cx)),
-                )
-                .child(div().flex_1().min_w_0().truncate().child(title))
-                .child(
-                    div()
-                        .id(("close-tab", index))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .size(px(18.0))
-                        .rounded_sm()
-                        .text_color(hsla(theme.text_muted))
-                        .hover(|style| style.bg(hsla(theme.border)).text_color(hsla(theme.text)))
-                        .when(!active, |this| {
-                            this.invisible().group_hover(group, |style| style.visible())
-                        })
-                        .on_click(cx.listener(move |view, _, window, cx| {
-                            cx.stop_propagation();
-                            view.close_tab(index, window, cx)
-                        }))
-                        .child("×"),
-                )
-        });
+        let mut rows = Vec::new();
+        let mut previous = None;
+        for (index, tab) in self.model.tabs.iter().enumerate() {
+            if tab.group != previous {
+                if let Some(group) = tab.group {
+                    rows.push(self.render_group_header(group, cx));
+                }
+                previous = tab.group;
+            }
+            let collapsed = tab
+                .group
+                .and_then(|group| self.model.group(group))
+                .is_some_and(|group| group.collapsed);
+            if !collapsed {
+                rows.push(self.render_tab_row(index, tab, cx));
+            }
+        }
+        let end = self.model.tabs.len();
         div()
-            .id("tab-bar")
-            .window_control_area(WindowControlArea::Drag)
-            .flex()
+            .w(px(SIDEBAR_WIDTH))
             .flex_shrink_0()
-            .items_center()
-            .gap_1()
-            .h(px(app::TAB_BAR_HEIGHT))
-            // Leaves room for the traffic lights drawn over the transparent title bar.
-            .pl(px(80.0))
-            .pr_2()
+            .h_full()
+            .flex()
+            .flex_col()
             .bg(hsla(theme.chrome))
-            .border_b_1()
+            .border_r_1()
             .border_color(hsla(theme.border))
             .font_family(theme::UI_FONT)
             .text_size(px(12.5))
+            .child(
+                self.title_bar("title-bar", cx)
+                    .flex()
+                    .flex_shrink_0()
+                    .items_center()
+                    .justify_end()
+                    .h(px(app::TITLE_BAR_HEIGHT))
+                    .pr_2()
+                    .child(
+                        icon_button("new-tab", "+", theme)
+                            .text_size(px(16.0))
+                            .on_click(cx.listener(|view, _, window, cx| {
+                                cx.stop_propagation();
+                                view.new_tab(window, cx)
+                            })),
+                    ),
+            )
+            .child(
+                div()
+                    .id("tab-list")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.0))
+                    .px_2()
+                    .children(rows)
+                    // Dropping below the list moves a tab to the end, outside any group.
+                    .child(
+                        div()
+                            .id("tab-list-end")
+                            .flex_1()
+                            .min_h(px(32.0))
+                            .rounded_md()
+                            .drag_over::<DraggedTab>(move |style, _, _, _| {
+                                style.bg(hsla(theme.tab_hover))
+                            })
+                            .on_drop(cx.listener(move |view, dragged: &DraggedTab, window, cx| {
+                                view.drop_tab(dragged, end, None, window, cx)
+                            })),
+                    ),
+            )
+    }
+
+    /// Stands in for the hidden system title bar: drag moves the window, double-click zooms.
+    fn title_bar(&self, id: &'static str, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
+        div()
+            .id(id)
+            .window_control_area(WindowControlArea::Drag)
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|view, _, _, _| view.should_move_window = true),
@@ -307,25 +385,157 @@ impl WorkspaceView {
                     window.titlebar_double_click();
                 }
             })
-            .children(tabs)
+    }
+
+    /// Window-move area above the terminal, showing the active tab's title.
+    fn render_title_strip(&self, title: String, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = self.theme();
+        self.title_bar("title-strip", cx)
+            .flex()
+            .flex_shrink_0()
+            .items_center()
+            .justify_center()
+            .h(px(app::TITLE_BAR_HEIGHT))
+            .px_3()
+            .font_family(theme::UI_FONT)
+            .text_size(px(12.5))
+            .text_color(hsla(theme.text_muted))
+            .child(div().truncate().child(title))
+    }
+
+    fn render_group_header(&self, id: GroupId, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.theme();
+        let Some(group) = self.model.group(id) else {
+            return div().into_any_element();
+        };
+        let tabs = self.model.group_tabs(id);
+        let end = tabs.last().map_or(0, |last| last + 1);
+        let hover = format!("group-{}", id.0);
+        let color = hsla(theme.group_colors[group.color]);
+        // A collapsed group hides the active tab's row, so the header stands in for it.
+        let holds_active = group.collapsed && tabs.contains(&self.model.active_tab);
+        div()
+            .id(("group", id.0))
+            .group(hover.clone())
+            .flex()
+            .flex_shrink_0()
+            .items_center()
+            .gap_2()
+            .h(px(26.0))
+            .mt_1()
+            .px_2()
+            .rounded_md()
+            .text_color(hsla(theme.text))
+            .when(holds_active, |this| this.bg(hsla(theme.tab_active)))
+            .hover(|style| style.bg(hsla(theme.tab_hover)))
+            .drag_over::<DraggedTab>(move |style, _, _, _| style.bg(hsla(theme.tab_active)))
+            .on_click(cx.listener(move |view, _, _, cx| {
+                view.model.toggle_group(id);
+                cx.notify()
+            }))
+            .on_drop(cx.listener(move |view, dragged: &DraggedTab, window, cx| {
+                view.drop_tab(dragged, end, Some(id), window, cx)
+            }))
             .child(
                 div()
-                    .id("new-tab")
-                    .flex()
-                    .flex_shrink_0()
-                    .items_center()
-                    .justify_center()
-                    .size(px(26.0))
-                    .rounded_md()
-                    .text_size(px(16.0))
+                    .w(px(10.0))
                     .text_color(hsla(theme.text_muted))
-                    .hover(|style| style.bg(hsla(theme.tab_hover)).text_color(hsla(theme.text)))
-                    .on_click(cx.listener(|view, _, window, cx| {
-                        cx.stop_propagation();
-                        view.new_tab(window, cx)
-                    }))
-                    .child("+"),
+                    .child(if group.collapsed { "▸" } else { "▾" }),
             )
+            .child(div().size(px(8.0)).rounded_full().bg(color))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .child(group.name.clone()),
+            )
+            .child(
+                div()
+                    .text_color(hsla(theme.text_muted))
+                    .group_hover(hover.clone(), |style| style.invisible())
+                    .child(tabs.len().to_string()),
+            )
+            .child(
+                div()
+                    .flex()
+                    .invisible()
+                    .group_hover(hover, |style| style.visible())
+                    .child(
+                        icon_button(("group-new-tab", id.0), "+", theme).on_click(cx.listener(
+                            move |view, _, window, cx| {
+                                cx.stop_propagation();
+                                view.new_tab_in_group(id, window, cx)
+                            },
+                        )),
+                    )
+                    .child(
+                        icon_button(("group-close", id.0), "×", theme).on_click(cx.listener(
+                            move |view, _, window, cx| {
+                                cx.stop_propagation();
+                                view.close_group(id, window, cx)
+                            },
+                        )),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn render_tab_row(&self, index: usize, tab: &Tab, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.theme();
+        let active = index == self.model.active_tab;
+        let title = self.tab_title(tab, cx);
+        let group = tab.group;
+        let color = group
+            .and_then(|group| self.model.group(group))
+            .map(|group| hsla(theme.group_colors[group.color]));
+        let hover = format!("tab-{index}");
+        let dragged = DraggedTab {
+            index,
+            title: title.clone(),
+            background: theme.tab_active,
+            text: theme.text,
+        };
+        div()
+            .id(("tab", index))
+            .group(hover.clone())
+            .flex()
+            .flex_shrink_0()
+            .items_center()
+            .gap_2()
+            .h(px(30.0))
+            .pl(px(if group.is_some() { 18.0 } else { 10.0 }))
+            .pr_1()
+            .rounded_md()
+            .text_color(hsla(if active { theme.text } else { theme.text_muted }))
+            .when(active, |this| this.bg(hsla(theme.tab_active)))
+            .when(!active, |this| {
+                this.hover(|style| style.bg(hsla(theme.tab_hover)))
+            })
+            .on_click(cx.listener(move |view, _, window, cx| view.select_tab(index, window, cx)))
+            .on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
+            .drag_over::<DraggedTab>(move |style, _, _, _| {
+                style.border_t_2().border_color(hsla(theme.accent))
+            })
+            .on_drop(cx.listener(move |view, dragged: &DraggedTab, window, cx| {
+                view.drop_tab(dragged, index, group, window, cx)
+            }))
+            .when_some(color, |this, color| {
+                this.child(div().w(px(3.0)).h(px(14.0)).rounded_sm().bg(color))
+            })
+            .child(div().flex_1().min_w_0().truncate().child(title))
+            .child(
+                icon_button(("close-tab", index), "×", theme)
+                    .when(!active, |this| {
+                        this.invisible().group_hover(hover, |style| style.visible())
+                    })
+                    .on_click(cx.listener(move |view, _, window, cx| {
+                        cx.stop_propagation();
+                        view.close_tab(index, window, cx)
+                    })),
+            )
+            .into_any_element()
     }
 
     fn render_layout(
@@ -460,13 +670,22 @@ impl Render for WorkspaceView {
             .get(&self.model.active_pane())
             .map_or_else(String::new, |(pane, _)| pane.read(cx).title());
         window.set_window_title(&format!("{title} — {}", app::name()));
+        let title = match self
+            .model
+            .active()
+            .group
+            .and_then(|id| self.model.group(id))
+        {
+            Some(group) => format!("{} · {title}", group.name),
+            None => title,
+        };
         let layout = self.model.active().layout.clone();
         let content = self.render_layout(&layout, &mut Vec::new(), cx);
         div()
             .track_focus(&self.focus)
             .size_full()
             .flex()
-            .flex_col()
+            .flex_row()
             .bg(hsla(theme.terminal_background))
             .text_color(hsla(theme.text))
             .on_mouse_move(cx.listener(|view, event, _, cx| view.drag_divider(event, cx)))
@@ -545,7 +764,44 @@ impl Render for WorkspaceView {
             .on_action(
                 cx.listener(|view, _: &UseLightTheme, _, cx| view.set_theme(ThemeName::Light, cx)),
             )
-            .child(self.render_tab_bar(cx))
-            .child(div().flex_1().min_h_0().child(content))
+            .on_action(cx.listener(|view, _: &GroupTab, _, cx| {
+                if view.model.active().group.is_none() {
+                    view.model.create_group(view.model.active_tab);
+                    cx.notify()
+                }
+            }))
+            .on_action(cx.listener(|view, _: &UngroupTab, _, cx| {
+                view.model.ungroup(view.model.active_tab);
+                cx.notify()
+            }))
+            .child(self.render_sidebar(cx))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .flex()
+                    .flex_col()
+                    .child(self.render_title_strip(title, cx))
+                    .child(div().flex_1().min_h_0().child(content)),
+            )
     }
+}
+
+fn icon_button(
+    id: impl Into<gpui::ElementId>,
+    label: &'static str,
+    theme: &Theme,
+) -> gpui::Stateful<gpui::Div> {
+    div()
+        .id(id)
+        .flex()
+        .flex_shrink_0()
+        .items_center()
+        .justify_center()
+        .size(px(20.0))
+        .rounded_sm()
+        .text_color(hsla(theme.text_muted))
+        .hover(|style| style.bg(hsla(theme.border)).text_color(hsla(theme.text)))
+        .child(label)
 }
