@@ -127,12 +127,20 @@ impl WorkspaceView {
         self.panes.insert(id, (pane, subscription));
     }
 
+    fn pane(&self, id: PaneId) -> Option<&Entity<TerminalPane>> {
+        self.panes.get(&id).map(|(pane, _)| pane)
+    }
+
+    fn pane_title(&self, id: PaneId, cx: &Context<Self>) -> String {
+        self.pane(id)
+            .map_or_else(String::new, |pane| pane.read(cx).title())
+    }
+
     /// The active pane's cwd comes from OSC 7, which any local program's output can send
     /// (Ghostty already rejects remote hosts), so only an existing directory is trusted.
     fn active_cwd(&self, cx: &Context<Self>) -> std::path::PathBuf {
-        self.panes
-            .get(&self.model.active_pane())
-            .and_then(|(pane, _)| pane.read(cx).cwd().canonicalize().ok())
+        self.pane(self.model.active_pane())
+            .and_then(|pane| pane.read(cx).cwd().canonicalize().ok())
             .filter(|cwd| cwd.is_dir())
             .unwrap_or_else(|| self.config.cwd.clone())
     }
@@ -150,7 +158,7 @@ impl WorkspaceView {
     fn set_frozen(&mut self, frozen: bool, cx: &mut Context<Self>) {
         self.frozen = frozen;
         for id in self.shown_panes() {
-            if let Some((pane, _)) = self.panes.get(&id) {
+            if let Some(pane) = self.pane(id) {
                 pane.update(cx, |pane, cx| pane.set_frozen(frozen, cx));
             }
         }
@@ -166,7 +174,7 @@ impl WorkspaceView {
             let shown = visible.contains(id);
             pane.update(cx, |pane, cx| pane.set_visible(shown, cx));
         }
-        if let Some((pane, _)) = self.panes.get(&self.model.active_pane()) {
+        if let Some(pane) = self.pane(self.model.active_pane()) {
             pane.update(cx, |pane, cx| pane.focus(window, cx));
         }
         self.split_bounds.clear();
@@ -202,21 +210,11 @@ impl WorkspaceView {
         }
     }
 
-    fn close_tab(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(tab) = self.model.tabs.get(index) else {
-            return;
-        };
-        for pane in tab.layout.panes() {
-            self.close_pane(pane, window, cx);
-        }
-    }
-
-    fn close_group(&mut self, group: GroupId, window: &mut Window, cx: &mut Context<Self>) {
-        let panes: Vec<PaneId> = self
-            .model
-            .group_tabs(group)
-            .into_iter()
-            .flat_map(|index| self.model.tabs[index].layout.panes())
+    fn close_tabs(&mut self, indices: &[usize], window: &mut Window, cx: &mut Context<Self>) {
+        let panes: Vec<PaneId> = indices
+            .iter()
+            .filter_map(|&index| self.model.tabs.get(index))
+            .flat_map(|tab| tab.layout.panes())
             .collect();
         for pane in panes {
             self.close_pane(pane, window, cx);
@@ -303,17 +301,6 @@ impl WorkspaceView {
         }
     }
 
-    fn close_tabs(&mut self, indices: &[usize], window: &mut Window, cx: &mut Context<Self>) {
-        let panes: Vec<PaneId> = indices
-            .iter()
-            .filter_map(|&index| self.model.tabs.get(index))
-            .flat_map(|tab| tab.layout.panes())
-            .collect();
-        for pane in panes {
-            self.close_pane(pane, window, cx);
-        }
-    }
-
     /// Stands in for the hidden system title bar: drag moves the window, double-click zooms.
     fn title_bar(&self, id: &'static str, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
         div()
@@ -386,10 +373,7 @@ impl WorkspaceView {
 impl Render for WorkspaceView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = self.theme();
-        let title = self
-            .panes
-            .get(&self.model.active_pane())
-            .map_or_else(String::new, |(pane, _)| pane.read(cx).title());
+        let title = self.pane_title(self.model.active_pane(), cx);
         window.set_window_title(&format!("{title} — {}", app::name()));
         let tab = self.model.active();
         let layout = if tab.maximized {
@@ -426,7 +410,7 @@ impl Render for WorkspaceView {
             }))
             .on_action(cx.listener(|view, _: &RestartSession, window, cx| {
                 let theme = view.terminal_theme();
-                if let Some((pane, _)) = view.panes.get(&view.model.active_pane()) {
+                if let Some(pane) = view.pane(view.model.active_pane()) {
                     pane.update(cx, |pane, cx| pane.retry(&theme, window, cx));
                 }
             }))

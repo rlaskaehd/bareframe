@@ -10,10 +10,7 @@ impl WorkspaceView {
     fn render_pane_header(&self, id: PaneId, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.theme();
         let active = id == self.model.active_pane();
-        let title = self
-            .panes
-            .get(&id)
-            .map_or_else(String::new, |(pane, _)| pane.read(cx).title());
+        let title = self.pane_title(id, cx);
         let key = id.0 as usize;
         div()
             .relative()
@@ -80,7 +77,7 @@ impl WorkspaceView {
             Layout::Pane(id) => {
                 let id = *id;
                 let split = self.model.active().layout.panes().len() > 1;
-                let pane = self.panes.get(&id).map(|(pane, _)| pane.clone());
+                let pane = self.pane(id).cloned();
                 div()
                     .size_full()
                     .min_w_0()

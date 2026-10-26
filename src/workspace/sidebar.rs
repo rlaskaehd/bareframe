@@ -116,12 +116,7 @@ impl WorkspaceView {
             (0..self.model.tabs.len())
                 .filter(|&index| {
                     let tab = &self.model.tabs[index];
-                    let title = self.tab_title(tab, cx);
-                    let path = self
-                        .panes
-                        .get(&tab.active_pane)
-                        .map(|(pane, _)| pane.read(cx).display_cwd());
-                    found(title) || path.is_some_and(found)
+                    found(self.tab_title(tab, cx)) || self.tab_subtitle(tab, cx).is_some_and(found)
                 })
                 .collect(),
         )
@@ -202,16 +197,14 @@ impl WorkspaceView {
     /// A custom title wins over the shell's, as in Warp.
     fn tab_title(&self, tab: &Tab, cx: &Context<Self>) -> String {
         tab.title.clone().unwrap_or_else(|| {
-            self.panes
-                .get(&tab.active_pane)
-                .map_or_else(String::new, |(pane, _)| pane.read(cx).name())
+            self.pane(tab.active_pane)
+                .map_or_else(String::new, |pane| pane.read(cx).name())
         })
     }
 
     /// The second line of a tab row: the active pane's `~` path.
     fn tab_subtitle(&self, tab: &Tab, cx: &Context<Self>) -> Option<String> {
-        let (pane, _) = self.panes.get(&tab.active_pane)?;
-        Some(pane.read(cx).display_cwd())
+        Some(self.pane(tab.active_pane)?.read(cx).display_cwd())
     }
 
     pub(super) fn render_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -439,7 +432,7 @@ impl WorkspaceView {
                         icon_button(("group-close", id.0), "×", theme).on_click(cx.listener(
                             move |view, _, window, cx| {
                                 cx.stop_propagation();
-                                view.close_group(id, window, cx)
+                                view.close_tabs(&view.model.group_tabs(id), window, cx)
                             },
                         )),
                     ),
@@ -585,7 +578,7 @@ impl WorkspaceView {
                         icon_button(("close-tab", index), "×", theme).on_click(cx.listener(
                             move |view, _, window, cx| {
                                 cx.stop_propagation();
-                                view.close_tab(index, window, cx)
+                                view.close_tabs(&[index], window, cx)
                             },
                         )),
                     ),

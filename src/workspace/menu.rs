@@ -120,7 +120,7 @@ impl WorkspaceView {
                 MenuAction::CloseTabs(targets),
             )]);
         } else {
-            if let Some((pane, _)) = self.panes.get(&pane) {
+            if let Some(pane) = self.pane(pane) {
                 let pane = pane.read(cx);
                 sections.push(vec![
                     ("Copy pane title".into(), MenuAction::CopyText(pane.title())),
@@ -253,7 +253,9 @@ impl WorkspaceView {
                 let tabs = self.model.group_tabs(group);
                 self.model.remove_from_group(&tabs);
             }
-            MenuAction::CloseGroup(group) => self.close_group(group, window, cx),
+            MenuAction::CloseGroup(group) => {
+                self.close_tabs(&self.model.group_tabs(group), window, cx)
+            }
             MenuAction::ToggleGroup(group) => self.model.toggle_group(group),
             MenuAction::ToggleMaximize => self.model.toggle_maximized(),
             MenuAction::Split(axis) => return self.split(axis, window, cx),
