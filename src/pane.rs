@@ -26,6 +26,8 @@ pub struct TerminalPane {
     focus: FocusHandle,
     /// Shown in place of the hidden surface while a popup overlaps it.
     frozen: Option<Arc<RenderImage>>,
+    /// The running or last finished command, from the shell integration's titles.
+    last_command: Option<String>,
 }
 
 impl EventEmitter<PaneEvent> for TerminalPane {}
@@ -45,6 +47,7 @@ impl TerminalPane {
             backend: None,
             focus: cx.focus_handle(),
             frozen: None,
+            last_command: None,
         };
         pane.start(theme, window, cx);
         pane
@@ -58,6 +61,12 @@ impl TerminalPane {
                     |pane, _, event: &TerminalEvent, cx| {
                         if !pane.session.apply(event) {
                             return;
+                        }
+                        if let TerminalEventKind::TitleChanged(title) = &event.kind
+                            && title != "Terminal"
+                            && !is_location(title)
+                        {
+                            pane.last_command = Some(title.clone());
                         }
                         match event.kind {
                             TerminalEventKind::Exited { .. } => cx.emit(PaneEvent::Exited),
@@ -100,6 +109,17 @@ impl TerminalPane {
             SessionStatus::Failed(_) => "Could not start".into(),
             _ if self.session.title != "Terminal" => self.session.title.clone(),
             _ => self.display_cwd(),
+        }
+    }
+
+    /// The sidebar name, as Warp picks it: the running or last command, else "New session".
+    pub fn name(&self) -> String {
+        match &self.session.status {
+            SessionStatus::Failed(_) => "Could not start".into(),
+            _ => self
+                .last_command
+                .clone()
+                .unwrap_or_else(|| "New session".into()),
         }
     }
 
@@ -189,5 +209,28 @@ impl Render for TerminalPane {
                     .text_sm()
                     .child(error)
             })
+    }
+}
+
+/// The shell integration titles the prompt with its location (`~/a`, `/tmp`, `…/b/c/d`) and
+/// a running command with the command line.
+// ponytail: a command typed as a path (`/bin/ls`, `~/run.sh`) reads as a location; parse
+// the integration's preexec hook directly if that matters.
+fn is_location(title: &str) -> bool {
+    title.starts_with('~') || title.starts_with('/') || title.starts_with("…/")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_location;
+
+    #[test]
+    fn prompt_titles_are_locations_and_commands_are_not() {
+        for title in ["~", "~/Sandbox/bareframe", "/tmp", "…/a/b/c"] {
+            assert!(is_location(title), "{title}");
+        }
+        for title in ["vim notes.md", "cargo test", "htop"] {
+            assert!(!is_location(title), "{title}");
+        }
     }
 }

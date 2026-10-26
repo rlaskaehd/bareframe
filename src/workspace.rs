@@ -894,14 +894,14 @@ impl WorkspaceView {
         tab.title.clone().unwrap_or_else(|| {
             self.panes
                 .get(&tab.active_pane)
-                .map_or_else(String::new, |(pane, _)| pane.read(cx).title())
+                .map_or_else(String::new, |(pane, _)| pane.read(cx).name())
         })
     }
 
-    /// The second line of a tab row: the `~` path, unless the title already shows it.
-    fn tab_subtitle(&self, tab: &Tab, title: &str, cx: &Context<Self>) -> Option<String> {
+    /// The second line of a tab row: the active pane's `~` path.
+    fn tab_subtitle(&self, tab: &Tab, cx: &Context<Self>) -> Option<String> {
         let (pane, _) = self.panes.get(&tab.active_pane)?;
-        Some(pane.read(cx).display_cwd()).filter(|path| path != title)
+        Some(pane.read(cx).display_cwd())
     }
 
     fn render_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1211,7 +1211,7 @@ impl WorkspaceView {
         let theme = self.theme();
         let active = index == self.model.active_tab;
         let title = self.tab_title(tab, cx);
-        let subtitle = self.tab_subtitle(tab, &title, cx);
+        let subtitle = self.tab_subtitle(tab, cx);
         // Selection highlight only matters once more than one tab is involved.
         let selection = self.model.selected_indices();
         let selected = selection.len() > 1 && selection.contains(&index);
@@ -1726,20 +1726,17 @@ fn sidebar_icon(color: u32) -> impl IntoElement {
         .child(div().w(px(4.5)).h_full().bg(hsla(color)))
 }
 
-/// The session icon: a prompt glyph in a rounded square frame, in the tab's color if any.
+/// Warp's session icon: a prompt glyph in a circle, in the tab's color if any.
 fn terminal_icon(theme: &Theme, active: bool, tint: Option<Hsla>) -> impl IntoElement {
-    let frame = tint.unwrap_or(hsla(theme.text_muted));
     div()
         .flex_none()
         .size(px(28.0))
-        .rounded(px(6.0))
-        .border_1()
-        .border_color(frame.opacity(if active { 0.7 } else { 0.4 }))
+        .rounded_full()
         .flex()
         .items_center()
         .justify_center()
         .bg(match tint {
-            Some(tint) => tint.opacity(0.18),
+            Some(tint) => tint.opacity(0.25),
             None => hsla(if active {
                 theme.border
             } else {
