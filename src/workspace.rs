@@ -9,8 +9,9 @@ use bareframe_core::{
     workspace::{Axis, Closed, Direction, GroupId, Layout, PaneId, Tab, Workspace},
 };
 use gpui::{
-    AnyElement, Bounds, Context, CursorStyle, Entity, FocusHandle, MouseButton, MouseMoveEvent,
-    Pixels, Subscription, Window, WindowControlArea, canvas, div, prelude::*, px, relative,
+    AnyElement, Bounds, Context, CursorStyle, Entity, FocusHandle, MouseButton, MouseDownEvent,
+    MouseMoveEvent, Pixels, Point, Subscription, Window, WindowControlArea, anchored, canvas,
+    deferred, div, prelude::*, px, relative,
 };
 use gpui_libghostty::TerminalTheme;
 use std::collections::HashMap;
@@ -43,6 +44,28 @@ impl Render for DraggedTab {
     }
 }
 
+/// Width of sidebar context menus; they must fit inside the sidebar because the
+/// terminal's native surface covers anything drawn over it.
+const MENU_WIDTH: f32 = 188.0;
+
+#[derive(Clone)]
+enum MenuAction {
+    NewGroup(Vec<usize>),
+    MoveToGroup(Vec<usize>, GroupId),
+    RemoveFromGroup(Vec<usize>),
+    CloseTabs(Vec<usize>),
+    CloseOtherTabs(usize),
+    NewTabInGroup(GroupId),
+    Ungroup(GroupId),
+    CloseGroup(GroupId),
+    ToggleGroup(GroupId),
+}
+
+struct ContextMenu {
+    position: Point<Pixels>,
+    items: Vec<(String, MenuAction)>,
+}
+
 struct Resize {
     tab: usize,
     path: Vec<bool>,
@@ -64,6 +87,7 @@ pub struct WorkspaceView {
     sidebar_open: bool,
     sidebar_width: f32,
     resizing_sidebar: bool,
+    menu: Option<ContextMenu>,
     focus: FocusHandle,
     _quit: Subscription,
 }
@@ -88,6 +112,7 @@ impl WorkspaceView {
             sidebar_open: true,
             sidebar_width: SIDEBAR_DEFAULT_WIDTH,
             resizing_sidebar: false,
+            menu: None,
             focus: cx.focus_handle(),
             _quit: cx.on_app_quit(|view, cx| {
                 view.shutdown(cx);
@@ -299,6 +324,202 @@ impl WorkspaceView {
         }
     }
 
+    /// Plain click focuses a tab; shift extends the selection from the active tab and
+    /// cmd toggles one tab, as in Warp's vertical tabs.
+    fn click_tab(
+        &mut self,
+        index: usize,
+        modifiers: gpui::Modifiers,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if modifiers.shift {
+            self.model.select_range(index);
+            cx.notify();
+        } else if modifiers.platform {
+            self.model.toggle_selected(index);
+            cx.notify();
+        } else {
+            self.model.clear_selection();
+            self.select_tab(index, window, cx);
+        }
+    }
+
+    fn open_menu(
+        &mut self,
+        position: Point<Pixels>,
+        items: Vec<(String, MenuAction)>,
+        cx: &mut Context<Self>,
+    ) {
+        let x = f32::from(position.x)
+            .min(self.sidebar_width - MENU_WIDTH - 4.0)
+            .max(4.0);
+        self.menu = Some(ContextMenu {
+            position: gpui::point(px(x), position.y),
+            items,
+        });
+        cx.notify();
+    }
+
+    fn group_label(&self, id: GroupId) -> String {
+        self.model
+            .group(id)
+            .map_or_else(|| "group".into(), |group| group.name.clone())
+    }
+
+    /// Right-clicking a tab in a multi-selection acts on the selection; any other
+    /// tab clears the selection and gets its own menu.
+    fn open_tab_menu(&mut self, index: usize, position: Point<Pixels>, cx: &mut Context<Self>) {
+        let selection = self.model.selected_indices();
+        let targets = if selection.len() > 1 && selection.contains(&index) {
+            selection
+        } else {
+            self.model.clear_selection();
+            vec![index]
+        };
+        let mut items = Vec::new();
+        if targets.len() > 1 {
+            items.push((
+                "Create group from tabs".into(),
+                MenuAction::NewGroup(targets.clone()),
+            ));
+        } else {
+            items.push((
+                "New group with tab".into(),
+                MenuAction::NewGroup(targets.clone()),
+            ));
+        }
+        for group in self.model.destination_groups(&targets) {
+            items.push((
+                format!("Move to {}", self.group_label(group)),
+                MenuAction::MoveToGroup(targets.clone(), group),
+            ));
+        }
+        if self.model.shared_group(&targets).is_some() {
+            items.push((
+                "Remove from group".into(),
+                MenuAction::RemoveFromGroup(targets.clone()),
+            ));
+        }
+        if targets.len() > 1 {
+            items.push((
+                format!("Close {} tabs", targets.len()),
+                MenuAction::CloseTabs(targets),
+            ));
+        } else {
+            items.push(("Close tab".into(), MenuAction::CloseTabs(targets)));
+            if self.model.tabs.len() > 1 {
+                items.push(("Close other tabs".into(), MenuAction::CloseOtherTabs(index)));
+            }
+        }
+        self.open_menu(position, items, cx);
+    }
+
+    fn open_group_menu(&mut self, id: GroupId, position: Point<Pixels>, cx: &mut Context<Self>) {
+        let collapsed = self.model.group(id).is_some_and(|group| group.collapsed);
+        self.model.clear_selection();
+        let items = vec![
+            ("New tab in group".into(), MenuAction::NewTabInGroup(id)),
+            (
+                if collapsed {
+                    "Expand group"
+                } else {
+                    "Collapse group"
+                }
+                .into(),
+                MenuAction::ToggleGroup(id),
+            ),
+            ("Ungroup tabs".into(), MenuAction::Ungroup(id)),
+            ("Close all tabs in group".into(), MenuAction::CloseGroup(id)),
+        ];
+        self.open_menu(position, items, cx);
+    }
+
+    fn close_tabs(&mut self, indices: &[usize], window: &mut Window, cx: &mut Context<Self>) {
+        let panes: Vec<PaneId> = indices
+            .iter()
+            .filter_map(|&index| self.model.tabs.get(index))
+            .flat_map(|tab| tab.layout.panes())
+            .collect();
+        for pane in panes {
+            self.close_pane(pane, window, cx);
+        }
+    }
+
+    fn run_menu_action(&mut self, action: MenuAction, window: &mut Window, cx: &mut Context<Self>) {
+        self.menu = None;
+        match action {
+            MenuAction::NewGroup(tabs) => {
+                self.model.new_group(&tabs);
+            }
+            MenuAction::MoveToGroup(tabs, group) => self.model.move_to_group(&tabs, group),
+            MenuAction::RemoveFromGroup(tabs) => self.model.remove_from_group(&tabs),
+            MenuAction::CloseTabs(tabs) => self.close_tabs(&tabs, window, cx),
+            MenuAction::CloseOtherTabs(keep) => {
+                let others: Vec<usize> =
+                    (0..self.model.tabs.len()).filter(|&i| i != keep).collect();
+                self.close_tabs(&others, window, cx);
+            }
+            MenuAction::NewTabInGroup(group) => self.new_tab_in_group(group, window, cx),
+            MenuAction::Ungroup(group) => {
+                let tabs = self.model.group_tabs(group);
+                self.model.remove_from_group(&tabs);
+            }
+            MenuAction::CloseGroup(group) => self.close_group(group, window, cx),
+            MenuAction::ToggleGroup(group) => self.model.toggle_group(group),
+        }
+        self.sync(window, cx);
+    }
+
+    fn render_menu(&self, menu: &ContextMenu, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = self.theme();
+        let items = menu
+            .items
+            .iter()
+            .enumerate()
+            .map(|(index, (label, action))| {
+                let action = action.clone();
+                div()
+                    .id(("menu-item", index))
+                    .px_2()
+                    .py(px(5.0))
+                    .mx_1()
+                    .rounded_sm()
+                    .truncate()
+                    .hover(|style| style.bg(hsla(theme.accent)).text_color(hsla(theme.chrome)))
+                    .on_click(cx.listener(move |view, _, window, cx| {
+                        view.run_menu_action(action.clone(), window, cx)
+                    }))
+                    .child(label.clone())
+            });
+        deferred(
+            anchored().position(menu.position).snap_to_window().child(
+                div()
+                    .id("context-menu")
+                    // Without this, clicks on menu items also reach the tab rows underneath.
+                    .occlude()
+                    .w(px(MENU_WIDTH))
+                    .py_1()
+                    .flex()
+                    .flex_col()
+                    .bg(hsla(theme.tab_active))
+                    .border_1()
+                    .border_color(hsla(theme.border))
+                    .rounded_md()
+                    .shadow_lg()
+                    .font_family(theme::UI_FONT)
+                    .text_size(px(12.5))
+                    .text_color(hsla(theme.text))
+                    .on_mouse_down_out(cx.listener(|view, _, _, cx| {
+                        view.menu = None;
+                        cx.notify()
+                    }))
+                    .children(items),
+            ),
+        )
+        .with_priority(1)
+    }
+
     fn tab_title(&self, tab: &Tab, cx: &Context<Self>) -> String {
         self.panes
             .get(&tab.active_pane)
@@ -483,6 +704,12 @@ impl WorkspaceView {
                 view.model.toggle_group(id);
                 cx.notify()
             }))
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |view, event: &MouseDownEvent, _, cx| {
+                    view.open_group_menu(id, event.position, cx)
+                }),
+            )
             .on_drop(cx.listener(move |view, dragged: &DraggedTab, window, cx| {
                 view.drop_tab(dragged, end, Some(id), window, cx)
             }))
@@ -537,6 +764,9 @@ impl WorkspaceView {
         let active = index == self.model.active_tab;
         let title = self.tab_title(tab, cx);
         let subtitle = self.tab_subtitle(tab, &title, cx);
+        // Selection highlight only matters once more than one tab is involved.
+        let selection = self.model.selected_indices();
+        let selected = selection.len() > 1 && selection.contains(&index);
         let group = tab.group;
         let color = group
             .and_then(|group| self.model.group(group))
@@ -560,12 +790,31 @@ impl WorkspaceView {
             .pl(px(if group.is_some() { 18.0 } else { 10.0 }))
             .pr_1()
             .rounded_md()
-            .text_color(hsla(if active { theme.text } else { theme.text_muted }))
+            .text_color(hsla(if active || selected {
+                theme.text
+            } else {
+                theme.text_muted
+            }))
             .when(active, |this| this.bg(hsla(theme.tab_active)))
-            .when(!active, |this| {
+            .when(selected, |this| {
+                this.bg(hsla(theme.accent).opacity(0.22))
+                    .border_1()
+                    .border_color(hsla(theme.accent).opacity(0.5))
+            })
+            .when(!active && !selected, |this| {
                 this.hover(|style| style.bg(hsla(theme.tab_hover)))
             })
-            .on_click(cx.listener(move |view, _, window, cx| view.select_tab(index, window, cx)))
+            .on_click(
+                cx.listener(move |view, event: &gpui::ClickEvent, window, cx| {
+                    view.click_tab(index, event.modifiers(), window, cx)
+                }),
+            )
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |view, event: &MouseDownEvent, _, cx| {
+                    view.open_tab_menu(index, event.position, cx)
+                }),
+            )
             .on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
             .drag_over::<DraggedTab>(move |style, _, _, _| {
                 style.border_t_2().border_color(hsla(theme.accent))
@@ -830,15 +1079,18 @@ impl Render for WorkspaceView {
                 cx.listener(|view, _: &UseLightTheme, _, cx| view.set_theme(ThemeName::Light, cx)),
             )
             .on_action(cx.listener(|view, _: &GroupTab, _, cx| {
-                if view.model.active().group.is_none() {
-                    view.model.create_group(view.model.active_tab);
-                    cx.notify()
-                }
-            }))
-            .on_action(cx.listener(|view, _: &UngroupTab, _, cx| {
-                view.model.ungroup(view.model.active_tab);
+                let tabs = view.model.target_tabs();
+                view.model.new_group(&tabs);
                 cx.notify()
             }))
+            .on_action(cx.listener(|view, _: &UngroupTab, _, cx| {
+                let tabs = view.model.target_tabs();
+                view.model.remove_from_group(&tabs);
+                cx.notify()
+            }))
+            .when_some(self.menu.as_ref(), |this, menu| {
+                this.child(self.render_menu(menu, cx))
+            })
             .child(self.render_top_bar(cx))
             .child(
                 div()

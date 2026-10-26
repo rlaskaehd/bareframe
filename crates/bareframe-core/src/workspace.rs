@@ -179,6 +179,8 @@ pub struct Tab {
     pub layout: Layout,
     pub active_pane: PaneId,
     pub group: Option<GroupId>,
+    /// Part of the sidebar's multi-selection (shift-click range or cmd-click).
+    pub selected: bool,
 }
 
 impl Tab {
@@ -187,6 +189,7 @@ impl Tab {
             layout: Layout::Pane(pane),
             active_pane: pane,
             group: None,
+            selected: false,
         }
     }
 
@@ -323,9 +326,91 @@ impl Workspace {
         Some(Closed::Tab)
     }
 
-    /// Puts `tab` in a new group and returns it.
-    pub fn create_group(&mut self, tab: usize) -> Option<GroupId> {
-        self.tabs.get(tab)?;
+    /// The multi-selection, which always includes the active tab once anything is selected.
+    pub fn selected_indices(&self) -> Vec<usize> {
+        if !self.tabs.iter().any(|tab| tab.selected) {
+            return Vec::new();
+        }
+        (0..self.tabs.len())
+            .filter(|&index| self.tabs[index].selected || index == self.active_tab)
+            .collect()
+    }
+
+    /// The tabs a group command applies to: the selection, else the active tab.
+    pub fn target_tabs(&self) -> Vec<usize> {
+        let selected = self.selected_indices();
+        if selected.is_empty() {
+            vec![self.active_tab]
+        } else {
+            selected
+        }
+    }
+
+    /// Shift-click: adds every tab between the active tab and `index`, expanding
+    /// collapsed groups in the range so the user sees what is selected.
+    pub fn select_range(&mut self, index: usize) {
+        if index >= self.tabs.len() {
+            return;
+        }
+        let (low, high) = (index.min(self.active_tab), index.max(self.active_tab));
+        for tab in &mut self.tabs[low..=high] {
+            tab.selected = true;
+            if let Some(group) = tab.group
+                && let Some(group) = self.groups.iter_mut().find(|g| g.id == group)
+            {
+                group.collapsed = false;
+            }
+        }
+    }
+
+    /// Cmd-click: adds or removes one tab.
+    pub fn toggle_selected(&mut self, index: usize) {
+        if let Some(tab) = self.tabs.get_mut(index) {
+            tab.selected = !tab.selected;
+        }
+    }
+
+    pub fn clear_selection(&mut self) {
+        for tab in &mut self.tabs {
+            tab.selected = false;
+        }
+    }
+
+    /// Removes the tabs at `indices` and returns them in order.
+    fn take(&mut self, indices: &[usize]) -> Vec<Tab> {
+        let mut indices: Vec<usize> = indices
+            .iter()
+            .copied()
+            .filter(|&index| index < self.tabs.len())
+            .collect();
+        indices.sort_unstable();
+        indices.dedup();
+        let mut taken: Vec<Tab> = indices
+            .iter()
+            .rev()
+            .map(|&index| self.tabs.remove(index))
+            .collect();
+        taken.reverse();
+        taken
+    }
+
+    /// Re-inserts `block` at `at`, keeping the active tab and group adjacency.
+    fn put(&mut self, at: usize, block: Vec<Tab>, active: PaneId) {
+        let at = at.min(self.tabs.len());
+        self.tabs.splice(at..at, block);
+        self.active_tab = self.tab_of(active).unwrap_or(0);
+        self.clear_selection();
+        self.normalize();
+    }
+
+    /// Puts the tabs at `indices` in a new group, anchored at the earliest one.
+    pub fn new_group(&mut self, indices: &[usize]) -> Option<GroupId> {
+        let first = indices
+            .iter()
+            .copied()
+            .filter(|&i| i < self.tabs.len())
+            .min()?;
+        let active = self.active_pane();
         let id = GroupId(self.next_group);
         self.next_group += 1;
         self.groups.push(Group {
@@ -334,22 +419,71 @@ impl Workspace {
             color: (id.0 as usize - 1) % GROUP_COLORS,
             collapsed: false,
         });
-        self.tabs[tab].group = Some(id);
-        self.normalize();
+        let mut block = self.take(indices);
+        for tab in &mut block {
+            tab.group = Some(id);
+        }
+        self.put(first, block, active);
         Some(id)
     }
 
-    /// Takes `tab` out of its group and places it right after the group's other tabs.
-    pub fn ungroup(&mut self, tab: usize) {
-        let Some(group) = self.tabs.get(tab).and_then(|tab| tab.group) else {
+    /// Moves the tabs at `indices` to the end of `group`.
+    pub fn move_to_group(&mut self, indices: &[usize], group: GroupId) {
+        if self.group(group).is_none() {
             return;
-        };
-        let end = self
+        }
+        let active = self.active_pane();
+        let mut block = self.take(indices);
+        for tab in &mut block {
+            tab.group = Some(group);
+        }
+        let at = self
             .tabs
             .iter()
-            .rposition(|t| t.group == Some(group))
-            .unwrap_or(tab);
-        self.move_tab(tab, end + 1, None);
+            .rposition(|tab| tab.group == Some(group))
+            .map_or(self.tabs.len(), |last| last + 1);
+        self.put(at, block, active);
+    }
+
+    /// Takes the tabs at `indices` out of their group and places them right after it.
+    pub fn remove_from_group(&mut self, indices: &[usize]) {
+        let Some(group) = indices
+            .iter()
+            .find_map(|&index| self.tabs.get(index).and_then(|tab| tab.group))
+        else {
+            return;
+        };
+        let first = indices.iter().copied().min().unwrap_or(0);
+        let active = self.active_pane();
+        let mut block = self.take(indices);
+        for tab in &mut block {
+            tab.group = None;
+        }
+        let at = self
+            .tabs
+            .iter()
+            .rposition(|tab| tab.group == Some(group))
+            .map_or(first.min(self.tabs.len()), |last| last + 1);
+        self.put(at, block, active);
+    }
+
+    /// The groups the tabs at `indices` could move to: every group they are not all in already.
+    pub fn destination_groups(&self, indices: &[usize]) -> Vec<GroupId> {
+        let shared = self.shared_group(indices);
+        self.groups
+            .iter()
+            .map(|group| group.id)
+            .filter(|id| Some(*id) != shared)
+            .collect()
+    }
+
+    /// The group every tab at `indices` belongs to, if they share one.
+    pub fn shared_group(&self, indices: &[usize]) -> Option<GroupId> {
+        let mut groups = indices
+            .iter()
+            .map(|&index| self.tabs.get(index).and_then(|tab| tab.group));
+        let first = groups.next()??;
+        groups.all(|group| group == Some(first)).then_some(first)
     }
 
     /// Moves the tab at `from` to sit before index `to` (`to == len` appends) and sets its group.
@@ -493,7 +627,7 @@ mod tests {
         let (mut ws, a) = Workspace::new();
         let b = ws.new_tab();
         let c = ws.new_tab();
-        let group = ws.create_group(0).unwrap();
+        let group = ws.new_group(&[0]).unwrap();
         // c joins by being dropped onto the group; it moves next to a.
         ws.move_tab(2, 3, Some(group));
         let order = |ws: &Workspace| ws.tabs.iter().map(|t| t.active_pane).collect::<Vec<_>>();
@@ -504,7 +638,7 @@ mod tests {
         assert_eq!(ws.active().group, Some(group));
         assert_eq!(ws.group_tabs(group).len(), 3);
         // Ungrouping places the tab after the group's block.
-        ws.ungroup(0);
+        ws.remove_from_group(&[0]);
         assert_eq!(order(&ws), [c, d, a, b]);
         assert_eq!(ws.tabs[2].group, None);
         // Closing the last tabs of a group removes the group.
@@ -516,9 +650,52 @@ mod tests {
     }
 
     #[test]
+    fn shift_and_cmd_selection_group_together() {
+        let (mut ws, a) = Workspace::new();
+        let b = ws.new_tab();
+        let c = ws.new_tab();
+        let d = ws.new_tab();
+        let order = |ws: &Workspace| ws.tabs.iter().map(|t| t.active_pane).collect::<Vec<_>>();
+        // Active is d (index 3); shift-click b selects b..=d.
+        ws.select_range(1);
+        assert_eq!(ws.selected_indices(), [1, 2, 3]);
+        // Cmd-click c out of the selection; the active tab always stays in.
+        ws.toggle_selected(2);
+        assert_eq!(ws.selected_indices(), [1, 3]);
+        let group = ws.new_group(&ws.selected_indices()).unwrap();
+        assert_eq!(order(&ws), [a, b, d, c]);
+        assert_eq!(ws.group_tabs(group).len(), 2);
+        assert_eq!(ws.active_pane(), d);
+        assert!(ws.selected_indices().is_empty());
+        // Move a and c into the group; they join at its end.
+        ws.select_tab(0);
+        ws.toggle_selected(3);
+        assert_eq!(ws.destination_groups(&ws.selected_indices()), [group]);
+        ws.move_to_group(&ws.selected_indices(), group);
+        assert_eq!(order(&ws), [b, d, a, c]);
+        assert_eq!(ws.shared_group(&[0, 1, 2, 3]), Some(group));
+        // Removing two from the group places them after it.
+        ws.remove_from_group(&[0, 1]);
+        assert_eq!(order(&ws), [a, c, b, d]);
+        assert_eq!(ws.shared_group(&[0, 1]), Some(group));
+        assert_eq!(ws.tabs[3].group, None);
+    }
+
+    #[test]
+    fn shift_range_expands_collapsed_groups() {
+        let (mut ws, _) = Workspace::new();
+        ws.new_tab();
+        let group = ws.new_group(&[1]).unwrap();
+        ws.toggle_group(group);
+        ws.select_tab(0);
+        ws.select_range(1);
+        assert!(!ws.group(group).unwrap().collapsed);
+    }
+
+    #[test]
     fn last_tab_is_replaced_instead_of_closing_the_window() {
         let (mut ws, a) = Workspace::new();
-        ws.create_group(0);
+        ws.new_group(&[0]);
         let Some(Closed::Replaced(fresh)) = ws.close(a) else {
             panic!("the last tab must be replaced");
         };
