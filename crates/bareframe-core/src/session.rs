@@ -36,6 +36,22 @@ pub enum TerminalEventKind {
     ObservationGap {
         dropped: u64,
     },
+    /// The terminal asks the user before a clipboard operation goes ahead.
+    ClipboardRequest {
+        operation: ClipboardOperation,
+        text: String,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClipboardOperation {
+    /// A paste Ghostty considers unsafe (a newline outside bracketed paste, or text
+    /// that would end bracketed paste early).
+    Paste,
+    /// A program reading the clipboard through OSC 52.
+    Read,
+    /// A program writing the clipboard through OSC 52.
+    Write,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -86,6 +102,7 @@ impl SessionState {
             }
             (SessionStatus::Running, TerminalEventKind::CommandFinished { .. }) => {}
             (SessionStatus::Running, TerminalEventKind::ObservationGap { .. }) => {}
+            (SessionStatus::Running, TerminalEventKind::ClipboardRequest { .. }) => {}
             _ => return false,
         }
         true

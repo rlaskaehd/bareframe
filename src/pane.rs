@@ -1,7 +1,10 @@
 use crate::{terminal::adapter::GhosttyAdapter, theme};
 use bareframe_core::{
     config::{LaunchConfig, display_path},
-    session::{SessionId, SessionState, SessionStatus, TerminalEvent, TerminalEventKind},
+    session::{
+        ClipboardOperation, SessionId, SessionState, SessionStatus, TerminalEvent,
+        TerminalEventKind,
+    },
     workspace::PaneId,
 };
 use gpui::{
@@ -15,6 +18,8 @@ pub enum PaneEvent {
     /// The shell ended; the pane should close.
     Exited,
     TitleChanged,
+    /// The terminal waits for the user to allow or refuse a clipboard operation.
+    Clipboard(ClipboardOperation, String),
 }
 
 /// One terminal session and the native surface showing it.
@@ -71,7 +76,10 @@ impl TerminalPane {
                         {
                             pane.last_command = Some(title.clone());
                         }
-                        match event.kind {
+                        match &event.kind {
+                            TerminalEventKind::ClipboardRequest { operation, text } => {
+                                cx.emit(PaneEvent::Clipboard(*operation, text.clone()))
+                            }
                             TerminalEventKind::Exited { .. } => cx.emit(PaneEvent::Exited),
                             TerminalEventKind::TitleChanged(_)
                             | TerminalEventKind::WorkingDirectoryChanged(_) => {
@@ -142,6 +150,12 @@ impl TerminalPane {
         match &self.terminal {
             Some(terminal) => terminal.update(cx, |terminal, cx| terminal.focus(window, cx)),
             None => self.focus.focus(window, cx),
+        }
+    }
+
+    pub fn resolve_clipboard(&self, approved: bool, cx: &mut Context<Self>) {
+        if let Some(terminal) = &self.terminal {
+            terminal.update(cx, |terminal, _| terminal.resolve_clipboard(approved));
         }
     }
 

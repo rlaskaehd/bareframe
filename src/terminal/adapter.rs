@@ -7,7 +7,9 @@ use crate::app::{
 use bareframe_core::{
     config::LaunchConfig,
     ime::Composition,
-    session::{SessionKey, TerminalEvent, TerminalEventKind},
+    session::{
+        ClipboardOperation as SessionClipboard, SessionKey, TerminalEvent, TerminalEventKind,
+    },
 };
 use gpui::{
     AppContext, Bounds, Context, ElementInputHandler, Entity, EntityInputHandler, EventEmitter,
@@ -20,7 +22,7 @@ use gpui_libghostty::{
         KeyAction, Modifiers, MouseButton, MouseState, NativeEvent, NativeSurface,
         TerminalThemeState, spawn_surface,
     },
-    TerminalConfiguration, TerminalOptions, TerminalTheme,
+    ClipboardOperation, TerminalConfiguration, TerminalOptions, TerminalTheme,
 };
 use std::{ffi::CString, ops::Range};
 
@@ -36,6 +38,8 @@ pub struct GhosttyAdapter {
     composition: Composition,
     started: bool,
     exited: bool,
+    /// A clipboard request is on screen; it is reported once until answered.
+    clipboard_asked: bool,
 }
 
 impl EventEmitter<TerminalEvent> for GhosttyAdapter {}
@@ -57,8 +61,9 @@ impl GhosttyAdapter {
         options.quiet_login = true;
         options.configuration = TerminalConfiguration::Custom(theme.clone());
         // Ghostty asks only for unsafe pastes (a newline outside bracketed paste, or text
-        // that would end bracketed paste early) and OSC 52 reads. Both are refused until
-        // there is a confirmation prompt; ordinary pastes never reach this callback.
+        // that would end bracketed paste early) and, when set to ask, OSC 52 reads and
+        // writes. Returning false defers each to the user (see `ClipboardRequest`);
+        // ordinary pastes never reach this callback.
         options.clipboard_approval = Some(std::sync::Arc::new(|_| false));
         // SAFETY: This entity creates, services and drops its child on GPUI's UI
         // thread. WorkspaceView releases it before its parent NSView is closed.
@@ -91,6 +96,7 @@ impl GhosttyAdapter {
                 composition: Composition::default(),
                 started: false,
                 exited: false,
+                clipboard_asked: false,
             }
         }))
     }
@@ -123,6 +129,17 @@ impl GhosttyAdapter {
                 },
                 NativeEvent::Gap { dropped } => TerminalEventKind::ObservationGap { dropped },
             });
+        }
+        if !self.clipboard_asked
+            && let Some((operation, text)) = surface.clipboard_pending()
+        {
+            self.clipboard_asked = true;
+            let operation = match operation {
+                ClipboardOperation::Paste => SessionClipboard::Paste,
+                ClipboardOperation::Read => SessionClipboard::Read,
+                ClipboardOperation::Write => SessionClipboard::Write,
+            };
+            observations.push(TerminalEventKind::ClipboardRequest { operation, text });
         }
         let alive = surface.is_alive();
         if !self.started {
@@ -316,6 +333,14 @@ impl GhosttyAdapter {
                 0,
             );
         }
+    }
+
+    /// Answers the clipboard request the user was shown.
+    pub fn resolve_clipboard(&mut self, approved: bool) {
+        if let Some(surface) = &mut self.surface {
+            surface.resolve_clipboard(approved);
+        }
+        self.clipboard_asked = false;
     }
 
     /// Sends `text` as if typed, through Ghostty's `text:` binding action, whose argument

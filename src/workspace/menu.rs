@@ -48,7 +48,7 @@ pub(super) struct ContextMenu {
 impl WorkspaceView {
     pub(super) fn dismiss_menu(&mut self, cx: &mut Context<Self>) {
         self.menu = None;
-        if self.frozen {
+        if self.frozen && self.clipboard_prompt.is_none() {
             self.set_frozen(false, cx);
         }
         cx.notify();

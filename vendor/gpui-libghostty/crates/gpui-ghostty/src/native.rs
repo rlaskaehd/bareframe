@@ -267,6 +267,11 @@ mod platform {
         fn bareframe_surface_event(surface: *mut RawSurface, event: *mut HostEvent) -> bool;
         fn bareframe_surface_preedit(surface: *mut RawSurface, text: *const c_char, length: usize);
         fn bareframe_surface_ime_rect(surface: *mut RawSurface, rect: *mut f64);
+        fn bareframe_surface_clipboard_pending(
+            surface: *mut RawSurface,
+            text: *mut *const c_char,
+        ) -> c_int;
+        fn bareframe_surface_clipboard_resolve(surface: *mut RawSurface, approved: bool);
         fn bareframe_surface_action(
             surface: *mut RawSurface,
             text: *const c_char,
@@ -424,6 +429,34 @@ mod platform {
             // SAFETY: The shim writes exactly four doubles.
             unsafe { bareframe_surface_ime_rect(self.raw.as_ptr(), rect.as_mut_ptr()) }
             rect
+        }
+
+        /// The clipboard request waiting for the user, if the approval callback
+        /// deferred one: what it is and the text involved.
+        pub fn clipboard_pending(&mut self) -> Option<(crate::ClipboardOperation, String)> {
+            let mut text = std::ptr::null();
+            // SAFETY: `raw` is valid; the shim keeps the text alive until resolved and
+            // it is copied before this returns.
+            let operation = unsafe { bareframe_surface_clipboard_pending(self.raw.as_ptr(), &mut text) };
+            let operation = match operation {
+                0 => crate::ClipboardOperation::Paste,
+                1 => crate::ClipboardOperation::Read,
+                2 => crate::ClipboardOperation::Write,
+                _ => return None,
+            };
+            if text.is_null() {
+                return None;
+            }
+            // SAFETY: Non-null and NUL-terminated by the shim's strdup.
+            let text = unsafe { CStr::from_ptr(text) }.to_string_lossy().into_owned();
+            Some((operation, text))
+        }
+
+        /// Answers the pending clipboard request: approved pastes and reads proceed,
+        /// an approved write sets the clipboard; refused ones are dropped.
+        pub fn resolve_clipboard(&mut self, approved: bool) {
+            // SAFETY: `raw` is valid and this runs on the AppKit main thread.
+            unsafe { bareframe_surface_clipboard_resolve(self.raw.as_ptr(), approved) }
         }
 
         pub fn binding_action(&mut self, action: &CStr) -> bool {
@@ -708,6 +741,10 @@ impl NativeSurface {
     pub fn set_frame(&mut self, _x: f64, _y: f64, _width: f64, _height: f64, _scale_factor: f64) {}
     pub fn set_visible(&mut self, _visible: bool) {}
     pub fn set_hidden_rendering(&mut self, _rendered: bool) {}
+    pub fn clipboard_pending(&mut self) -> Option<(ClipboardOperation, String)> {
+        None
+    }
+    pub fn resolve_clipboard(&mut self, _approved: bool) {}
     pub fn frame_count(&self) -> u64 {
         0
     }

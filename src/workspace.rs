@@ -22,6 +22,7 @@ use menu::ContextMenu;
 use sidebar::{SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_SHARE, SIDEBAR_MIN_WIDTH};
 use std::collections::HashMap;
 
+mod clipboard;
 mod layout;
 mod menu;
 mod prefs;
@@ -120,6 +121,7 @@ pub struct WorkspaceView {
     /// Tabs being dragged in the sidebar; their rows show an empty slot meanwhile.
     dragging: Vec<TabId>,
     menu: Option<ContextMenu>,
+    clipboard_prompt: Option<clipboard::ClipboardPrompt>,
     /// The shown surfaces are swapped for snapshots while a pane menu covers them.
     frozen: bool,
     renaming: Option<(RenameTarget, Entity<RenameInput>, Subscription)>,
@@ -189,6 +191,7 @@ impl WorkspaceView {
             _search_events: search_events,
             dragging: Vec::new(),
             menu: None,
+            clipboard_prompt: None,
             frozen: false,
             renaming: None,
             search: None,
@@ -337,6 +340,9 @@ impl WorkspaceView {
                 window,
                 move |view, _, event, window, cx| match event {
                     PaneEvent::Exited => view.close_pane(id, window, cx),
+                    PaneEvent::Clipboard(operation, text) => {
+                        view.show_clipboard_prompt(id, *operation, text.clone(), window, cx)
+                    }
                     PaneEvent::TitleChanged => {
                         view.refresh_explorer_roots(cx);
                         cx.notify()
@@ -400,9 +406,12 @@ impl WorkspaceView {
             self.dismiss_menu(cx);
         }
         let visible = self.shown_panes();
-        for (id, pane) in self.terminals() {
-            let shown = visible.contains(id);
-            pane.update(cx, |pane, cx| pane.set_visible(shown, cx));
+        // A clipboard prompt keeps the terminals frozen under it until it is answered.
+        if self.clipboard_prompt.is_none() {
+            for (id, pane) in self.terminals() {
+                let shown = visible.contains(id);
+                pane.update(cx, |pane, cx| pane.set_visible(shown, cx));
+            }
         }
         if let Some(pane) = self.pane(self.model.active_pane()).cloned() {
             pane.focus(window, cx);
@@ -892,6 +901,7 @@ impl Render for WorkspaceView {
             .when_some(self.menu.as_ref(), |this, menu| {
                 this.child(self.render_menu(menu, cx))
             })
+            .children(self.render_clipboard_prompt(cx))
             .child(self.render_top_bar(cx))
             .child(
                 div()

@@ -34,6 +34,13 @@ typedef struct gpui_ghostty_surface {
     _Atomic bool alive;
     _Atomic uint64_t frame_count;
     bareframe_event_queue events;
+    // One clipboard request the approval callback declined to decide, held until
+    // the embedder asks the user (bareframe_surface_clipboard_*). Paste and read
+    // keep Ghostty's request; a write keeps only the text.
+    bool has_pending;
+    int pending_operation;
+    char *pending_text;
+    void *pending_request;
 } gpui_ghostty_surface;
 
 @implementation GpuiGhosttyView
@@ -177,6 +184,20 @@ static bool runtime_read_clipboard(void *userdata, ghostty_clipboard_e location,
     return true;
 }
 
+// Holds a request for the embedder's confirmation. Only one waits at a time; a
+// second is refused so a program can't queue prompts behind the user's back.
+static bool hold_clipboard(gpui_ghostty_surface *state, int operation, const char *text, void *request) {
+    if (state->has_pending || text == NULL) return false;
+    char *copy = strdup(text);
+    if (copy == NULL) return false;
+    state->has_pending = true;
+    state->pending_operation = operation;
+    state->pending_text = copy;
+    state->pending_request = request;
+    runtime_wakeup(state);
+    return true;
+}
+
 static void runtime_confirm_read_clipboard(
     void *userdata,
     const char *text,
@@ -186,12 +207,49 @@ static void runtime_confirm_read_clipboard(
     gpui_ghostty_surface *state = userdata;
     if (state->surface != NULL) {
         int operation = kind == GHOSTTY_CLIPBOARD_REQUEST_PASTE ? 0 : 1;
-        bool approved = state->approve_clipboard != NULL &&
-            state->approve_clipboard(state->wakeup_userdata, operation, text);
+        // No callback means deny; a callback that returns false defers to the user.
+        if (state->approve_clipboard == NULL) {
+            ghostty_surface_complete_clipboard_request(state->surface, "", request, true);
+            return;
+        }
+        if (state->approve_clipboard(state->wakeup_userdata, operation, text)) {
+            ghostty_surface_complete_clipboard_request(state->surface, text, request, true);
+            return;
+        }
         // Completing with empty text releases Ghostty's request without exposing
         // clipboard contents or inserting an unsafe paste.
-        ghostty_surface_complete_clipboard_request(state->surface, approved ? text : "", request, true);
+        if (!hold_clipboard(state, operation, text, request)) {
+            ghostty_surface_complete_clipboard_request(state->surface, "", request, true);
+        }
     }
+}
+
+static void set_pasteboard(const char *data) {
+    NSString *text = [NSString stringWithUTF8String:data];
+    if (text == nil) return;
+    NSPasteboard *pasteboard = [NSPasteboard generalPasteboard];
+    [pasteboard clearContents];
+    [pasteboard setString:text forType:NSPasteboardTypeString];
+}
+
+int bareframe_surface_clipboard_pending(gpui_ghostty_surface *state, const char **text) {
+    if (state == NULL || !state->has_pending) return -1;
+    if (text != NULL) *text = state->pending_text;
+    return state->pending_operation;
+}
+
+void bareframe_surface_clipboard_resolve(gpui_ghostty_surface *state, bool approved) {
+    if (state == NULL || !state->has_pending) return;
+    if (state->pending_operation == 2) {
+        if (approved) set_pasteboard(state->pending_text);
+    } else if (state->surface != NULL) {
+        ghostty_surface_complete_clipboard_request(
+            state->surface, approved ? state->pending_text : "", state->pending_request, true);
+    }
+    free(state->pending_text);
+    state->pending_text = NULL;
+    state->pending_request = NULL;
+    state->has_pending = false;
 }
 
 static void runtime_write_clipboard(
@@ -205,13 +263,14 @@ static void runtime_write_clipboard(
     (void)location;
     for (size_t index = 0; index < count; index++) {
         if (strcmp(content[index].mime, "text/plain") != 0) continue;
-        if (confirm && (state->approve_clipboard == NULL ||
-            !state->approve_clipboard(state->wakeup_userdata, 2, content[index].data))) return;
-        NSString *text = [NSString stringWithUTF8String:content[index].data];
-        if (text == nil) return;
-        NSPasteboard *pasteboard = [NSPasteboard generalPasteboard];
-        [pasteboard clearContents];
-        [pasteboard setString:text forType:NSPasteboardTypeString];
+        if (confirm) {
+            if (state->approve_clipboard == NULL) return;
+            if (!state->approve_clipboard(state->wakeup_userdata, 2, content[index].data)) {
+                hold_clipboard(state, 2, content[index].data, NULL);
+                return;
+            }
+        }
+        set_pasteboard(content[index].data);
         return;
     }
 }
@@ -323,6 +382,8 @@ void gpui_ghostty_surface_free(gpui_ghostty_surface *state) {
     // Stop counting before the view goes away, so a later frame can't reach a
     // surface that has been freed.
     gpui_ghostty_forget_frames(state);
+    // A request still waiting for the user is refused, so Ghostty gets it back.
+    bareframe_surface_clipboard_resolve(state, false);
     [state->view removeFromSuperview];
     if (state->surface != NULL) ghostty_surface_free(state->surface);
     if (state->app != NULL) ghostty_app_free(state->app);
