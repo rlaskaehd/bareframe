@@ -32,6 +32,7 @@ actions!(
         SelectLastTab,
         SplitRight,
         SplitDown,
+        ToggleMaximizePane,
         FocusLeft,
         FocusRight,
         FocusUp,
@@ -69,12 +70,17 @@ impl gpui::AssetSource for Assets {
     fn load(&self, path: &str) -> gpui::Result<Option<std::borrow::Cow<'static, [u8]>>> {
         Ok(match path {
             "icons/pin.svg" => Some(include_bytes!("../assets/icons/pin.svg").as_slice().into()),
+            "icons/corner.svg" => Some(
+                include_bytes!("../assets/icons/corner.svg")
+                    .as_slice()
+                    .into(),
+            ),
             _ => None,
         })
     }
 
     fn list(&self, _: &str) -> gpui::Result<Vec<gpui::SharedString>> {
-        Ok(vec!["icons/pin.svg".into()])
+        Ok(vec!["icons/pin.svg".into(), "icons/corner.svg".into()])
     }
 }
 
@@ -150,6 +156,7 @@ pub fn run(config: LaunchConfig) {
                 KeyBinding::new("cmd-9", SelectLastTab, None),
                 KeyBinding::new("cmd-d", SplitRight, None),
                 KeyBinding::new("cmd-shift-d", SplitDown, None),
+                KeyBinding::new("cmd-shift-enter", ToggleMaximizePane, None),
                 KeyBinding::new("cmd-alt-left", FocusLeft, None),
                 KeyBinding::new("cmd-alt-right", FocusRight, None),
                 KeyBinding::new("cmd-alt-up", FocusUp, None),
@@ -168,6 +175,7 @@ pub fn run(config: LaunchConfig) {
                     MenuItem::action("New Tab", NewTab),
                     MenuItem::action("Split Right", SplitRight),
                     MenuItem::action("Split Down", SplitDown),
+                    MenuItem::action("Maximize Pane", ToggleMaximizePane),
                     MenuItem::separator(),
                     MenuItem::action("Add Tab to New Group", GroupTab),
                     MenuItem::action("Remove Tab from Group", UngroupTab),

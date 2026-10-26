@@ -4,8 +4,12 @@ use bareframe_core::{
     session::{SessionId, SessionState, SessionStatus, TerminalEvent, TerminalEventKind},
     workspace::PaneId,
 };
-use gpui::{Context, Entity, EventEmitter, FocusHandle, Subscription, Window, div, prelude::*};
+use gpui::{
+    Context, Entity, EventEmitter, FocusHandle, RenderImage, Subscription, Window, div, img,
+    prelude::*,
+};
 use gpui_libghostty::TerminalTheme;
+use std::sync::Arc;
 
 pub enum PaneEvent {
     /// The shell ended; the pane should close.
@@ -20,6 +24,8 @@ pub struct TerminalPane {
     terminal: Option<Entity<GhosttyAdapter>>,
     backend: Option<Subscription>,
     focus: FocusHandle,
+    /// Shown in place of the hidden surface while a popup overlaps it.
+    frozen: Option<Arc<RenderImage>>,
 }
 
 impl EventEmitter<PaneEvent> for TerminalPane {}
@@ -38,6 +44,7 @@ impl TerminalPane {
             terminal: None,
             backend: None,
             focus: cx.focus_handle(),
+            frozen: None,
         };
         pane.start(theme, window, cx);
         pane
@@ -122,6 +129,22 @@ impl TerminalPane {
         }
     }
 
+    /// Swaps the native surface for a still image so GPUI can draw over it, or back.
+    pub fn set_frozen(&mut self, frozen: bool, cx: &mut Context<Self>) {
+        let Some(terminal) = &self.terminal else {
+            return;
+        };
+        self.frozen = None;
+        if frozen {
+            match terminal.update(cx, |terminal, _| terminal.snapshot()) {
+                Ok(image) => self.frozen = Some(image),
+                Err(error) => eprintln!("bareframe: {error}"),
+            }
+        }
+        terminal.update(cx, |terminal, _| terminal.set_visible(!frozen));
+        cx.notify();
+    }
+
     pub fn apply_theme(&self, theme: &TerminalTheme, cx: &mut Context<Self>) {
         if let Some(terminal) = &self.terminal
             && let Err(error) = terminal.update(cx, |terminal, _| terminal.apply_theme(theme))
@@ -153,9 +176,13 @@ impl Render for TerminalPane {
         };
         div()
             .track_focus(&self.focus)
+            .relative()
             .size_full()
             .min_h_0()
             .children(self.terminal.clone())
+            .when_some(self.frozen.clone(), |this, image| {
+                this.child(img(image).absolute().inset_0().size_full())
+            })
             .when_some(error, |this, error| {
                 this.p_4()
                     .font_family(theme::UI_FONT)

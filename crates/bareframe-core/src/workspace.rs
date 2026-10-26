@@ -193,6 +193,8 @@ pub struct Tab {
     pub title: Option<String>,
     /// Only meaningful outside a group; a grouped tab follows its group's pin.
     pub pinned: bool,
+    /// The active pane fills the tab; any layout change ends it, as in Warp.
+    pub maximized: bool,
 }
 
 impl Tab {
@@ -205,6 +207,7 @@ impl Tab {
             selected: false,
             title: None,
             pinned: false,
+            maximized: false,
         }
     }
 
@@ -391,6 +394,7 @@ impl Workspace {
         let split = tab.layout.split(tab.active_pane, axis, pane);
         debug_assert!(split, "active pane belongs to the active tab");
         tab.active_pane = pane;
+        tab.maximized = false;
         pane
     }
 
@@ -398,6 +402,7 @@ impl Workspace {
         let index = self.tab_of(pane)?;
         let tab = &mut self.tabs[index];
         if let Some(nearest) = tab.layout.remove(pane) {
+            tab.maximized = false;
             if tab.active_pane == pane {
                 tab.active_pane = nearest;
             }
@@ -669,15 +674,25 @@ impl Workspace {
             return false;
         };
         self.active_tab = index;
-        self.tabs[index].active_pane = pane;
+        let tab = &mut self.tabs[index];
+        tab.maximized &= tab.active_pane == pane;
+        tab.active_pane = pane;
         true
+    }
+
+    /// Maximizing needs another pane to hide.
+    pub fn toggle_maximized(&mut self) {
+        let tab = &mut self.tabs[self.active_tab];
+        tab.maximized = !tab.maximized && tab.layout.panes().len() > 1;
     }
 
     pub fn focus_direction(&mut self, direction: Direction) -> bool {
         let Some(pane) = self.active().neighbor(direction) else {
             return false;
         };
-        self.tabs[self.active_tab].active_pane = pane;
+        let tab = &mut self.tabs[self.active_tab];
+        tab.active_pane = pane;
+        tab.maximized = false;
         true
     }
 
@@ -711,6 +726,29 @@ mod tests {
         assert_eq!(ws.close(first), Some(Closed::Replaced(PaneId(5))));
         assert_eq!(ws.active().layout, Layout::Pane(PaneId(5)));
         assert_eq!(ws.close(PaneId(99)), None);
+    }
+
+    #[test]
+    fn maximize_ends_on_any_layout_or_focus_change() {
+        let (mut ws, first) = Workspace::new();
+        ws.toggle_maximized();
+        assert!(!ws.active().maximized, "a lone pane has nothing to hide");
+        let right = ws.split(Axis::Horizontal);
+        ws.toggle_maximized();
+        assert!(ws.active().maximized);
+        ws.focus(right);
+        assert!(ws.active().maximized, "refocusing the same pane keeps it");
+        ws.focus(first);
+        assert!(!ws.active().maximized);
+        ws.toggle_maximized();
+        assert!(ws.focus_direction(Direction::Right));
+        assert!(!ws.active().maximized);
+        ws.toggle_maximized();
+        ws.split(Axis::Vertical);
+        assert!(!ws.active().maximized);
+        ws.toggle_maximized();
+        ws.close(first);
+        assert!(!ws.active().maximized);
     }
 
     #[test]

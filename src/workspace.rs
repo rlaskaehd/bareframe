@@ -71,10 +71,13 @@ enum MenuAction {
     Ungroup(GroupId),
     CloseGroup(GroupId),
     ToggleGroup(GroupId),
+    ToggleMaximize,
+    Split(Axis),
 }
 
 struct ContextMenu {
     position: Point<Pixels>,
+    /// A tab in a label separates the right-aligned shortcut.
     items: Vec<(String, MenuAction)>,
 }
 
@@ -100,6 +103,8 @@ pub struct WorkspaceView {
     sidebar_width: f32,
     resizing_sidebar: bool,
     menu: Option<ContextMenu>,
+    /// The shown surfaces are swapped for snapshots while a pane menu covers them.
+    frozen: bool,
     renaming: Option<(RenameTarget, Entity<RenameInput>, Subscription)>,
     focus: FocusHandle,
     _quit: Subscription,
@@ -126,6 +131,7 @@ impl WorkspaceView {
             sidebar_width: SIDEBAR_DEFAULT_WIDTH,
             resizing_sidebar: false,
             menu: None,
+            frozen: false,
             renaming: None,
             focus: cx.focus_handle(),
             _quit: cx.on_app_quit(|view, cx| {
@@ -181,9 +187,39 @@ impl WorkspaceView {
             .unwrap_or_else(|| self.config.cwd.clone())
     }
 
+    /// The active tab's panes on screen: only the active one while maximized.
+    fn shown_panes(&self) -> Vec<PaneId> {
+        let tab = self.model.active();
+        if tab.maximized {
+            vec![tab.active_pane]
+        } else {
+            tab.layout.panes()
+        }
+    }
+
+    fn set_frozen(&mut self, frozen: bool, cx: &mut Context<Self>) {
+        self.frozen = frozen;
+        for id in self.shown_panes() {
+            if let Some((pane, _)) = self.panes.get(&id) {
+                pane.update(cx, |pane, cx| pane.set_frozen(frozen, cx));
+            }
+        }
+    }
+
+    fn dismiss_menu(&mut self, cx: &mut Context<Self>) {
+        self.menu = None;
+        if self.frozen {
+            self.set_frozen(false, cx);
+        }
+        cx.notify();
+    }
+
     /// Shows only the active tab's surfaces and gives the active pane keyboard focus.
     fn sync(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let visible: Vec<PaneId> = self.model.active().layout.panes();
+        if self.frozen {
+            self.dismiss_menu(cx);
+        }
+        let visible = self.shown_panes();
         for (id, (pane, _)) in &self.panes {
             let shown = visible.contains(id);
             pane.update(cx, |pane, cx| pane.set_visible(shown, cx));
@@ -592,7 +628,7 @@ impl WorkspaceView {
             cx.notify();
             return;
         }
-        self.menu = None;
+        self.dismiss_menu(cx);
         match action {
             MenuAction::Rename(target) => return self.start_rename(target, window, cx),
             MenuAction::NewGroup(tabs) => {
@@ -612,8 +648,45 @@ impl WorkspaceView {
             }
             MenuAction::CloseGroup(group) => self.close_group(group, window, cx),
             MenuAction::ToggleGroup(group) => self.model.toggle_group(group),
+            MenuAction::ToggleMaximize => self.model.toggle_maximized(),
+            MenuAction::Split(axis) => return self.split(axis, window, cx),
         }
         self.sync(window, cx);
+    }
+
+    /// The pane header's overflow menu, opened below its button like Warp's.
+    fn open_pane_menu(
+        &mut self,
+        id: PaneId,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.model.focus(id) {
+            self.sync(window, cx);
+        }
+        let maximize = if self.model.active().maximized {
+            "Minimize pane\t⇧⌘↵"
+        } else {
+            "Maximize pane\t⇧⌘↵"
+        };
+        self.menu = Some(ContextMenu {
+            position: gpui::point(position.x - px(MENU_WIDTH - 12.0), position.y + px(12.0)),
+            items: vec![
+                (
+                    "Split pane right\t⌘D".into(),
+                    MenuAction::Split(Axis::Horizontal),
+                ),
+                (
+                    "Split pane down\t⇧⌘D".into(),
+                    MenuAction::Split(Axis::Vertical),
+                ),
+                (maximize.into(), MenuAction::ToggleMaximize),
+            ],
+        });
+        // The menu hangs over the terminals, which native surfaces would otherwise cover.
+        self.set_frozen(true, cx);
+        cx.notify();
     }
 
     fn render_menu(&self, menu: &ContextMenu, cx: &mut Context<Self>) -> impl IntoElement {
@@ -624,18 +697,21 @@ impl WorkspaceView {
             .enumerate()
             .map(|(index, (label, action))| {
                 let action = action.clone();
+                let (label, shortcut) = label.split_once('\t').unwrap_or((label, ""));
                 div()
                     .id(("menu-item", index))
+                    .flex()
+                    .gap_2()
                     .px_2()
                     .py(px(5.0))
                     .mx_1()
                     .rounded_sm()
-                    .truncate()
                     .hover(|style| style.bg(hsla(theme.accent)).text_color(hsla(theme.chrome)))
                     .on_click(cx.listener(move |view, _, window, cx| {
                         view.run_menu_action(action.clone(), window, cx)
                     }))
-                    .child(label.clone())
+                    .child(div().flex_1().min_w_0().truncate().child(label.to_owned()))
+                    .child(div().opacity(0.6).child(shortcut.to_owned()))
             });
         deferred(
             anchored().position(menu.position).snap_to_window().child(
@@ -655,10 +731,7 @@ impl WorkspaceView {
                     .font_family(theme::UI_FONT)
                     .text_size(px(12.5))
                     .text_color(hsla(theme.text))
-                    .on_mouse_down_out(cx.listener(|view, _, _, cx| {
-                        view.menu = None;
-                        cx.notify()
-                    }))
+                    .on_mouse_down_out(cx.listener(|view, _, _, cx| view.dismiss_menu(cx)))
                     .children(items),
             ),
         )
@@ -1005,6 +1078,7 @@ impl WorkspaceView {
             })
             .child(match self.rename_field(RenameTarget::Tab(tab.id)) {
                 Some(field) => field,
+                None if tab.layout.panes().len() > 1 => self.render_pane_rows(tab, active, cx),
                 None => div()
                     .flex_1()
                     .min_w_0()
@@ -1038,6 +1112,129 @@ impl WorkspaceView {
             .into_any_element()
     }
 
+    /// Shown once a tab is split, as in Warp: the title, a menu and a close button, with a
+    /// corner mark on the focused pane.
+    fn render_pane_header(&self, id: PaneId, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.theme();
+        let active = id == self.model.active_pane();
+        let title = self
+            .panes
+            .get(&id)
+            .map_or_else(String::new, |(pane, _)| pane.read(cx).title());
+        let key = id.0 as usize;
+        div()
+            .relative()
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
+            .h(px(28.0))
+            .px(px(56.0))
+            .border_b_1()
+            .border_color(hsla(theme.border))
+            .font_family(theme::UI_FONT)
+            .text_size(px(12.0))
+            .text_color(hsla(if active { theme.text } else { theme.text_muted }))
+            .when(active, |this| {
+                this.child(
+                    gpui::svg()
+                        .path("icons/corner.svg")
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .size(px(10.0))
+                        .text_color(hsla(theme.accent)),
+                )
+            })
+            .child(div().min_w_0().truncate().child(title))
+            .child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .right(px(6.0))
+                    .h_full()
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .child(
+                        icon_button(("pane-menu", key), "⋮", theme).on_click(cx.listener(
+                            move |view, event: &gpui::ClickEvent, window, cx| {
+                                cx.stop_propagation();
+                                view.open_pane_menu(id, event.position(), window, cx)
+                            },
+                        )),
+                    )
+                    .child(
+                        icon_button(("pane-close", key), "×", theme).on_click(cx.listener(
+                            move |view, _, window, cx| {
+                                cx.stop_propagation();
+                                view.close_pane(id, window, cx)
+                            },
+                        )),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    /// A split tab lists its panes, as Warp's vertical tabs do; clicking one focuses it.
+    /// A plain click also bubbles to the tab row, which selects the tab.
+    fn render_pane_rows(&self, tab: &Tab, active: bool, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.theme();
+        let rows = tab.layout.panes().into_iter().map(|id| {
+            let focused = active && id == tab.active_pane;
+            let (title, path) = self
+                .panes
+                .get(&id)
+                .map_or_else(Default::default, |(pane, _)| {
+                    let pane = pane.read(cx);
+                    (pane.title(), pane.display_cwd())
+                });
+            let overlay = hsla(theme.text);
+            div()
+                .id(("pane-row", id.0 as usize))
+                .flex()
+                .flex_col()
+                .px(px(6.0))
+                .py(px(3.0))
+                .rounded_md()
+                .text_color(hsla(if focused {
+                    theme.text
+                } else {
+                    theme.text_muted
+                }))
+                .when(focused, |this| this.bg(overlay.opacity(0.08)))
+                .hover(|style| style.bg(overlay.opacity(0.05)))
+                .on_click(cx.listener(move |view, event: &gpui::ClickEvent, _, _| {
+                    let modifiers = event.modifiers();
+                    if !modifiers.shift && !modifiers.platform {
+                        view.model.focus(id);
+                    }
+                }))
+                .child(div().truncate().child(title.clone()))
+                .when(path != title, |this| {
+                    this.child(div().truncate().text_size(px(11.0)).child(path))
+                })
+        });
+        div()
+            .flex_1()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .gap(px(1.0))
+            .when_some(tab.title.clone(), |this, title| {
+                this.child(
+                    div()
+                        .truncate()
+                        .px(px(6.0))
+                        .text_size(px(11.0))
+                        .text_color(hsla(theme.text_muted))
+                        .child(title),
+                )
+            })
+            .children(rows)
+            .into_any_element()
+    }
+
     fn render_layout(
         &self,
         layout: &Layout,
@@ -1048,20 +1245,14 @@ impl WorkspaceView {
         match layout {
             Layout::Pane(id) => {
                 let id = *id;
-                let active =
-                    id == self.model.active_pane() && self.model.active().layout.panes().len() > 1;
+                let split = self.model.active().layout.panes().len() > 1;
+                let pane = self.panes.get(&id).map(|(pane, _)| pane.clone());
                 div()
                     .size_full()
                     .min_w_0()
                     .min_h_0()
-                    // Breathing room around the text; the surface can't be padded from GPUI.
-                    .p(px(6.0))
-                    .border_1()
-                    .border_color(hsla(if active {
-                        theme.accent
-                    } else {
-                        theme.terminal_background
-                    }))
+                    .flex()
+                    .flex_col()
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |view, _, window, cx| {
@@ -1070,7 +1261,16 @@ impl WorkspaceView {
                             }
                         }),
                     )
-                    .children(self.panes.get(&id).map(|(pane, _)| pane.clone()))
+                    .when(split, |this| this.child(self.render_pane_header(id, cx)))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .min_h_0()
+                            // Breathing room around the text; the surface can't be padded from GPUI.
+                            .p(px(6.0))
+                            .children(pane),
+                    )
                     .into_any_element()
             }
             Layout::Split {
@@ -1170,7 +1370,12 @@ impl Render for WorkspaceView {
             .get(&self.model.active_pane())
             .map_or_else(String::new, |(pane, _)| pane.read(cx).title());
         window.set_window_title(&format!("{title} — {}", app::name()));
-        let layout = self.model.active().layout.clone();
+        let tab = self.model.active();
+        let layout = if tab.maximized {
+            Layout::Pane(tab.active_pane)
+        } else {
+            tab.layout.clone()
+        };
         let content = self.render_layout(&layout, &mut Vec::new(), cx);
         div()
             .track_focus(&self.focus)
@@ -1233,6 +1438,10 @@ impl Render for WorkspaceView {
                     view.split(Axis::Vertical, window, cx)
                 }),
             )
+            .on_action(cx.listener(|view, _: &ToggleMaximizePane, window, cx| {
+                view.model.toggle_maximized();
+                view.sync(window, cx)
+            }))
             .on_action(cx.listener(|view, _: &FocusLeft, w, cx| {
                 view.focus_direction(Direction::Left, w, cx)
             }))

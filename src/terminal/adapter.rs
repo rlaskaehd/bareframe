@@ -177,6 +177,14 @@ impl GhosttyAdapter {
         }
     }
 
+    /// The last drawn frame, for showing GPUI popups where the surface would cover them.
+    pub fn snapshot(&mut self) -> Result<std::sync::Arc<gpui::RenderImage>, String> {
+        let surface = self.surface.as_mut().ok_or("terminal has no surface")?;
+        Ok(std::sync::Arc::new(gpui::RenderImage::new([
+            surface.snapshot_frame()?
+        ])))
+    }
+
     pub fn apply_theme(&mut self, theme: &TerminalTheme) -> Result<(), String> {
         match &mut self.surface {
             Some(surface) => self.theme_state.apply(surface, theme),
