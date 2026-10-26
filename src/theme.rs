@@ -71,8 +71,13 @@ impl Theme {
             color(self.terminal_foreground),
             self.palette.map(color),
         );
-        theme.font_family = settings.font_family.clone();
-        theme.font_size = Some(settings.font_size);
+        theme.font_family = settings.font_family().map(str::to_owned);
+        theme.font_size = Some(settings.font_size());
+        theme.extra = settings
+            .ghostty_lines()
+            .into_iter()
+            .map(|(key, value)| (key.to_owned(), value))
+            .collect();
         theme
     }
 }

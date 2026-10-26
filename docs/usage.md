@@ -90,22 +90,39 @@ MVP 1의 셸 실행 모드는 zsh를 기준으로 한다. 다른 셸을 지정�
 - Pane 경계를 끌어 크기를 조절한다. 클릭한 Pane이 활성 Pane이 된다.
 - Pane이 둘 이상이면 각 Pane 위에 헤더가 붙는다. 가운데에 제목, 오른쪽에 `⋮`(오른쪽/아래 분할, 최대화) 메뉴와 `×`(Pane 닫기)가 있고, 활성 Pane은 헤더 왼쪽 위에 파란 삼각형이 표시된다.
 
-## 테마와 폰트
+## Settings
+
+상단 바 오른쪽 톱니 버튼이나 `Cmd+,`로 Settings 탭을 연다. 왼쪽에 검색(모든 섹션의 항목 이름·설명에서 찾음)과 섹션 목록, 아래에 `Open settings file`이 있다.
+
+| 섹션 | 항목 |
+| --- | --- |
+| Appearance — Themes | 테마: Dark / Light / Sync with OS(시스템 밝기 모드를 따름) |
+| Appearance — Text | 터미널 폰트, 크기, 굵기(폰트에 그 이름의 스타일이 있을 때), 줄 높이 조정(%), 획 굵게, 최소 대비, 합자 |
+| Appearance — Cursor | 커서 모양(Block / Bar / Underline), 깜박임 |
+| Appearance — Panes | 터미널 안쪽 여백(px) |
+| Appearance — Tabs | 새 탭에 현재 탭 색 유지 |
+| Appearance — Tools panel | Project explorer, Global search 표시(둘 다 끄면 렌치 버튼도 숨김) |
+| Features — General | 시작 시 창·탭·Pane 복원, 마우스 휠 스크롤 배율 |
+| Features — Session | 새 세션의 셸(존재하는 절대 경로일 때), 새 세션의 작업 디렉터리(이전 세션 / 홈), 새 탭 위치(현재 탭 뒤 / 맨 끝) |
+| Features — Keys | 왼쪽·오른쪽 Option을 Meta로 |
+| Features — Terminal | 마우스 리포팅, 선택 시 복사, 더블클릭 단어 경계 문자, 클립보드 접근(OSC 52: Deny / Ask / Allow, 기본 Deny. Ask는 확인 창이 생길 때까지 거부) |
+| About | 버전과 라이선스 |
+
+- 화면에서 바꾼 값은 바로 적용되고 설정 파일에 그 줄만 고쳐 쓴다(주석과 다른 줄은 그대로, 기본값으로 돌리면 그 줄을 지움).
+- 설정 파일 `~/.config/bareframe/config`(`$XDG_CONFIG_HOME`이 절대 경로면 그 아래)는 Ghostty처럼 `key = value` 형식이다. 직접 고쳐도 저장하는 순간 다시 읽어 적용한다. 잘못된 줄은 기본값을 쓰고 표준 에러에 경고만 출력한다.
+- 터미널 항목은 Ghostty 설정으로 바뀌어 모든 Pane에 적용된다(예: `cursor-style = bar`, `terminal-padding = 8`은 `window-padding-x/y = 8`).
+
+```text
+theme = dark          # dark | light | system
+font-family = Menlo   # 생략하면 Ghostty 기본 폰트
+font-size = 13        # 6–72
+cursor-style = bar    # block | bar | underline
+```
 
 | 키 / 메뉴 | 동작 |
 | --- | --- |
-| View > Dark Theme / Light Theme | 모든 Pane의 터미널 색상과 사이드바를 함께 전환 |
-| `Cmd+=` / `Cmd+-` / `Cmd+0` | 모든 Pane의 폰트 크기 1pt 키우기 / 줄이기 / 설정 파일 값으로 되돌리기 |
-
-설정 파일 `~/.config/bareframe/config`(`$XDG_CONFIG_HOME`이 절대 경로면 그 아래)에서 기본값을 정한다.
-
-```text
-theme = dark          # dark | light
-font-family = Menlo   # 생략하면 Ghostty 기본 폰트
-font-size = 13        # 6–72
-```
-
-잘못된 줄은 기본값을 쓰고 표준 에러에 경고만 출력한다. 메뉴와 단축키로 바꾼 값은 실행 중에만 유지된다.
+| View > Dark Theme / Light Theme | 테마를 바꾸고 설정 파일에 저장 |
+| `Cmd+=` / `Cmd+-` / `Cmd+0` | 모든 Pane의 폰트 크기 1pt 키우기 / 줄이기 / 설정 값으로 되돌리기(실행 중에만 유지) |
 
 ## 그 밖의 단축키와 종료
 

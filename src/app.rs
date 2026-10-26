@@ -134,29 +134,55 @@ pub fn home_dir() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
 }
 
-/// The validation instance ignores the user's file so results are reproducible.
-fn load_settings() -> Settings {
+/// The settings file; the validation instance keeps its own so results are reproducible.
+pub fn config_file() -> Option<PathBuf> {
     if is_validation_instance() {
-        return Settings::default();
+        return Some(PathBuf::from(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/target/validation/config"
+        )));
     }
-    let Some(home) = home_dir() else {
-        return Settings::default();
-    };
     let xdg = std::env::var_os("XDG_CONFIG_HOME");
-    let path = config_path(xdg.as_deref().map(Path::new), &home);
+    Some(config_path(xdg.as_deref().map(Path::new), &home_dir()?))
+}
+
+/// The file's text and the settings it holds; a missing file gives the defaults.
+pub fn load_settings() -> (Settings, String) {
+    let Some(path) = config_file() else {
+        return (Settings::default(), String::new());
+    };
     let text = match std::fs::read_to_string(&path) {
         Ok(text) => text,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Settings::default(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(error) => {
             eprintln!("bareframe: {}: {error}", path.display());
-            return Settings::default();
+            String::new()
         }
     };
     let (settings, warnings) = Settings::parse(&text);
     for warning in warnings {
         eprintln!("bareframe: {}: {warning}", path.display());
     }
-    settings
+    (settings, text)
+}
+
+/// Rewrites one key in the settings file, keeping the user's comments and other lines.
+/// Returns the new text so the file watcher can tell this write from an outside edit.
+pub fn save_setting(key: &str, value: &str, default: &str) -> Result<String, String> {
+    let path = config_file().ok_or("no home directory")?;
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(format!("{}: {error}", path.display())),
+    };
+    let text = bareframe_core::settings::write_value(&text, key, value, default);
+    let temporary = path.with_extension("tmp");
+    path.parent()
+        .map_or(Ok(()), std::fs::create_dir_all)
+        .and_then(|()| std::fs::write(&temporary, &text))
+        .and_then(|()| std::fs::rename(&temporary, &path))
+        .map_err(|error| format!("{}: {error}", path.display()))?;
+    Ok(text)
 }
 
 /// Where the window layout is saved; the validation instance keeps its own.
@@ -188,8 +214,10 @@ fn load_state() -> Option<SavedState> {
 }
 
 pub fn run(config: LaunchConfig, restore: bool) {
-    let settings = load_settings();
-    let saved = restore.then(load_state).flatten();
+    let (settings, config_text) = load_settings();
+    let saved = (restore && settings.flag("restore-state"))
+        .then(load_state)
+        .flatten();
     gpui_platform::application()
         .with_assets(Assets)
         .run(move |cx: &mut App| {
@@ -302,7 +330,9 @@ pub fn run(config: LaunchConfig, restore: bool) {
                     ..Default::default()
                 },
                 move |window, cx| {
-                    let view = cx.new(|cx| WorkspaceView::new(config, settings, saved, window, cx));
+                    let view = cx.new(|cx| {
+                        WorkspaceView::new(config, settings, config_text, saved, window, cx)
+                    });
                     let weak = view.downgrade();
                     window.on_window_should_close(cx, move |_, cx| {
                         if let Err(error) = weak.update(cx, |view, cx| view.shutdown(cx)) {

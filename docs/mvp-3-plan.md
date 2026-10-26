@@ -114,6 +114,12 @@ Warp 화면: 상단 바 오른쪽 끝 톱니 아이콘(`Cmd+,`). Settings는 별
 - 저장: 지금의 `~/.config/bareframe/config`(Ghostty식 `key = value`)를 그대로 쓴다. Settings에서 바꾸면 해당 줄만 고쳐 쓰고(주석·순서 유지), 파일이 바뀌면 다시 읽는다. `Open settings file`은 이 파일을 기본 편집기로 연다(3b부터 내장 편집기).
 - 터미널에 적용되는 값은 지금처럼 Ghostty 설정을 다시 만들어 모든 surface에 적용한다. libghostty가 재적용을 지원하지 않는 항목은 "새 세션부터 적용"으로 표시한다.
 
+**3a-4 구현 결과(2026-10-27)**: 위 표 중 아래 항목은 넣었다. 테마(Sync with OS 포함), 텍스트(폰트·크기·굵기·줄 높이·획 굵게·최소 대비·합자), 커서, 터미널 여백, 새 탭 색 유지, Tools panel 도구 표시, 시작 시 복원, 휠 배율, 새 세션 셸·작업 디렉터리·새 탭 위치, Option as Meta, 마우스 리포팅, 선택 시 복사, 단어 경계 문자, 클립보드 접근, About.
+남은 항목과 이유:
+- 창 불투명도·블러, UI 확대: GPUI 창 배경 투명화와 모든 색의 알파 처리, rem 기반 크기가 필요하다.
+- 비활성 Pane 흐리게, 마우스를 따라 포커스: Ghostty의 해당 설정은 앱 계층(macOS·GTK)에서 처리해 임베드에서는 동작하지 않는다. 네이티브 뷰 투명도와 마우스 추적을 직접 구현해야 한다.
+- 종료 전 경고, 마지막 창을 닫으면 종료(끄기), 로그인 시 시작, 데스크톱 알림, 경고음, 새 창 크기 지정, 탭 표시기·닫기 버튼 위치, 디렉터리별 탭 색: 각각 별도 기능(확인 창, 창 다시 열기, 로그인 항목, 알림 권한 등)이 필요해 후속 작업으로 둔다.
+
 ### A5. Keyboard shortcuts
 
 Warp 화면: `Configure keyboard shortcuts` 제목, `Search by name or by keys` 검색, 동작 이름과 키 캡 목록. 충돌하는 키는 주황 테두리로 표시. 행을 누르면 `Press new keyboard shortcut` 줄과 `Clear`·`Default`·`Cancel`·`Save` 버튼이 펼쳐진다.

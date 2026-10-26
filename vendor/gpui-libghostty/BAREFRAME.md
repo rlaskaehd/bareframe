@@ -22,6 +22,9 @@ Local changes are limited to macOS embedding:
   every surface at spawn and through `TerminalThemeState::apply`. A family name
   containing a newline is dropped rather than allowed to start another key.
   The struct is no longer `Copy`/`Eq` because of these fields.
+- `TerminalTheme::extra` carries further Ghostty `key = value` lines (cursor, padding,
+  clipboard and other settings from the app's Settings screen), written after the font.
+  A key or value with a control character, or a key containing `=`, is dropped.
 
 The application implements the GPUI view and text input handler in
 `src/terminal/adapter.rs`. The upstream GPUI macro is retained for provenance but

@@ -22,7 +22,25 @@ pub(super) enum Tool {
 }
 
 impl WorkspaceView {
+    /// Settings › Tools panel can switch each tool off.
+    fn tool_enabled(&self, tool: Tool) -> bool {
+        self.settings.flag(match tool {
+            Tool::Explorer => "project-explorer",
+            Tool::Search => "global-search",
+        })
+    }
+
+    /// The tool on show: the chosen one if enabled, else any enabled one.
+    pub(super) fn shown_tool(&self) -> Option<Tool> {
+        [self.tool, Tool::Explorer, Tool::Search]
+            .into_iter()
+            .find(|tool| self.tool_enabled(*tool))
+    }
+
     pub(super) fn toggle_tools(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.tools_open && self.shown_tool().is_none() {
+            return;
+        }
         self.tools_open = !self.tools_open;
         self.explorer
             .update(cx, |explorer, cx| explorer.set_active(self.tools_open, cx));
@@ -45,6 +63,9 @@ impl WorkspaceView {
     }
 
     pub(super) fn open_tool(&mut self, tool: Tool, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.tool_enabled(tool) {
+            return;
+        }
         self.tool = tool;
         if self.tools_open {
             self.focus_tool(window, cx);
@@ -55,7 +76,7 @@ impl WorkspaceView {
     }
 
     fn focus_tool(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        match self.tool {
+        match self.shown_tool().unwrap_or(self.tool) {
             Tool::Explorer => self
                 .explorer
                 .update(cx, |explorer, cx| explorer.focus(window, cx)),

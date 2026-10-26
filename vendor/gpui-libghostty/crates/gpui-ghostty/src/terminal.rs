@@ -39,6 +39,9 @@ pub struct TerminalTheme {
     /// Ghostty's built-in font is used when absent.
     pub font_family: Option<String>,
     pub font_size: Option<f32>,
+    /// Further Ghostty `key = value` lines, written after the colors and font. A line
+    /// whose key or value holds a control character is dropped.
+    pub extra: Vec<(String, String)>,
 }
 
 impl TerminalTheme {
@@ -53,6 +56,7 @@ impl TerminalTheme {
             palette,
             font_family: None,
             font_size: None,
+            extra: Vec::new(),
         }
     }
 }
@@ -114,6 +118,12 @@ fn theme_config_contents(theme: &TerminalTheme) -> String {
     }
     if let Some(size) = theme.font_size {
         contents.push_str(&format!("font-size = {size}\n"));
+    }
+    for (key, value) in &theme.extra {
+        let clean = |text: &str| !text.chars().any(char::is_control);
+        if clean(key) && clean(value) && !key.contains('=') {
+            contents.push_str(&format!("{key} = {value}\n"));
+        }
     }
     contents
 }
@@ -846,6 +856,21 @@ mod tests {
 
         theme.font_family = Some("Menlo\nbackground = #ff0000".into());
         assert!(!theme_config_contents(&theme).contains("font-family"));
+    }
+
+    #[test]
+    fn extra_lines_follow_the_font_and_cannot_inject_keys() {
+        let mut theme = theme(TerminalColor::new(0, 0, 0), TerminalColor::new(1, 1, 1));
+        theme.extra = vec![
+            ("cursor-style".into(), "bar".into()),
+            ("font-feature".into(), "-calt".into()),
+            ("cursor-style-blink".into(), "false\nbackground = #ff0000".into()),
+            ("background = #ff0000\nx".into(), "1".into()),
+            ("a=b".into(), "1".into()),
+        ];
+        let config = theme_config_contents(&theme);
+        assert!(config.ends_with("cursor-style = bar\nfont-feature = -calt\n"));
+        assert!(!config.contains("#ff0000"));
     }
 
     #[test]

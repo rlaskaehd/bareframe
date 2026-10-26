@@ -24,6 +24,7 @@ use std::collections::HashMap;
 
 mod layout;
 mod menu;
+mod prefs;
 mod sidebar;
 mod tools;
 
@@ -133,18 +134,29 @@ pub struct WorkspaceView {
     focus: FocusHandle,
     _quit: Subscription,
     _autosave: gpui::Task<()>,
+    /// The settings file's text as last read or written, to skip our own writes on reload.
+    config_text: String,
+    dark_appearance: bool,
+    _appearance: Subscription,
+    _config_watch: Option<(notify::RecommendedWatcher, gpui::Task<()>)>,
 }
 
 impl WorkspaceView {
     pub fn new(
         config: LaunchConfig,
         settings: Settings,
+        config_text: String,
         saved: Option<SavedState>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let (model, first) = Workspace::new();
-        let theme = Theme::get(settings.theme);
+        let dark_appearance = prefs::is_dark(window.appearance());
+        let theme = Theme::get(settings.theme().unwrap_or(if dark_appearance {
+            ThemeName::Dark
+        } else {
+            ThemeName::Light
+        }));
         let explorer = cx.new(|cx| Explorer::new(theme, cx));
         let explorer_events = cx.subscribe_in(&explorer, window, |view, _, event, window, cx| {
             view.on_explorer_event(event, window, cx)
@@ -157,7 +169,7 @@ impl WorkspaceView {
         let mut view = Self {
             model,
             panes: HashMap::new(),
-            base_font_size: settings.font_size,
+            base_font_size: settings.font_size(),
             settings,
             config,
             resize: None,
@@ -190,6 +202,13 @@ impl WorkspaceView {
             }),
             // ponytail: compares the encoded layout every 2s instead of tracking each
             // change; switch to change notifications if the layout ever gets large.
+            config_text,
+            dark_appearance,
+            _appearance: cx.observe_window_appearance(window, |view, window, cx| {
+                view.dark_appearance = prefs::is_dark(window.appearance());
+                view.apply_settings(cx);
+            }),
+            _config_watch: None,
             _autosave: cx.spawn(async move |view, cx| {
                 loop {
                     cx.background_executor()
@@ -208,6 +227,7 @@ impl WorkspaceView {
                 view.open_pane(first, cwd, window, cx);
             }
         }
+        view.watch_config(cx);
         view.sync(window, cx);
         view
     }
@@ -228,11 +248,7 @@ impl WorkspaceView {
         let panes: Vec<PaneId> = self.model.panes().collect();
         for id in panes {
             match kinds.get(&id) {
-                Some(SavedPane::Settings) => {
-                    let theme = self.theme();
-                    let pane = cx.new(|cx| SettingsPane::new(theme, cx));
-                    self.panes.insert(id, (PaneView::Settings(pane), None));
-                }
+                Some(SavedPane::Settings) => self.insert_settings_pane(id, window, cx),
                 kind => {
                     let cwd = match kind {
                         Some(SavedPane::Terminal { cwd }) if cwd.is_dir() => cwd.clone(),
@@ -293,10 +309,6 @@ impl WorkspaceView {
         }
     }
 
-    fn theme(&self) -> &'static Theme {
-        Theme::get(self.settings.theme)
-    }
-
     fn terminal_theme(&self) -> TerminalTheme {
         self.theme().terminal(&self.settings)
     }
@@ -308,10 +320,15 @@ impl WorkspaceView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let config = LaunchConfig {
+        let mut config = LaunchConfig {
             cwd,
             ..self.config.clone()
         };
+        // Settings › Default shell, if it names an existing file; else the launch shell.
+        let shell = std::path::Path::new(self.settings.get("shell"));
+        if shell.is_absolute() && shell.is_file() {
+            config.shell = shell.to_path_buf();
+        }
         let theme = self.terminal_theme();
         let pane = cx.new(|cx| TerminalPane::new(id, config, &theme, window, cx));
         let subscription =
@@ -347,29 +364,6 @@ impl WorkspaceView {
     fn pane_title(&self, id: PaneId, cx: &Context<Self>) -> String {
         self.pane(id)
             .map_or_else(String::new, |pane| pane.title(cx))
-    }
-
-    /// Warp keeps one Settings tab per window: open it, or go back to it.
-    fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let existing = self
-            .panes
-            .iter()
-            .find(|(_, (pane, _))| matches!(pane, PaneView::Settings(_)))
-            .map(|(id, _)| *id);
-        if let Some(id) = existing {
-            self.model.focus(id);
-        } else {
-            let id = self.model.new_tab();
-            // Settings belongs to the window, not to the group the user happened to be in.
-            if self.model.active().group.is_some() {
-                let tab = self.model.active_tab;
-                self.model.remove_from_group(&[tab]);
-            }
-            let theme = self.theme();
-            let pane = cx.new(|cx| SettingsPane::new(theme, cx));
-            self.panes.insert(id, (PaneView::Settings(pane), None));
-        }
-        self.sync(window, cx);
     }
 
     /// The active pane's cwd comes from OSC 7, which any local program's output can send
@@ -419,8 +413,21 @@ impl WorkspaceView {
     }
 
     fn new_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let cwd = self.active_cwd(cx);
+        let cwd = match self.settings.get("working-directory") {
+            "home" => app::home_dir().unwrap_or_else(|| self.config.cwd.clone()),
+            _ => self.active_cwd(cx),
+        };
+        let color = self.model.active().color;
         let pane = self.model.new_tab();
+        if self.settings.flag("preserve-tab-color") {
+            let index = self.model.active_tab;
+            self.model.set_tab_color(index, color);
+        }
+        if self.settings.get("new-tab-position") == "end" {
+            let (index, end) = (self.model.active_tab, self.model.tabs.len());
+            let group = self.model.active().group;
+            self.model.move_tabs(&[index], end, group);
+        }
         self.open_pane(pane, cwd, window, cx);
         self.sync(window, cx);
     }
@@ -496,7 +503,10 @@ impl WorkspaceView {
                 PaneView::Terminal(pane) => {
                     pane.update(cx, |pane, cx| pane.apply_theme(&theme, cx))
                 }
-                PaneView::Settings(pane) => pane.update(cx, |pane, cx| pane.set_theme(ui, cx)),
+                PaneView::Settings(pane) => pane.update(cx, |pane, cx| {
+                    pane.set_theme(ui, cx);
+                    pane.set_settings(self.settings.clone(), cx);
+                }),
             }
         }
         self.explorer
@@ -507,8 +517,11 @@ impl WorkspaceView {
     }
 
     fn set_theme(&mut self, name: ThemeName, cx: &mut Context<Self>) {
-        self.settings.theme = name;
-        self.apply_settings(cx);
+        let value = match name {
+            ThemeName::Dark => "dark",
+            ThemeName::Light => "light",
+        };
+        self.set_setting("theme", value, cx);
     }
 
     fn step_font_size(&mut self, steps: f32, cx: &mut Context<Self>) {
@@ -624,6 +637,8 @@ impl WorkspaceView {
             .child(
                 div()
                     .id("toggle-tools")
+                    // Hidden when Settings has switched every tool off.
+                    .when(self.shown_tool().is_none(), |this| this.invisible())
                     .ml_1()
                     .flex()
                     .items_center()
@@ -820,7 +835,10 @@ impl Render for WorkspaceView {
                 cx.listener(|view, _: &DecreaseFontSize, _, cx| view.step_font_size(-1.0, cx)),
             )
             .on_action(cx.listener(|view, _: &ResetFontSize, _, cx| {
-                view.settings.font_size = view.base_font_size;
+                let base = view.base_font_size.to_string();
+                if let Err(error) = view.settings.set("font-size", &base) {
+                    eprintln!("bareframe: {error}");
+                }
                 view.apply_settings(cx)
             }))
             .on_action(
