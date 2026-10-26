@@ -56,9 +56,13 @@ ln -s ../../.cache .worktrees/worker/.cache
 ln -s ../../.tools .worktrees/worker/.tools
 ```
 
-- `.cache`(Cargo 캐시)와 `.tools`(Zig, htop, SSH fixture)는 루트의 것을 symlink로 공유한다.
-- `target/`은 worktree마다 따로 두므로, 각 worktree의 첫 `./script/bootstrap`은 전체 빌드를 한다.
+- `.cache`와 `.tools`(Zig, htop, SSH fixture)는 루트의 것을 symlink로 공유한다.
+  - `.cache`에는 Cargo 캐시와 Ghostty native·Zig 캐시가 들어 있다(`.cargo/config.toml`). native 캐시는 소스 해시를 키로 쓰고 파일 lock을 걸기 때문에, 같은 vendor 소스라면 다른 worktree가 libghostty를 다시 빌드하지 않는다.
+- `target/`은 worktree마다 따로 둔다. 각 worktree의 첫 `./script/bootstrap`은 Rust 쪽을 전부 빌드한다.
+- **세션은 프로젝트 루트에서 시작한다.** 권한 규칙(`.claude/settings.local.json`)은 추적하지 않는 파일이라 worktree에 없다. 세션은 루트에서 시작한 채로 `cd .worktrees/<역할>` 또는 `git -C`로 worktree를 다룬다.
 - Reviewer는 `.worktrees/review`에서 `git fetch origin && git switch --detach <head SHA>`로 리뷰할 커밋을 꺼낸다.
+- GUI 검증은 한 번에 한 세션만 한다. 번들 bundle id가 같으므로 번들은 `open <경로>`처럼 경로로 실행하고, 어느 worktree의 번들인지 확인한다.
+- `git stash`는 모든 worktree가 공유한다. 다른 역할의 stash를 pop하지 않는다.
 - 같은 브랜치를 두 worktree에서 동시에 체크아웃할 수 없다. Worker의 브랜치는 Worker worktree에서만 체크아웃한다.
 
 ## 커밋
