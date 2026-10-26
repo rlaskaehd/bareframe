@@ -39,6 +39,10 @@ impl WorkspaceView {
         if self.clipboard_prompt.is_some() {
             return self.answer(pane, false, cx);
         }
+        // Nothing may cover the prompt, or a click aimed at the palette or a menu could
+        // land on a button that was not visible.
+        self.palette = None;
+        self.menu = None;
         let focus = cx.focus_handle();
         focus.focus(window, cx);
         self.clipboard_prompt = Some(ClipboardPrompt {
