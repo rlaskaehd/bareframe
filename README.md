@@ -29,6 +29,7 @@ Rust 1.98.1은 `rust-toolchain.toml`로 선택하며 전역 기본 toolchain을 
 
 - `crates/bareframe-core`: GPUI에 의존하지 않는 세션·Pane 식별자, 상태, 이벤트, 설정, IME 조합 모델.
 - `src/workspace.rs`: Workspace 상태와 터미널 Pane의 수명 관리.
+- `src/workspace/`: 사이드바(`sidebar.rs`), 메뉴(`menu.rs`), 분할 레이아웃(`layout.rs`) 렌더.
 - `src/terminal/adapter.rs`: GPUI 입력과 Ghostty 연결. native 자원은 이 계층이 관리한다.
 - `vendor/gpui-libghostty`: 고정된 upstream 사본과 macOS 통합 수정.
 - `reference/`: 변경하지 않는 upstream 참조 자료.
