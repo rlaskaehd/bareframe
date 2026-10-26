@@ -53,6 +53,28 @@
 | 탭을 다른 탭 위에 놓기, 그룹 `+`·`×` | NOT_RUN | 같은 `move_tab`·`close_pane` 경로이며 모델 테스트로만 확인 |
 | 마지막 탭에서 `exit`, 탭 `×` | NOT_RUN | `Cmd+W`와 같은 `close_pane` 경로 |
 
+## 피드백 반영: home 시작, 탭 제목, 사이드바 조절, 상단 바
+
+방식은 레퍼런스를 따랐다.
+- Ghostty와 Warp 모두 탭 제목을 셸 hook이 보내는 제목 시퀀스로 만든다. 프롬프트에서는 `%~`, 실행 중에는 명령이다. 포그라운드 프로세스를 OS에서 조회하지 않는다.
+- 그래서 Ghostty의 zsh 통합을 Ghostty와 같은 `ZDOTDIR` 방식으로 불러온다.
+- Ghostty의 자동 주입은 resources dir과 `xterm-ghostty` terminfo가 필요하다. 그래서 `ZDOTDIR`은 셸 실행 명령에서 지정한다.
+- 사이드바 수치와 `Cmd+Shift+B`는 Warp의 세로 탭 패널을 따랐다.
+
+일반 실행(사용자 zsh 설정 로드)에서 확인했다.
+
+| 시나리오 | 결과 | 근거 |
+| --- | --- | --- |
+| 시작 위치 | PASS | 창 제목과 탭이 `~`로 시작 |
+| `cd ~/Sandbox/bareframe` | PASS | 탭 제목이 `~/Sandbox/bareframe`으로 바뀜 |
+| 새 탭의 위치 | PASS | `Cmd+T`로 연 탭이 `~/Sandbox/bareframe`에서 시작(OSC 7) |
+| 실행 중인 툴 | PASS | vim 실행 중 제목이 `vim -u NONE /tmp/title-check.txt`, 둘째 줄이 `~/Sandbox/bareframe` |
+| 사이드바 너비 | PASS | 오른쪽 가장자리 드래그로 넓어져 잘리던 제목이 모두 보임 |
+| 사이드바 토글 | PASS | 상단 바 버튼으로 닫히고, `Cmd+Shift+B`로 같은 너비로 다시 열림 |
+| 상단 바 | PASS | 제목 없이 신호등과 토글 버튼만 표시 |
+| 자동 테스트 | PASS | `./script/check`, 코어 테스트 24개(시작 위치, zsh 통합 명령, `~` 표시 포함) |
+| 사용자 `ZDOTDIR`이 설정된 환경 | NOT_RUN | `GHOSTTY_ZSH_ZDOTDIR` 전달은 단위 테스트로만 확인 |
+
 ## 검증 중 고친 것
 
 - `Cmd+Shift+[`/`]`가 동작하지 않았다. GPUI는 macOS에서 Shift가 눌린 `[`를 `{`로 표기하므로 `cmd-{`/`cmd-}`로 바인딩했다(Zed와 같음).
