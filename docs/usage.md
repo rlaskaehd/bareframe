@@ -48,16 +48,22 @@ MVP 1의 셸 실행 모드는 zsh를 기준으로 한다. 다른 셸을 지정�
 ### 탭 그룹
 
 - 여러 탭 선택(Warp와 같음): Shift+클릭은 활성 탭부터 클릭한 탭까지, Cmd+클릭은 한 탭씩 추가·제외한다. 일반 클릭은 선택을 풀고 그 탭으로 간다.
-- 탭 우클릭 메뉴: 여러 탭을 고른 상태면 `Create group from tabs`, `Move to <그룹>`, `Remove from group`, `Close N tabs`. 한 탭이면 `New group with tab`, `Move to <그룹>`, `Remove from group`, `Close tab`, `Close other tabs`.
-- 그룹 헤더 우클릭 메뉴: `New tab in group`, `Collapse/Expand group`, `Ungroup tabs`, `Close all tabs in group`.
+- 탭 우클릭 메뉴: 여러 탭을 고른 상태면 `Create group from tabs`, `Move to group ›`, `Remove from group`, `Close N tabs`. 한 탭이면 `Rename tab`, `Pin/Unpin tab`(그룹 밖 탭), `New group with tab`, `Move to group ›`, `Remove from group`, `Close tab`, `Close other tabs`, `Close tabs above/below`.
+- 그룹 헤더 우클릭 메뉴: `Rename`, `New tab in group`, `Collapse/Expand group`, `Pin/Unpin group`, `Move group up/down`, `Ungroup tabs`, `Close all tabs in group`, `Close other tabs`.
+- `Move to group ›`를 누르면 메뉴가 이동할 그룹 목록으로 바뀐다. 메뉴는 터미널 화면에 가리지 않도록 사이드바 안에만 그린다.
+
+### 이름 변경과 고정
+
+- 탭을 더블클릭하거나 메뉴의 `Rename tab`/`Rename`으로 이름을 바꾼다. 한글 입력이 되고, `Enter`로 확정, `Esc`로 취소, 다른 곳을 클릭하면 확정한다. 빈 이름으로 확정하면 탭은 셸이 알려 주는 제목으로, 그룹은 `New Group`으로 돌아간다.
+- 고정한 탭과 그룹은 목록 맨 앞에 모이고, 일반 탭과는 구분선으로 나뉜다(📌 표시). 고정 그룹에서 빠진 탭은 고정이 풀린다. 그룹 위·아래 이동은 고정 영역을 넘지 않는다.
 - `Cmd+G`/`Cmd+Shift+G`는 선택한 탭 전체(없으면 현재 탭)에 적용된다.
 
-- 그룹은 색, 이름(`Group N`), 탭 수를 가진 헤더로 표시되고, 그룹의 탭은 항상 붙어 있다.
+- 그룹 헤더는 색, 이름(기본 `New Group`), 둘째 줄의 `N tabs`로 표시되고, 그룹의 탭은 항상 붙어 있다.
 - 헤더를 클릭하면 접고 편다. 접힌 그룹에 활성 탭이 있으면 헤더를 활성으로 표시한다.
 - 헤더에 마우스를 올리면 `+`(그룹에 새 탭)와 `×`(그룹의 탭을 모두 닫기)가 나타난다.
 - 그룹 안의 탭에서 `Cmd+T`를 누르면 새 탭도 같은 그룹에 들어간다.
-- 탭을 끌어 다른 탭 위에 놓으면 그 앞으로 옮겨지고 그 탭의 그룹에 들어간다. 그룹 헤더에 놓으면 그룹의 끝에, 목록 아래 빈 곳에 놓으면 그룹 밖 맨 끝으로 간다.
-- 탭이 모두 빠진 그룹은 사라진다. 그룹 이름 변경은 아직 지원하지 않는다.
+- 탭을 끌어 다른 탭 위에 놓으면 그 앞으로 옮겨지고 그 탭의 그룹에 들어간다. 그룹 헤더에 놓으면 그룹의 끝에, 목록 아래 빈 곳에 놓으면 그룹 밖 맨 끝으로 간다. 여러 탭을 선택한 상태로 끌면 함께 움직인다.
+- 탭이 모두 빠진 그룹은 사라진다.
 - Pane 경계를 끌어 크기를 조절한다. 클릭한 Pane이 활성 Pane이 되고, Pane이 둘 이상이면 활성 Pane에 테두리를 표시한다.
 
 ## 테마와 폰트
