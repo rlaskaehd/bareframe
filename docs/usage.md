@@ -47,6 +47,11 @@ MVP 1의 셸 실행 모드는 zsh를 기준으로 한다. 다른 셸을 지정�
 
 ### 탭 그룹
 
+- 여러 탭 선택(Warp와 같음): Shift+클릭은 활성 탭부터 클릭한 탭까지, Cmd+클릭은 한 탭씩 추가·제외한다. 일반 클릭은 선택을 풀고 그 탭으로 간다.
+- 탭 우클릭 메뉴: 여러 탭을 고른 상태면 `Create group from tabs`, `Move to <그룹>`, `Remove from group`, `Close N tabs`. 한 탭이면 `New group with tab`, `Move to <그룹>`, `Remove from group`, `Close tab`, `Close other tabs`.
+- 그룹 헤더 우클릭 메뉴: `New tab in group`, `Collapse/Expand group`, `Ungroup tabs`, `Close all tabs in group`.
+- `Cmd+G`/`Cmd+Shift+G`는 선택한 탭 전체(없으면 현재 탭)에 적용된다.
+
 - 그룹은 색, 이름(`Group N`), 탭 수를 가진 헤더로 표시되고, 그룹의 탭은 항상 붙어 있다.
 - 헤더를 클릭하면 접고 편다. 접힌 그룹에 활성 탭이 있으면 헤더를 활성으로 표시한다.
 - 헤더에 마우스를 올리면 `+`(그룹에 새 탭)와 `×`(그룹의 탭을 모두 닫기)가 나타난다.
