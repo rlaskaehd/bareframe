@@ -9,12 +9,18 @@ use gpui::{
 
 /// Lines of the text shown in the prompt; enough to spot a hidden command.
 const PREVIEW_LINES: usize = 12;
+/// Characters shown per line; longer lines wrap up to this and say how much is left.
+const PREVIEW_LINE_CHARS: usize = 400;
+/// Clicks this soon after the prompt appears don't approve: they were aimed at what was
+/// there before.
+const CONFIRM_DELAY: std::time::Duration = std::time::Duration::from_millis(600);
 
 pub(super) struct ClipboardPrompt {
     pane: PaneId,
     operation: ClipboardOperation,
     text: String,
     focus: FocusHandle,
+    shown: std::time::Instant,
 }
 
 impl WorkspaceView {
@@ -38,6 +44,7 @@ impl WorkspaceView {
             operation,
             text,
             focus,
+            shown: std::time::Instant::now(),
         });
         // The prompt is drawn by GPUI, which native terminal surfaces would cover.
         if !self.frozen {
@@ -88,11 +95,22 @@ impl WorkspaceView {
                 "Allow",
             ),
         };
-        let mut preview: Vec<&str> = prompt.text.lines().take(PREVIEW_LINES).collect();
-        let more = prompt.text.lines().count().saturating_sub(PREVIEW_LINES);
-        if preview.is_empty() {
-            preview.push("");
-        }
+        // Who is asking, so a background tab can't pass off its request as the active one's.
+        let source = self.pane(prompt.pane).map(|pane| {
+            let name = pane.name(cx);
+            match pane.location(cx) {
+                Some(location) => format!("From {name} · {location}"),
+                None => format!("From {name}"),
+            }
+        });
+        // A lone `\r` also starts a line on screen, so it can't hide what follows it.
+        let lines: Vec<&str> = prompt
+            .text
+            .lines()
+            .flat_map(|line| line.split('\r'))
+            .collect();
+        let more = lines.len().saturating_sub(PREVIEW_LINES);
+        let preview: Vec<String> = lines.into_iter().take(PREVIEW_LINES).map(visible).collect();
         let button = |id: &'static str, label: &'static str, primary: bool| {
             div()
                 .id(id)
@@ -146,6 +164,13 @@ impl WorkspaceView {
                                     .child(title),
                             )
                             .child(div().text_color(hsla(theme.text_muted)).child(body))
+                            .children(source.map(|source| {
+                                div()
+                                    .text_size(px(12.0))
+                                    .text_color(hsla(theme.text_muted))
+                                    .truncate()
+                                    .child(source)
+                            }))
                             .child(
                                 div()
                                     .p_2()
@@ -157,11 +182,7 @@ impl WorkspaceView {
                                     .text_size(px(12.0))
                                     .flex()
                                     .flex_col()
-                                    .children(
-                                        preview
-                                            .into_iter()
-                                            .map(|line| div().truncate().child(line.to_owned())),
-                                    )
+                                    .children(preview.into_iter().map(|line| div().child(line)))
                                     .when(more > 0, |this| {
                                         this.child(
                                             div()
@@ -182,7 +203,12 @@ impl WorkspaceView {
                                     ))
                                     .child(button("clipboard-confirm", confirm, true).on_click(
                                         cx.listener(|view, _, window, cx| {
-                                            view.finish_clipboard_prompt(true, window, cx)
+                                            let early = view.clipboard_prompt.as_ref().is_some_and(
+                                                |prompt| prompt.shown.elapsed() < CONFIRM_DELAY,
+                                            );
+                                            if !early {
+                                                view.finish_clipboard_prompt(true, window, cx)
+                                            }
                                         }),
                                     )),
                             ),
@@ -190,5 +216,46 @@ impl WorkspaceView {
             )
             .with_priority(2),
         )
+    }
+}
+
+/// A preview line with nothing hidden: control characters as their Unicode pictures
+/// (`␛`), invisible and direction-changing characters as `<U+202E>`, and a long line cut
+/// with a note of how much is left.
+fn visible(line: &str) -> String {
+    let mut out = String::new();
+    for (count, ch) in line.chars().enumerate() {
+        if count == PREVIEW_LINE_CHARS {
+            let rest = line.chars().count() - count;
+            out.push_str(&format!(" … {rest} more characters"));
+            break;
+        }
+        match ch {
+            '\u{0}'..='\u{1f}' => out.extend(char::from_u32(0x2400 + ch as u32)),
+            '\u{7f}' => out.push('\u{2421}'),
+            '\u{80}'..='\u{9f}'
+            | '\u{200b}'..='\u{200f}'
+            | '\u{202a}'..='\u{202e}'
+            | '\u{2060}'..='\u{2069}'
+            | '\u{feff}' => out.push_str(&format!("<U+{:04X}>", ch as u32)),
+            ch => out.push(ch),
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::visible;
+
+    #[test]
+    fn hidden_characters_are_shown() {
+        assert_eq!(
+            visible("a\u{1b}[2Jb\tc\u{7f}"),
+            "a\u{241b}[2Jb\u{2409}c\u{2421}"
+        );
+        assert_eq!(visible("ls\u{202e}txt"), "ls<U+202E>txt");
+        let long = "x".repeat(super::PREVIEW_LINE_CHARS + 5);
+        assert!(visible(&long).ends_with(" … 5 more characters"));
     }
 }
