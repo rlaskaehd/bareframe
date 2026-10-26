@@ -1,7 +1,8 @@
 use crate::workspace::WorkspaceView;
 use bareframe_core::{
     config::LaunchConfig,
-    settings::{Settings, config_path},
+    settings::{Settings, config_path, state_path},
+    state::{self, SavedState},
 };
 use gpui::{
     App, AppContext, Bounds, KeyBinding, Menu, MenuItem, TitlebarOptions, WindowBounds,
@@ -137,8 +138,37 @@ fn load_settings() -> Settings {
     settings
 }
 
-pub fn run(config: LaunchConfig) {
+/// Where the window layout is saved; the validation instance keeps its own.
+pub fn state_file() -> Option<PathBuf> {
+    if is_validation_instance() {
+        return Some(PathBuf::from(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/target/validation/state"
+        )));
+    }
+    let xdg = std::env::var_os("XDG_CONFIG_HOME");
+    Some(state_path(xdg.as_deref().map(Path::new), &home_dir()?))
+}
+
+/// A missing file is a first launch; a broken one is reported and left for inspection.
+fn load_state() -> Option<SavedState> {
+    let path = state_file()?;
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(error) => {
+            eprintln!("bareframe: {}: {error}", path.display());
+            return None;
+        }
+    };
+    state::decode(&text)
+        .inspect_err(|error| eprintln!("bareframe: {}: {error}", path.display()))
+        .ok()
+}
+
+pub fn run(config: LaunchConfig, restore: bool) {
     let settings = load_settings();
+    let saved = restore.then(load_state).flatten();
     gpui_platform::application()
         .with_assets(Assets)
         .run(move |cx: &mut App| {
@@ -226,7 +256,12 @@ pub fn run(config: LaunchConfig) {
                 }
             })
             .detach();
-            let bounds = Bounds::centered(None, size(px(1040.0), px(720.0)), cx);
+            let bounds = match saved.as_ref().and_then(|saved| saved.window) {
+                Some([x, y, width, height]) => {
+                    Bounds::new(point(px(x), px(y)), size(px(width), px(height)))
+                }
+                None => Bounds::centered(None, size(px(1040.0), px(720.0)), cx),
+            };
             if let Err(error) = cx.open_window(
                 WindowOptions {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
@@ -238,7 +273,7 @@ pub fn run(config: LaunchConfig) {
                     ..Default::default()
                 },
                 move |window, cx| {
-                    let view = cx.new(|cx| WorkspaceView::new(config, settings, window, cx));
+                    let view = cx.new(|cx| WorkspaceView::new(config, settings, saved, window, cx));
                     let weak = view.downgrade();
                     window.on_window_should_close(cx, move |_, cx| {
                         if let Err(error) = weak.update(cx, |view, cx| view.shutdown(cx)) {

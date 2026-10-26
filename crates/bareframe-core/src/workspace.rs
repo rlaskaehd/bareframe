@@ -200,6 +200,15 @@ pub struct Tab {
 }
 
 impl Tab {
+    /// A saved tab with default flags; the caller fills in the rest.
+    pub(crate) fn restored(id: TabId, layout: Layout, active_pane: PaneId) -> Self {
+        Self {
+            layout,
+            active_pane,
+            ..Self::new(id, active_pane)
+        }
+    }
+
     fn new(id: TabId, pane: PaneId) -> Self {
         Self {
             id,
@@ -260,7 +269,7 @@ pub enum Closed {
 }
 
 /// Tabs of one group are always adjacent; every public mutation restores that.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Workspace {
     pub tabs: Vec<Tab>,
     pub active_tab: usize,
@@ -282,6 +291,37 @@ impl Workspace {
             next_tab: 2,
         };
         (workspace, pane)
+    }
+
+    /// Rebuilds a saved workspace. `None` if it is inconsistent: no tabs, a pane used twice,
+    /// an active pane outside its tab, or a tab in a missing group.
+    pub fn from_parts(tabs: Vec<Tab>, groups: Vec<Group>, active_tab: usize) -> Option<Self> {
+        let panes: Vec<PaneId> = tabs.iter().flat_map(|tab| tab.layout.panes()).collect();
+        let mut unique = panes.clone();
+        unique.sort();
+        unique.dedup();
+        let consistent = !tabs.is_empty()
+            && unique.len() == panes.len()
+            && tabs.iter().all(|tab| {
+                tab.layout.contains(tab.active_pane)
+                    && tab
+                        .group
+                        .is_none_or(|id| groups.iter().any(|group| group.id == id))
+            });
+        if !consistent {
+            return None;
+        }
+        let next = |ids: &mut dyn Iterator<Item = u64>| ids.max().unwrap_or(0) + 1;
+        let mut workspace = Self {
+            next_pane: next(&mut panes.iter().map(|pane| pane.0)),
+            next_group: next(&mut groups.iter().map(|group| group.id.0)),
+            next_tab: next(&mut tabs.iter().map(|tab| tab.id.0)),
+            active_tab: active_tab.min(tabs.len() - 1),
+            tabs,
+            groups,
+        };
+        workspace.normalize();
+        Some(workspace)
     }
 
     fn allocate(&mut self) -> PaneId {

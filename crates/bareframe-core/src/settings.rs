@@ -82,6 +82,11 @@ pub fn config_path(xdg_config_home: Option<&Path>, home: &Path) -> PathBuf {
         .join("bareframe/config")
 }
 
+/// Where the window layout is saved, next to the config file.
+pub fn state_path(xdg_config_home: Option<&Path>, home: &Path) -> PathBuf {
+    config_path(xdg_config_home, home).with_file_name("state")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

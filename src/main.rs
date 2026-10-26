@@ -21,6 +21,9 @@ fn main() {
         ]);
     }
     args.extend(std::env::args_os().skip(1));
+    // Asking for a directory means a fresh window there, not last session's tabs. The
+    // validation instance always passes one but keeps its own saved state.
+    let restore = app::is_validation_instance() || !args.iter().any(|arg| arg == "--cwd");
     let request = std::env::current_dir()
         .map_err(|error| error.to_string())
         .and_then(|cwd| {
@@ -30,7 +33,7 @@ fn main() {
     match request {
         Ok(LaunchRequest::Help) => println!("{HELP}"),
         Ok(LaunchRequest::Version) => println!("bareframe {}", env!("CARGO_PKG_VERSION")),
-        Ok(LaunchRequest::Run(config)) => app::run(config),
+        Ok(LaunchRequest::Run(config)) => app::run(config, restore),
         Err(error) => {
             eprintln!("bareframe: {error}\n\n{HELP}");
             std::process::exit(2);

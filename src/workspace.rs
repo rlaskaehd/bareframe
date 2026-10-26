@@ -8,6 +8,7 @@ use crate::{
 use bareframe_core::{
     config::LaunchConfig,
     settings::{Settings, ThemeName},
+    state::{self, SavedPane, SavedState},
     workspace::{Axis, Closed, Direction, GroupId, Layout, PaneId, TabId, Workspace},
 };
 use gpui::{
@@ -112,14 +113,20 @@ pub struct WorkspaceView {
     search: Option<(Entity<RenameInput>, [Subscription; 2])>,
     /// Set only when it changes; render runs every frame.
     window_title: String,
+    /// Recorded on render so the layout can be saved without a window at hand.
+    window_bounds: Option<[f32; 4]>,
+    /// The last text written to the state file.
+    saved: String,
     focus: FocusHandle,
     _quit: Subscription,
+    _autosave: gpui::Task<()>,
 }
 
 impl WorkspaceView {
     pub fn new(
         config: LaunchConfig,
         settings: Settings,
+        saved: Option<SavedState>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -142,15 +149,108 @@ impl WorkspaceView {
             renaming: None,
             search: None,
             window_title: String::new(),
+            window_bounds: None,
+            saved: String::new(),
             focus: cx.focus_handle(),
             _quit: cx.on_app_quit(|view, cx| {
                 view.shutdown(cx);
                 async {}
             }),
+            // ponytail: compares the encoded layout every 2s instead of tracking each
+            // change; switch to change notifications if the layout ever gets large.
+            _autosave: cx.spawn(async move |view, cx| {
+                loop {
+                    cx.background_executor()
+                        .timer(std::time::Duration::from_secs(2))
+                        .await;
+                    if view.update(cx, |view, cx| view.save_state(cx)).is_err() {
+                        break;
+                    }
+                }
+            }),
         };
-        let cwd = view.config.cwd.clone();
-        view.open_pane(first, cwd, window, cx);
+        match saved {
+            Some(saved) => view.restore(saved, window, cx),
+            None => {
+                let cwd = view.config.cwd.clone();
+                view.open_pane(first, cwd, window, cx);
+            }
+        }
+        view.sync(window, cx);
         view
+    }
+
+    /// Reopens a saved layout: terminals start fresh shells in their last directory (home
+    /// if it is gone); programs that were running are not restarted.
+    fn restore(&mut self, saved: SavedState, window: &mut Window, cx: &mut Context<Self>) {
+        self.model = saved.workspace;
+        self.sidebar_open = saved.sidebar_open;
+        self.sidebar_width = saved.sidebar_width;
+        let kinds: HashMap<PaneId, SavedPane> = saved.panes.into_iter().collect();
+        let panes: Vec<PaneId> = self.model.panes().collect();
+        for id in panes {
+            match kinds.get(&id) {
+                Some(SavedPane::Settings) => {
+                    let theme = self.theme();
+                    let pane = cx.new(|cx| SettingsPane::new(theme, cx));
+                    self.panes.insert(id, (PaneView::Settings(pane), None));
+                }
+                kind => {
+                    let cwd = match kind {
+                        Some(SavedPane::Terminal { cwd }) if cwd.is_dir() => cwd.clone(),
+                        _ => self.config.cwd.clone(),
+                    };
+                    self.open_pane(id, cwd, window, cx);
+                }
+            }
+        }
+    }
+
+    fn state(&self, cx: &App) -> SavedState {
+        let panes = self
+            .panes
+            .iter()
+            .map(|(id, (pane, _))| {
+                let saved = match pane {
+                    PaneView::Terminal(pane) => SavedPane::Terminal {
+                        cwd: pane.read(cx).cwd().to_path_buf(),
+                    },
+                    PaneView::Settings(_) => SavedPane::Settings,
+                };
+                (*id, saved)
+            })
+            .collect();
+        SavedState {
+            workspace: self.model.clone(),
+            panes,
+            sidebar_open: self.sidebar_open,
+            sidebar_width: self.sidebar_width,
+            window: self.window_bounds,
+        }
+    }
+
+    /// Writes the layout if it changed, through a temporary file so a crash mid-write
+    /// leaves the previous state intact.
+    fn save_state(&mut self, cx: &App) {
+        let mut state = self.state(cx);
+        state.panes.sort_by_key(|(id, _)| *id);
+        let text = state::encode(&state);
+        if text == self.saved {
+            return;
+        }
+        let Some(path) = app::state_file() else {
+            return;
+        };
+        let temporary = path.with_extension("tmp");
+        let written = path
+            .parent()
+            .map_or(Ok(()), std::fs::create_dir_all)
+            .and_then(|()| std::fs::write(&temporary, &text))
+            .and_then(|()| std::fs::rename(&temporary, &path));
+        match written {
+            Ok(()) => self.saved = text,
+            Err(error) => eprintln!("bareframe: saving {}: {error}", path.display()),
+        }
     }
 
     fn theme(&self) -> &'static Theme {
@@ -217,6 +317,11 @@ impl WorkspaceView {
             self.model.focus(id);
         } else {
             let id = self.model.new_tab();
+            // Settings belongs to the window, not to the group the user happened to be in.
+            if self.model.active().group.is_some() {
+                let tab = self.model.active_tab;
+                self.model.remove_from_group(&[tab]);
+            }
             let theme = self.theme();
             let pane = cx.new(|cx| SettingsPane::new(theme, cx));
             self.panes.insert(id, (PaneView::Settings(pane), None));
@@ -390,6 +495,10 @@ impl WorkspaceView {
     }
 
     pub fn shutdown(&mut self, cx: &mut Context<Self>) {
+        // Quitting and closing the window both land here, before the panes go away.
+        if !self.panes.is_empty() {
+            self.save_state(cx);
+        }
         for (_, (pane, _)) in self.panes.drain() {
             if let PaneView::Terminal(pane) = pane {
                 pane.update(cx, |pane, cx| pane.shutdown(cx));
@@ -495,6 +604,13 @@ impl Render for WorkspaceView {
             window.set_window_title(&title);
             self.window_title = title;
         }
+        let bounds = window.bounds();
+        self.window_bounds = Some([
+            f32::from(bounds.origin.x),
+            f32::from(bounds.origin.y),
+            f32::from(bounds.size.width),
+            f32::from(bounds.size.height),
+        ]);
         let tab = self.model.active();
         let layout = if tab.maximized {
             Layout::Pane(tab.active_pane)
