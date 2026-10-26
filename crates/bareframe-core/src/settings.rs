@@ -8,17 +8,6 @@ pub enum ThemeName {
     Light,
 }
 
-impl ThemeName {
-    pub const ALL: [Self; 2] = [Self::Dark, Self::Light];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Dark => "Dark",
-            Self::Light => "Light",
-        }
-    }
-}
-
 pub const DEFAULT_FONT_SIZE: f32 = 13.0;
 pub const FONT_SIZE_RANGE: std::ops::RangeInclusive<f32> = 6.0..=72.0;
 

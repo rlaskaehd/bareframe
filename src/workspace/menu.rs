@@ -4,9 +4,10 @@ use crate::theme::{self, hsla};
 use bareframe_core::workspace::{Axis, GroupId, PaneId};
 use gpui::{AnyElement, Context, Pixels, Point, Window, anchored, deferred, div, prelude::*, px};
 
-/// Width of sidebar context menus; they must fit inside the sidebar because the
-/// terminal's native surface covers anything drawn over it.
+/// Width of every context menu. Menus may overlap the terminals because `open_menu`
+/// swaps the native surfaces for snapshots while one is open.
 const MENU_WIDTH: f32 = 188.0;
+
 #[derive(Clone)]
 pub(super) enum MenuAction {
     Rename(RenameTarget),
