@@ -7,6 +7,7 @@ use crate::{
     theme::Theme,
 };
 use bareframe_core::{
+    keymap,
     settings::{self, Settings, ThemeName},
     workspace::PaneId,
 };
@@ -65,6 +66,7 @@ impl WorkspaceView {
         let events = cx.subscribe_in(&pane, window, |view, _, event, _, cx| match event {
             SettingsEvent::Set(key, value) => view.set_setting(key, value, cx),
             SettingsEvent::OpenFile => view.open_config_file(),
+            SettingsEvent::Bind(name, change) => view.set_binding(name, change.as_ref(), cx),
         });
         self.panes
             .insert(id, (PaneView::Settings(pane), Some(events)));
@@ -88,6 +90,21 @@ impl WorkspaceView {
             Err(error) => eprintln!("bareframe: {error}"),
         }
         self.apply_settings(cx);
+    }
+
+    /// Saves a Keyboard shortcuts edit as `keybind` lines and rebinds (`None` = default,
+    /// `Some(None)` = no shortcut).
+    fn set_binding(
+        &mut self,
+        name: &str,
+        change: Option<&Option<keymap::Trigger>>,
+        cx: &mut Context<Self>,
+    ) {
+        let change = change.map(Option::as_ref);
+        match app::edit_config(|text| keymap::write_binding(text, name, change)) {
+            Ok(text) => self.reload_settings(text, cx),
+            Err(error) => eprintln!("bareframe: saving keyboard shortcut: {error}"),
+        }
     }
 
     fn open_config_file(&self) {
@@ -151,6 +168,15 @@ impl WorkspaceView {
             }
         });
         self._config_watch = Some((watcher, task));
+    }
+
+    /// Settings › Reload settings file (Ghostty's `reload_config`).
+    pub(super) fn reload_from_disk(&mut self, cx: &mut Context<Self>) {
+        let text = app::config_file()
+            .and_then(|path| std::fs::read_to_string(path).ok())
+            .unwrap_or_default();
+        self.config_text.clear();
+        self.reload_settings(text, cx);
     }
 
     fn reload_settings(&mut self, text: String, cx: &mut Context<Self>) {

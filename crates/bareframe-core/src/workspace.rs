@@ -144,6 +144,23 @@ impl Layout {
         nearest
     }
 
+    /// Gives every pane the same share along each run of same-direction splits, as
+    /// Ghostty's `equalize_splits` does: a split's ratio follows its panes on each side.
+    pub fn equalize(&mut self) {
+        if let Self::Split {
+            ratio,
+            first,
+            second,
+            ..
+        } = self
+        {
+            first.equalize();
+            second.equalize();
+            let (a, b) = (first.panes().len() as f32, second.panes().len() as f32);
+            *ratio = (a / (a + b)).clamp(MIN_RATIO, 1.0 - MIN_RATIO);
+        }
+    }
+
     /// Addresses a split by the child choices from the root (`false` = first).
     pub fn set_ratio(&mut self, path: &[bool], value: f32) -> bool {
         match (self, path.split_first()) {
@@ -765,6 +782,27 @@ impl Workspace {
         tab.maximized = !tab.maximized && tab.layout.panes().len() > 1;
     }
 
+    /// Moves to the next or previous pane of the active tab in layout order, wrapping.
+    pub fn focus_cycle(&mut self, forward: bool) -> bool {
+        let tab = &mut self.tabs[self.active_tab];
+        let panes = tab.layout.panes();
+        let Some(index) = panes.iter().position(|pane| *pane == tab.active_pane) else {
+            return false;
+        };
+        if panes.len() < 2 {
+            return false;
+        }
+        let count = panes.len();
+        let next = if forward {
+            (index + 1) % count
+        } else {
+            (index + count - 1) % count
+        };
+        tab.active_pane = panes[next];
+        tab.maximized = false;
+        true
+    }
+
     pub fn focus_direction(&mut self, direction: Direction) -> bool {
         let Some(pane) = self.active().neighbor(direction) else {
             return false;
@@ -827,6 +865,30 @@ mod tests {
         assert_eq!(ws.tabs[2].color, Some(1));
         ws.set_tab_color(2, Some(99));
         assert_eq!(ws.tabs[2].color, None);
+    }
+
+    #[test]
+    fn panes_cycle_and_equalize_by_count() {
+        let (mut ws, first) = Workspace::new();
+        let second = ws.split(Axis::Horizontal);
+        let third = ws.split(Axis::Horizontal);
+        assert!(ws.focus_cycle(true));
+        assert_eq!(ws.active_pane(), first, "wraps after the last pane");
+        assert!(ws.focus_cycle(false));
+        assert_eq!(ws.active_pane(), third);
+        ws.tabs[0].layout.set_ratio(&[], 0.9);
+        ws.tabs[0].layout.equalize();
+        let widths: Vec<f32> = ws
+            .active()
+            .layout
+            .rects()
+            .iter()
+            .map(|(_, r)| r.width)
+            .collect();
+        for width in widths {
+            assert!((width - 1.0 / 3.0).abs() < 1e-4, "{width}");
+        }
+        let _ = second;
     }
 
     #[test]

@@ -1,6 +1,9 @@
 //! Only this module knows GPUI's embedding and the pinned Ghostty adapter ABI.
 //! It emits backend-independent events. Command output is still owned by Ghostty.
-use crate::app::{Copy, Paste};
+use crate::app::{
+    ClearScreen, Copy, JumpToNextPrompt, JumpToPreviousPrompt, Paste, ScrollPageDown, ScrollPageUp,
+    ScrollToBottom, ScrollToTop, TerminalSelectAll,
+};
 use bareframe_core::{
     config::LaunchConfig,
     ime::Composition,
@@ -503,6 +506,22 @@ impl Render for GhosttyAdapter {
                 view.binding(c"paste_from_clipboard");
                 cx.stop_propagation();
             }))
+            .on_action(cx.listener(|view, _: &TerminalSelectAll, _, _| view.binding(c"select_all")))
+            .on_action(cx.listener(|view, _: &ClearScreen, _, _| view.binding(c"clear_screen")))
+            .on_action(cx.listener(|view, _: &ScrollToTop, _, _| view.binding(c"scroll_to_top")))
+            .on_action(
+                cx.listener(|view, _: &ScrollToBottom, _, _| view.binding(c"scroll_to_bottom")),
+            )
+            .on_action(cx.listener(|view, _: &ScrollPageUp, _, _| view.binding(c"scroll_page_up")))
+            .on_action(
+                cx.listener(|view, _: &ScrollPageDown, _, _| view.binding(c"scroll_page_down")),
+            )
+            .on_action(cx.listener(|view, _: &JumpToPreviousPrompt, _, _| {
+                view.binding(c"jump_to_prompt:-1")
+            }))
+            .on_action(
+                cx.listener(|view, _: &JumpToNextPrompt, _, _| view.binding(c"jump_to_prompt:1")),
+            )
             .on_key_down(cx.listener(|view, event, _, cx| view.key_down(event, cx)))
             .on_key_up(cx.listener(|view, event, _, _| view.key_up(event)))
             .on_mouse_move(cx.listener(|view, event: &MouseMoveEvent, _, _| {

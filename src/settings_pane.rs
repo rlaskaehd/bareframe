@@ -4,11 +4,15 @@ use crate::{
     rename::{RenameEvent, RenameInput},
     theme::{self, Theme, hsla},
 };
-use bareframe_core::settings::{self, DEFS, Def, Kind, Settings};
+use bareframe_core::{
+    keymap::{self, ACTIONS, Trigger},
+    settings::{self, DEFS, Def, Kind, Settings},
+};
 use gpui::{
     AnyElement, Context, Entity, EventEmitter, FocusHandle, Subscription, Window, div, prelude::*,
     px,
 };
+use std::collections::BTreeMap;
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Section {
@@ -48,6 +52,16 @@ pub enum SettingsEvent {
     /// A setting was changed on screen; the workspace validates, saves and applies it.
     Set(&'static str, String),
     OpenFile,
+    /// A keyboard shortcut edit: `None` restores the default, `Some(None)` removes it.
+    Bind(&'static str, Option<Option<Trigger>>),
+}
+
+/// A shortcut being recorded, as Warp's "Press new keyboard shortcut" row.
+struct Recording {
+    action: &'static str,
+    trigger: Option<Trigger>,
+    /// Keeps the key interceptor alive; dropping it ends recording.
+    _keys: Subscription,
 }
 
 pub struct SettingsPane {
@@ -58,7 +72,9 @@ pub struct SettingsPane {
     search: Entity<RenameInput>,
     /// The text setting being edited and its field.
     editing: Option<(&'static str, Entity<RenameInput>, Subscription)>,
-    _search: Subscription,
+    shortcut_search: Entity<RenameInput>,
+    recording: Option<Recording>,
+    _search: [Subscription; 2],
 }
 
 impl EventEmitter<SettingsEvent> for SettingsPane {}
@@ -72,6 +88,8 @@ impl SettingsPane {
     ) -> Self {
         let search = cx.new(|cx| RenameInput::search(theme.accent, window, cx));
         let observed = cx.observe(&search, |_, _, cx| cx.notify());
+        let shortcut_search = cx.new(|cx| RenameInput::search(theme.accent, window, cx));
+        let shortcuts_observed = cx.observe(&shortcut_search, |_, _, cx| cx.notify());
         Self {
             focus: cx.focus_handle(),
             section: Section::Appearance,
@@ -79,7 +97,9 @@ impl SettingsPane {
             settings,
             search,
             editing: None,
-            _search: observed,
+            shortcut_search,
+            recording: None,
+            _search: [observed, shortcuts_observed],
         }
     }
 
@@ -319,6 +339,239 @@ impl SettingsPane {
         out
     }
 
+    /// Starts recording a shortcut for `action`. Key presses are intercepted before any
+    /// binding runs, so pressing an existing shortcut records it instead of running it.
+    fn record(&mut self, action: &'static str, cx: &mut Context<Self>) {
+        let pane = cx.entity().downgrade();
+        let keys = cx.intercept_keystrokes(move |event, _, cx| {
+            let stroke = &event.keystroke;
+            let modifiers = stroke.modifiers;
+            let trigger = Trigger::from_keystroke(
+                modifiers.control,
+                modifiers.alt,
+                modifiers.shift,
+                modifiers.platform,
+                &stroke.key,
+            );
+            let escape = stroke.key == "escape" && !modifiers.modified();
+            if pane
+                .update(cx, |pane, cx| {
+                    if escape {
+                        pane.recording = None;
+                    } else if let (Some(recording), Some(trigger)) = (&mut pane.recording, trigger)
+                    {
+                        recording.trigger = Some(trigger);
+                    }
+                    cx.notify();
+                })
+                .is_ok()
+            {
+                cx.stop_propagation();
+            }
+        });
+        self.recording = Some(Recording {
+            action,
+            trigger: None,
+            _keys: keys,
+        });
+        cx.notify();
+    }
+
+    fn finish_recording(&mut self, change: Option<Option<Trigger>>, cx: &mut Context<Self>) {
+        if let Some(recording) = self.recording.take() {
+            cx.emit(SettingsEvent::Bind(recording.action, change));
+        }
+        cx.notify();
+    }
+
+    fn render_shortcuts(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let theme = self.theme;
+        let (bindings, _) = keymap::resolve(&self.settings.keybinds);
+        let by_action = keymap::by_action(&bindings);
+        let query = self.shortcut_search.read(cx).text().trim().to_lowercase();
+        let tokens: Vec<&str> = query.split_whitespace().collect();
+        let mut actions: Vec<_> = ACTIONS.iter().collect();
+        actions.sort_by_key(|action| action.description);
+        let empty = query.is_empty();
+        let mut out = vec![
+            div()
+                .pt_2()
+                .text_color(hsla(theme.text_muted))
+                .child("Add your own custom keybindings to existing actions. Defaults follow Ghostty; changes are saved as keybind lines in the settings file.")
+                .into_any_element(),
+            div()
+                .id("shortcut-search")
+                .relative()
+                .my_3()
+                .px_2()
+                .h(px(30.0))
+                .flex()
+                .items_center()
+                .rounded_md()
+                .border_1()
+                .border_color(hsla(theme.border))
+                .overflow_hidden()
+                .cursor_text()
+                .on_click(cx.listener(|pane, _, window, cx| {
+                    pane.shortcut_search
+                        .update(cx, |input, cx| input.focus(window, cx))
+                }))
+                .when(empty, |this| {
+                    this.child(
+                        div()
+                            .absolute()
+                            .left(px(9.0))
+                            .text_color(hsla(theme.text_muted))
+                            .child("Search by name or by keys (ex. \"cmd d\")"),
+                    )
+                })
+                .child(self.shortcut_search.clone())
+                .into_any_element(),
+        ];
+        for action in actions {
+            let triggers = by_action.get(action.name).cloned().unwrap_or_default();
+            let matches = tokens.is_empty()
+                || action.description.to_lowercase().contains(&query)
+                || triggers.iter().any(|trigger| {
+                    let text = trigger.to_string();
+                    tokens.iter().all(|token| text.contains(token))
+                });
+            if !matches {
+                continue;
+            }
+            out.push(self.render_shortcut(action, &triggers, &bindings, cx));
+        }
+        out
+    }
+
+    fn render_shortcut(
+        &self,
+        action: &'static keymap::Action,
+        triggers: &[Trigger],
+        bindings: &BTreeMap<Trigger, &'static str>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.theme;
+        let name = action.name;
+        let editing = self
+            .recording
+            .as_ref()
+            .filter(|recording| recording.action == name);
+        let row = div()
+            .id(gpui::ElementId::Name(format!("shortcut:{name}").into()))
+            .flex()
+            .items_center()
+            .gap_4()
+            .px_3()
+            .py(px(9.0))
+            .rounded_md()
+            .when(editing.is_some(), |this| {
+                this.bg(hsla(theme.accent)).text_color(hsla(theme.chrome))
+            })
+            .when(editing.is_none(), |this| {
+                this.hover(|style| style.bg(hsla(theme.tab_hover)))
+                    .on_click(cx.listener(move |pane, _, _, cx| pane.record(name, cx)))
+            })
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .child(action.description),
+            )
+            .child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .children(triggers.iter().map(|trigger| caps(theme, trigger, false))),
+            );
+        let Some(recording) = editing else {
+            return row.into_any_element();
+        };
+        let conflict = recording.trigger.as_ref().and_then(|trigger| {
+            bindings
+                .get(trigger)
+                .filter(|other| **other != name)
+                .and_then(|other| keymap::find(other))
+        });
+        let recorded = recording.trigger.clone();
+        let button = |id: &'static str, label: &'static str| {
+            div()
+                .id(gpui::ElementId::Name(format!("{name}:{id}").into()))
+                .px_2()
+                .py(px(3.0))
+                .rounded_sm()
+                .border_1()
+                .border_color(hsla(theme.text_muted))
+                .text_size(px(12.0))
+                .hover(|style| style.bg(hsla(theme.tab_hover)))
+                .child(label)
+        };
+        div()
+            .flex()
+            .flex_col()
+            .child(row)
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .px_3()
+                    .py_2()
+                    .rounded_md()
+                    .bg(hsla(theme.tab_active))
+                    .child(match &recording.trigger {
+                        Some(trigger) => div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(caps(theme, trigger, conflict.is_some()))
+                            .when_some(conflict, |this, other| {
+                                this.child(
+                                    div()
+                                        .text_size(px(12.0))
+                                        .text_color(hsla(theme.group_colors[3]))
+                                        .child(format!(
+                                            "Used by “{}”; saving moves it here",
+                                            other.description
+                                        )),
+                                )
+                            })
+                            .into_any_element(),
+                        None => div()
+                            .text_color(hsla(theme.text_muted))
+                            .child("Press new keyboard shortcut (Esc cancels)")
+                            .into_any_element(),
+                    })
+                    .child(
+                        div()
+                            .flex()
+                            .justify_end()
+                            .gap_2()
+                            .child(button("clear", "Clear").on_click(
+                                cx.listener(|pane, _, _, cx| pane.finish_recording(Some(None), cx)),
+                            ))
+                            .child(button("default", "Default").on_click(
+                                cx.listener(|pane, _, _, cx| pane.finish_recording(None, cx)),
+                            ))
+                            .child(button("cancel", "Cancel").on_click(cx.listener(
+                                |pane, _, _, cx| {
+                                    pane.recording = None;
+                                    cx.notify()
+                                },
+                            )))
+                            .when_some(recorded, |this, trigger| {
+                                this.child(button("save", "Save").on_click(cx.listener(
+                                    move |pane, _, _, cx| {
+                                        pane.finish_recording(Some(Some(trigger.clone())), cx)
+                                    },
+                                )))
+                            }),
+                    ),
+            )
+            .into_any_element()
+    }
+
     fn render_about(&self) -> AnyElement {
         let theme = self.theme;
         let line = |text: String| div().py_1().text_color(hsla(theme.text_muted)).child(text);
@@ -375,13 +628,7 @@ impl Render for SettingsPane {
         };
         let body: Vec<AnyElement> = match (searching, self.section) {
             (false, Section::About) => vec![self.render_about()],
-            (false, Section::KeyboardShortcuts) => vec![
-                div()
-                    .pt_4()
-                    .text_color(hsla(theme.text_muted))
-                    .child("Keyboard shortcuts are configured with keybind lines in the settings file for now.")
-                    .into_any_element(),
-            ],
+            (false, Section::KeyboardShortcuts) => self.render_shortcuts(cx),
             _ => self.render_settings(cx),
         };
         div()
@@ -472,4 +719,33 @@ impl Render for SettingsPane {
                     ),
             )
     }
+}
+
+/// Key caps as Warp draws them, outlined in orange when the shortcut is taken.
+fn caps(theme: &Theme, trigger: &Trigger, conflict: bool) -> AnyElement {
+    div()
+        .flex()
+        .gap_1()
+        .children(trigger.caps().into_iter().map(|cap| {
+            div()
+                .min_w(px(22.0))
+                .h(px(22.0))
+                .px_1()
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded_sm()
+                .border_1()
+                .border_color(hsla(if conflict {
+                    theme.group_colors[3]
+                } else {
+                    theme.border
+                }))
+                .bg(hsla(theme.terminal_background))
+                // Explicit, so caps stay readable on the highlighted row.
+                .text_color(hsla(theme.text))
+                .text_size(px(12.0))
+                .child(cap)
+        }))
+        .into_any_element()
 }

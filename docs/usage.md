@@ -106,11 +106,15 @@ MVP 1의 셸 실행 모드는 zsh를 기준으로 한다. 다른 셸을 지정�
 | Features — Session | 새 세션의 셸(존재하는 절대 경로일 때), 새 세션의 작업 디렉터리(이전 세션 / 홈), 새 탭 위치(현재 탭 뒤 / 맨 끝) |
 | Features — Keys | 왼쪽·오른쪽 Option을 Meta로 |
 | Features — Terminal | 마우스 리포팅, 선택 시 복사, 더블클릭 단어 경계 문자, 클립보드 접근(OSC 52: Deny / Ask / Allow, 기본 Deny. Ask는 확인 창이 생길 때까지 거부) |
+| Keyboard shortcuts | 모든 동작의 단축키 목록과 검색(이름 또는 키, 예: `cmd d`). 줄을 누르면 새 단축키를 녹화하고 `Clear`(단축키 없음)·`Default`(기본값)·`Cancel`·`Save`. 다른 동작이 쓰던 키면 알려 주고, 저장하면 그 키를 이 동작으로 옮긴다. `Esc`는 녹화 취소 |
 | About | 버전과 라이선스 |
 
 - 화면에서 바꾼 값은 바로 적용되고 설정 파일에 그 줄만 고쳐 쓴다(주석과 다른 줄은 그대로, 기본값으로 돌리면 그 줄을 지움).
 - 설정 파일 `~/.config/bareframe/config`(`$XDG_CONFIG_HOME`이 절대 경로면 그 아래)는 Ghostty처럼 `key = value` 형식이다. 직접 고쳐도 저장하는 순간 다시 읽어 적용한다. 잘못된 줄은 기본값을 쓰고 표준 에러에 경고만 출력한다.
 - 터미널 항목은 Ghostty 설정으로 바뀌어 모든 Pane에 적용된다(예: `cursor-style = bar`, `terminal-padding = 8`은 `window-padding-x/y = 8`).
+
+- 단축키 기본값은 Ghostty의 macOS 기본값을 따른다. 사이드바(`Cmd+B`)·Tools panel·탭 그룹(`Cmd+G`/`Cmd+Shift+G`)처럼 bareframe에만 있는 동작은 Warp를 따른다. 바꾼 단축키는 설정 파일에 Ghostty 문법의 `keybind` 줄로 저장되고, 직접 써도 된다(`keybind = cmd+shift+t=new_tab`, 해제는 `keybind = cmd+t=unbind`). 동작 이름은 Ghostty와 같다(예: `new_split:right`, `goto_tab:3`, `clear_screen`, `jump_to_prompt:-1`).
+- Ghostty 기본값 중 새로 들어간 단축키: `Cmd+[`/`Cmd+]`(이전·다음 Pane), `Cmd+Ctrl+=`(Pane 크기 균등), `Ctrl+Tab`/`Ctrl+Shift+Tab`(다음·이전 탭), `Cmd+Alt+W`(탭 닫기), `Cmd+A`(전체 선택), `Cmd+K`(화면 지우기), `Cmd+Home`/`End`/`PgUp`/`PgDn`(스크롤), `Cmd+↑`/`↓`(이전·다음 프롬프트), `Cmd+Shift+,`(설정 파일 다시 읽기), `Cmd+Enter`·`Cmd+Ctrl+F`(전체 화면).
 
 ```text
 theme = dark          # dark | light | system

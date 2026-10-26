@@ -51,8 +51,116 @@ actions!(
         ShowProjectExplorer,
         ShowGlobalSearch,
         FindInFiles,
+        CloseTab,
+        FocusPreviousPane,
+        FocusNextPane,
+        EqualizePanes,
+        ReloadSettings,
+        ToggleFullscreen,
+        TerminalSelectAll,
+        ClearScreen,
+        ScrollToTop,
+        ScrollToBottom,
+        ScrollPageUp,
+        ScrollPageDown,
+        JumpToPreviousPrompt,
+        JumpToNextPrompt,
     ]
 );
+
+/// The GPUI action for a keymap action name (see `bareframe_core::keymap::ACTIONS`).
+fn keymap_action(name: &str) -> Option<Box<dyn gpui::Action>> {
+    Some(match name {
+        "new_tab" => Box::new(NewTab),
+        "close_surface" => Box::new(ClosePane),
+        "close_tab" => Box::new(CloseTab),
+        "close_window" => Box::new(CloseWindow),
+        "quit" => Box::new(Quit),
+        "new_split:right" => Box::new(SplitRight),
+        "new_split:down" => Box::new(SplitDown),
+        "goto_split:previous" => Box::new(FocusPreviousPane),
+        "goto_split:next" => Box::new(FocusNextPane),
+        "goto_split:left" => Box::new(FocusLeft),
+        "goto_split:right" => Box::new(FocusRight),
+        "goto_split:up" => Box::new(FocusUp),
+        "goto_split:down" => Box::new(FocusDown),
+        "equalize_splits" => Box::new(EqualizePanes),
+        "toggle_split_zoom" => Box::new(ToggleMaximizePane),
+        "previous_tab" => Box::new(PreviousTab),
+        "next_tab" => Box::new(NextTab),
+        "goto_tab:1" => Box::new(SelectTab1),
+        "goto_tab:2" => Box::new(SelectTab2),
+        "goto_tab:3" => Box::new(SelectTab3),
+        "goto_tab:4" => Box::new(SelectTab4),
+        "goto_tab:5" => Box::new(SelectTab5),
+        "goto_tab:6" => Box::new(SelectTab6),
+        "goto_tab:7" => Box::new(SelectTab7),
+        "goto_tab:8" => Box::new(SelectTab8),
+        "last_tab" => Box::new(SelectLastTab),
+        "copy_to_clipboard" => Box::new(Copy),
+        "paste_from_clipboard" => Box::new(Paste),
+        "select_all" => Box::new(TerminalSelectAll),
+        "clear_screen" => Box::new(ClearScreen),
+        "scroll_to_top" => Box::new(ScrollToTop),
+        "scroll_to_bottom" => Box::new(ScrollToBottom),
+        "scroll_page_up" => Box::new(ScrollPageUp),
+        "scroll_page_down" => Box::new(ScrollPageDown),
+        "jump_to_prompt:-1" => Box::new(JumpToPreviousPrompt),
+        "jump_to_prompt:1" => Box::new(JumpToNextPrompt),
+        "increase_font_size:1" => Box::new(IncreaseFontSize),
+        "decrease_font_size:1" => Box::new(DecreaseFontSize),
+        "reset_font_size" => Box::new(ResetFontSize),
+        "open_config" => Box::new(OpenSettings),
+        "reload_config" => Box::new(ReloadSettings),
+        "toggle_fullscreen" => Box::new(ToggleFullscreen),
+        "restart_session" => Box::new(RestartSession),
+        "toggle_tab_sidebar" => Box::new(ToggleSidebar),
+        "toggle_tools_panel" => Box::new(ToggleToolsPanel),
+        "show_project_explorer" => Box::new(ShowProjectExplorer),
+        "show_global_search" => Box::new(ShowGlobalSearch),
+        "find_in_files" => Box::new(FindInFiles),
+        "group_tab" => Box::new(GroupTab),
+        "ungroup_tab" => Box::new(UngroupTab),
+        _ => return None,
+    })
+}
+
+/// Replaces every key binding with the defaults plus the settings file's `keybind` lines.
+pub fn bind_keys(settings: &Settings, cx: &mut App) {
+    use bareframe_core::keymap::{self, Scope};
+    cx.clear_key_bindings();
+    cx.bind_keys(crate::rename::key_bindings());
+    cx.bind_keys(crate::explorer::key_bindings());
+    let (bindings, warnings) = keymap::resolve(&settings.keybinds);
+    for warning in warnings {
+        eprintln!("bareframe: settings: {warning}");
+    }
+    let terminal = gpui::KeyBindingContextPredicate::parse("BareframeTerminal")
+        .ok()
+        .map(std::rc::Rc::new);
+    let mut loaded = Vec::new();
+    for (trigger, name) in bindings {
+        let (Some(action), Some(def)) = (keymap_action(name), keymap::find(name)) else {
+            eprintln!("bareframe: no handler for keymap action {name}");
+            continue;
+        };
+        let context = (def.scope == Scope::Terminal)
+            .then(|| terminal.clone())
+            .flatten();
+        match KeyBinding::load(
+            &trigger.to_gpui(),
+            action,
+            context,
+            false,
+            None,
+            &gpui::DummyKeyboardMapper,
+        ) {
+            Ok(binding) => loaded.push(binding),
+            Err(error) => eprintln!("bareframe: keybind {trigger}: {error:?}"),
+        }
+    }
+    cx.bind_keys(loaded);
+}
 
 /// Height of the sidebar header that replaces the system title bar.
 pub const TITLE_BAR_HEIGHT: f32 = 38.0;
@@ -169,13 +277,19 @@ pub fn load_settings() -> (Settings, String) {
 /// Rewrites one key in the settings file, keeping the user's comments and other lines.
 /// Returns the new text so the file watcher can tell this write from an outside edit.
 pub fn save_setting(key: &str, value: &str, default: &str) -> Result<String, String> {
+    edit_config(|text| bareframe_core::settings::write_value(text, key, value, default))
+}
+
+/// Reads the settings file (empty if missing), rewrites it with `change` and writes it back
+/// through a temporary file. Returns the new text.
+pub fn edit_config(change: impl FnOnce(&str) -> String) -> Result<String, String> {
     let path = config_file().ok_or("no home directory")?;
     let text = match std::fs::read_to_string(&path) {
         Ok(text) => text,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(error) => return Err(format!("{}: {error}", path.display())),
     };
-    let text = bareframe_core::settings::write_value(&text, key, value, default);
+    let text = change(&text);
     let temporary = path.with_extension("tmp");
     path.parent()
         .map_or(Ok(()), std::fs::create_dir_all)
@@ -222,49 +336,7 @@ pub fn run(config: LaunchConfig, restore: bool) {
         .with_assets(Assets)
         .run(move |cx: &mut App| {
             cx.on_action(|_: &Quit, cx| cx.quit());
-            cx.bind_keys(crate::rename::key_bindings());
-            cx.bind_keys(crate::explorer::key_bindings());
-            cx.bind_keys([
-                KeyBinding::new("cmd-q", Quit, None),
-                KeyBinding::new("cmd-shift-w", CloseWindow, None),
-                KeyBinding::new("cmd-w", ClosePane, None),
-                KeyBinding::new("cmd-c", Copy, Some("BareframeTerminal")),
-                KeyBinding::new("cmd-v", Paste, Some("BareframeTerminal")),
-                KeyBinding::new("cmd-shift-r", RestartSession, None),
-                KeyBinding::new("cmd-t", NewTab, None),
-                KeyBinding::new("cmd-}", NextTab, None),
-                KeyBinding::new("cmd-{", PreviousTab, None),
-                KeyBinding::new("cmd-1", SelectTab1, None),
-                KeyBinding::new("cmd-2", SelectTab2, None),
-                KeyBinding::new("cmd-3", SelectTab3, None),
-                KeyBinding::new("cmd-4", SelectTab4, None),
-                KeyBinding::new("cmd-5", SelectTab5, None),
-                KeyBinding::new("cmd-6", SelectTab6, None),
-                KeyBinding::new("cmd-7", SelectTab7, None),
-                KeyBinding::new("cmd-8", SelectTab8, None),
-                KeyBinding::new("cmd-9", SelectLastTab, None),
-                KeyBinding::new("cmd-d", SplitRight, None),
-                KeyBinding::new("cmd-shift-d", SplitDown, None),
-                KeyBinding::new("cmd-shift-enter", ToggleMaximizePane, None),
-                KeyBinding::new("cmd-alt-left", FocusLeft, None),
-                KeyBinding::new("cmd-alt-right", FocusRight, None),
-                KeyBinding::new("cmd-alt-up", FocusUp, None),
-                KeyBinding::new("cmd-alt-down", FocusDown, None),
-                KeyBinding::new("cmd-=", IncreaseFontSize, None),
-                KeyBinding::new("cmd-+", IncreaseFontSize, None),
-                KeyBinding::new("cmd--", DecreaseFontSize, None),
-                KeyBinding::new("cmd-0", ResetFontSize, None),
-                KeyBinding::new("cmd-g", GroupTab, None),
-                KeyBinding::new("cmd-shift-g", UngroupTab, None),
-                // Warp's tabs panel key, plus the earlier Cmd+Shift+B.
-                KeyBinding::new("cmd-b", ToggleSidebar, None),
-                KeyBinding::new("cmd-shift-b", ToggleSidebar, None),
-                KeyBinding::new("cmd-,", OpenSettings, None),
-                KeyBinding::new("cmd-\\", ToggleToolsPanel, None),
-                KeyBinding::new("ctrl-1", ShowProjectExplorer, None),
-                KeyBinding::new("ctrl-3", ShowGlobalSearch, None),
-                KeyBinding::new("cmd-shift-f", FindInFiles, None),
-            ]);
+            bind_keys(&settings, cx);
             cx.set_menus(vec![
                 Menu::new("bareframe").items([
                     MenuItem::action("Settings…", OpenSettings),

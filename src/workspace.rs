@@ -513,6 +513,7 @@ impl WorkspaceView {
             .update(cx, |explorer, cx| explorer.set_theme(ui, cx));
         self.global_search
             .update(cx, |search, cx| search.set_theme(ui, cx));
+        app::bind_keys(&self.settings, cx);
         cx.notify();
     }
 
@@ -769,6 +770,27 @@ impl Render for WorkspaceView {
             .on_action(cx.listener(|view, _: &FindInFiles, window, cx| {
                 view.open_tool(tools::Tool::Search, window, cx)
             }))
+            .on_action(cx.listener(|view, _: &CloseTab, window, cx| {
+                let tab = view.model.active_tab;
+                view.close_tabs(&[tab], window, cx)
+            }))
+            .on_action(cx.listener(|view, _: &FocusPreviousPane, window, cx| {
+                if view.model.focus_cycle(false) {
+                    view.sync(window, cx)
+                }
+            }))
+            .on_action(cx.listener(|view, _: &FocusNextPane, window, cx| {
+                if view.model.focus_cycle(true) {
+                    view.sync(window, cx)
+                }
+            }))
+            .on_action(cx.listener(|view, _: &EqualizePanes, window, cx| {
+                let tab = view.model.active_tab;
+                view.model.tabs[tab].layout.equalize();
+                view.sync(window, cx)
+            }))
+            .on_action(cx.listener(|_, _: &ToggleFullscreen, window, _| window.toggle_fullscreen()))
+            .on_action(cx.listener(|view, _: &ReloadSettings, _, cx| view.reload_from_disk(cx)))
             .on_action(cx.listener(|view, _: &CloseWindow, window, cx| {
                 view.shutdown(cx);
                 window.remove_window();
