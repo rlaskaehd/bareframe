@@ -315,38 +315,51 @@ fn tool_tab(
         )
 }
 
-/// Opens a file with its default macOS application until bareframe has its own viewers.
-/// Only plain documents are opened, by their resolved path so a symlink can't disguise a
-/// script or app; everything else is revealed in Finder, so a click never runs code.
+/// Opens a file outside bareframe until it has its own viewers. Only plain documents are
+/// opened, by their resolved path so a symlink can't disguise a script or app: text and
+/// source in the default text editor (a `.py` default handler may run it), images and
+/// PDFs in their viewer. Everything else is revealed in Finder, so a click never runs code.
 pub(super) fn open_externally(path: &Path) {
-    match std::fs::canonicalize(path) {
-        Ok(target) if is_document(&target) => {
-            if let Err(error) = std::process::Command::new("/usr/bin/open")
-                .arg(&target)
-                .spawn()
-            {
-                eprintln!("bareframe: opening {}: {error}", target.display());
-            }
-        }
-        _ => reveal_in_finder(path),
+    let target = std::fs::canonicalize(path).ok();
+    let mut open = std::process::Command::new("/usr/bin/open");
+    match target.as_deref().map(document_kind) {
+        Some(Some(Document::Text)) => open.arg("-t"),
+        Some(Some(Document::Media)) => &mut open,
+        _ => return reveal_in_finder(path),
+    };
+    let target = target.expect("a document kind implies a resolved path");
+    if let Err(error) = open.arg(&target).spawn() {
+        eprintln!("bareframe: opening {}: {error}", target.display());
     }
 }
 
-/// A regular, non-executable file with an extension known to open in a viewer or editor.
-fn is_document(path: &Path) -> bool {
+#[derive(Debug, PartialEq)]
+enum Document {
+    Text,
+    Media,
+}
+
+/// A regular, non-executable file with a known document extension.
+fn document_kind(path: &Path) -> Option<Document> {
     use std::os::unix::fs::PermissionsExt;
-    const DOCUMENTS: [&str; 38] = [
+    const TEXT: [&str; 31] = [
         "md", "markdown", "txt", "log", "csv", "tsv", "json", "jsonl", "toml", "yaml", "yml",
         "xml", "ini", "conf", "rs", "c", "h", "cc", "cpp", "hpp", "m", "swift", "zig", "go", "py",
-        "js", "ts", "tsx", "css", "png", "jpg", "jpeg", "gif", "svg", "webp", "pdf", "lock",
-        "patch",
+        "js", "ts", "tsx", "css", "lock", "patch",
     ];
+    const MEDIA: [&str; 6] = ["png", "jpg", "jpeg", "gif", "webp", "pdf"];
     let plain = std::fs::metadata(path)
         .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 == 0);
-    let extension = path
-        .extension()
-        .map(|extension| extension.to_string_lossy().to_lowercase());
-    plain && extension.is_some_and(|extension| DOCUMENTS.contains(&extension.as_str()))
+    let extension = path.extension()?.to_string_lossy().to_lowercase();
+    if !plain {
+        None
+    } else if TEXT.contains(&extension.as_str()) {
+        Some(Document::Text)
+    } else if MEDIA.contains(&extension.as_str()) {
+        Some(Document::Media)
+    } else {
+        None
+    }
 }
 
 pub(super) fn reveal_in_finder(path: &Path) {
@@ -366,7 +379,7 @@ fn shell_quote(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_document, shell_quote};
+    use super::{Document, document_kind, shell_quote};
 
     #[test]
     fn only_plain_documents_are_opened() {
@@ -384,10 +397,13 @@ mod tests {
         let disguised = dir.join("readme.md");
         let _ = std::fs::remove_file(&disguised);
         std::os::unix::fs::symlink(&command, &disguised).unwrap();
-        assert!(is_document(&note));
-        assert!(!is_document(&script), "executable bit");
-        assert!(!is_document(&command), "not on the list");
-        assert!(!is_document(&std::fs::canonicalize(&disguised).unwrap()));
+        assert_eq!(document_kind(&note), Some(Document::Text));
+        assert_eq!(document_kind(&script), None, "executable bit");
+        assert_eq!(document_kind(&command), None, "not on the list");
+        assert_eq!(
+            document_kind(&std::fs::canonicalize(&disguised).unwrap()),
+            None
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
