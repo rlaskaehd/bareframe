@@ -7,8 +7,25 @@ use gpui::{
 
 actions!(bareframe, [Quit, CloseWindow, Copy, Paste, RestartSession]);
 
+/// Debug builds write trace files when `BAREFRAME_VALIDATION` is `1` (clean
+/// shell, the validation bundle's default) or `login` (the user's login shell).
 pub fn is_validation_instance() -> bool {
-    cfg!(debug_assertions) && std::env::var("BAREFRAME_VALIDATION").as_deref() == Ok("1")
+    validation_mode().is_some()
+}
+
+pub fn validation_uses_clean_shell() -> bool {
+    validation_mode() == Some("1")
+}
+
+fn validation_mode() -> Option<&'static str> {
+    if !cfg!(debug_assertions) {
+        return None;
+    }
+    match std::env::var("BAREFRAME_VALIDATION").as_deref() {
+        Ok("1") => Some("1"),
+        Ok("login") => Some("login"),
+        _ => None,
+    }
 }
 
 pub fn name() -> &'static str {

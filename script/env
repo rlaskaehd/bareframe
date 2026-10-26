@@ -16,3 +16,15 @@ if [[ -z "${ZIG:-}" ]]; then
     fi
 fi
 
+
+# Installs the zsh integration and its GPLv3 notice under $1/shell-integration,
+# where bareframe looks next to (run) or above (bundle) its executable.
+install_shell_integration() {
+    local source="$BAREFRAME_ROOT/vendor/gpui-libghostty/crates/gpui-ghostty/vendor/ghostty/src/shell-integration/zsh"
+    local target="$1/shell-integration"
+    rm -rf "$target"
+    mkdir -p "$target/zsh"
+    cp "$source/.zshenv" "$source/ghostty-integration" "$target/zsh/"
+    cp "$BAREFRAME_ROOT/resources/shell-integration/README" \
+        "$BAREFRAME_ROOT/resources/shell-integration/COPYING" "$target/"
+}

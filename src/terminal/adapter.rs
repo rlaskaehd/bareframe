@@ -46,6 +46,25 @@ impl GhosttyAdapter {
     ) -> Result<Entity<Self>, String> {
         let mut options = TerminalOptions::new(config.command(), config.cwd.clone());
         options.quiet_login = true;
+        // bareframe injects the integration itself, so Ghostty's own detection,
+        // which depends on an inherited resources dir, stays off.
+        options.extra_config = GHOSTTY_SHELL_CONFIG.into();
+        let integration = shell_integration_dir();
+        options.environment = config.shell_integration_environment(
+            integration.as_deref(),
+            std::env::var_os("ZDOTDIR").as_deref(),
+        );
+        trace(
+            TERMINAL_TRACE,
+            &format!(
+                "spawn {key:?} integration={:?}",
+                options
+                    .environment
+                    .iter()
+                    .find(|(name, _)| name == "ZDOTDIR")
+                    .map(|(_, dir)| dir)
+            ),
+        );
         options.clipboard_approval = Some(std::sync::Arc::new(|request| {
             request.operation == ClipboardOperation::Paste
         }));
@@ -85,6 +104,7 @@ impl GhosttyAdapter {
     }
 
     fn emit(&self, kind: TerminalEventKind, cx: &mut Context<Self>) {
+        trace(TERMINAL_TRACE, &format!("{:?} {kind:?}", self.key));
         cx.emit(TerminalEvent {
             key: self.key,
             kind,
@@ -501,16 +521,44 @@ fn mouse_button(value: gpui::MouseButton) -> MouseButton {
     }
 }
 
+const INPUT_TRACE: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/target/validation/input-trace.txt"
+);
+const TERMINAL_TRACE: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/target/validation/terminal-events.txt"
+);
+
+/// OSC 133 and OSC 7 stay on; cursor shape, title and PATH keep MVP 1 behavior.
+const GHOSTTY_SHELL_CONFIG: &str =
+    "shell-integration = none\nshell-integration-features = no-cursor,no-title,no-path\n";
+
+/// `script/bundle` installs the zsh integration in the app's Resources and
+/// `script/run` next to the development binary. Without it zsh runs plainly.
+fn shell_integration_dir() -> Option<std::path::PathBuf> {
+    let executable = std::env::current_exe().ok()?.canonicalize().ok()?;
+    let directory = executable.parent()?;
+    [
+        directory.join("../Resources/shell-integration/zsh"),
+        directory.join("shell-integration/zsh"),
+    ]
+    .into_iter()
+    .find(|dir| dir.join(".zshenv").is_file() && dir.join("ghostty-integration").is_file())
+    .and_then(|dir| dir.canonicalize().ok())
+}
+
 fn trace_input(message: &str) {
+    trace(INPUT_TRACE, message);
+}
+
+fn trace(path: &str, message: &str) {
     if crate::app::is_validation_instance() {
         use std::io::Write;
         if let Ok(mut log) = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
-            .open(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/target/validation/input-trace.txt"
-            ))
+            .open(path)
         {
             let _ = writeln!(log, "{message}");
         }

@@ -8,6 +8,7 @@ if [[ -z "${ZIG:-}" || ! -f Cargo.lock ]]; then
     exit 1
 fi
 cargo build --locked
+install_shell_integration "$CARGO_TARGET_DIR/debug"
 binary_path="$(cd "$CARGO_TARGET_DIR/debug" && pwd)/bareframe"
 cd "$launch_directory"
 exec "$binary_path" "$@"
