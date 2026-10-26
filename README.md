@@ -33,4 +33,5 @@ Rust 1.98.1은 `rust-toolchain.toml`로 선택하며 전역 기본 toolchain을 
 - `vendor/gpui-libghostty`: 고정된 upstream 사본과 macOS 통합 수정.
 - `reference/`: 변경하지 않는 upstream 참조 자료.
 
-후속 Block Engine과의 연결 범위는 [MVP 2 확장 경계](docs/mvp-2-boundary.md)에 정리했다.
+후속 Block Engine과의 연결 범위는 [MVP 2 확장 경계](docs/mvp-2-boundary.md), 구현 단계는 [MVP 2 구현 계획](docs/mvp-2-plan.md)에 정리했다.
+작업 흐름은 [Git 전략](docs/git-strategy.md)을 따른다.
