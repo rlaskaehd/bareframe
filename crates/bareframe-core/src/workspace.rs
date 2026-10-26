@@ -162,34 +162,49 @@ impl Layout {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct GroupId(pub u64);
 
+/// Stable tab identity; indices shift whenever tabs move.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct TabId(pub u64);
+
 /// A named set of adjacent tabs, like a browser tab group.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Group {
     pub id: GroupId,
-    pub name: String,
+    /// Unnamed groups are shown as "New Group", as in Warp.
+    pub name: Option<String>,
     /// Index into the UI's group color list.
     pub color: usize,
     pub collapsed: bool,
+    /// A pinned group sits with the pinned tabs at the top of the list.
+    pub pinned: bool,
 }
 
 pub const GROUP_COLORS: usize = 6;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Tab {
+    pub id: TabId,
     pub layout: Layout,
     pub active_pane: PaneId,
     pub group: Option<GroupId>,
     /// Part of the sidebar's multi-selection (shift-click range or cmd-click).
     pub selected: bool,
+    /// A user-chosen title that replaces the shell's.
+    pub title: Option<String>,
+    /// Only meaningful outside a group; a grouped tab follows its group's pin.
+    pub pinned: bool,
 }
 
 impl Tab {
-    fn new(pane: PaneId) -> Self {
+    fn new(id: TabId, pane: PaneId) -> Self {
         Self {
+            id,
             layout: Layout::Pane(pane),
             active_pane: pane,
             group: None,
             selected: false,
+            title: None,
+            pinned: false,
         }
     }
 
@@ -246,17 +261,19 @@ pub struct Workspace {
     pub groups: Vec<Group>,
     next_pane: u64,
     next_group: u64,
+    next_tab: u64,
 }
 
 impl Workspace {
     pub fn new() -> (Self, PaneId) {
         let pane = PaneId(1);
         let workspace = Self {
-            tabs: vec![Tab::new(pane)],
+            tabs: vec![Tab::new(TabId(1), pane)],
             active_tab: 0,
             groups: Vec::new(),
             next_pane: 2,
             next_group: 1,
+            next_tab: 2,
         };
         (workspace, pane)
     }
@@ -265,6 +282,79 @@ impl Workspace {
         let pane = PaneId(self.next_pane);
         self.next_pane += 1;
         pane
+    }
+
+    fn fresh_tab(&mut self, pane: PaneId) -> Tab {
+        let id = TabId(self.next_tab);
+        self.next_tab += 1;
+        Tab::new(id, pane)
+    }
+
+    pub fn tab_index(&self, id: TabId) -> Option<usize> {
+        self.tabs.iter().position(|tab| tab.id == id)
+    }
+
+    fn is_pinned(&self, tab: &Tab) -> bool {
+        match tab.group {
+            Some(group) => self.group(group).is_some_and(|group| group.pinned),
+            None => tab.pinned,
+        }
+    }
+
+    pub fn tab_pinned(&self, index: usize) -> bool {
+        self.tabs.get(index).is_some_and(|tab| self.is_pinned(tab))
+    }
+
+    /// An empty title clears the custom title.
+    pub fn rename_tab(&mut self, id: TabId, title: &str) {
+        if let Some(index) = self.tab_index(id) {
+            let title = title.trim();
+            self.tabs[index].title = (!title.is_empty()).then(|| title.to_owned());
+        }
+    }
+
+    pub fn rename_group(&mut self, id: GroupId, name: &str) {
+        if let Some(group) = self.groups.iter_mut().find(|group| group.id == id) {
+            let name = name.trim();
+            group.name = (!name.is_empty()).then(|| name.to_owned());
+        }
+    }
+
+    /// Pinning an ungrouped tab; a grouped tab is pinned through its group.
+    pub fn set_tab_pinned(&mut self, index: usize, pinned: bool) {
+        if let Some(tab) = self.tabs.get_mut(index).filter(|tab| tab.group.is_none()) {
+            tab.pinned = pinned;
+            self.normalize();
+        }
+    }
+
+    pub fn set_group_pinned(&mut self, id: GroupId, pinned: bool) {
+        if let Some(group) = self.groups.iter_mut().find(|group| group.id == id) {
+            group.pinned = pinned;
+            self.normalize();
+        }
+    }
+
+    /// Swaps a group with the neighbouring tab or group, staying within its pin region.
+    pub fn move_group(&mut self, id: GroupId, up: bool) {
+        let active = self.active_pane();
+        let mut units: Vec<Vec<Tab>> = Vec::new();
+        for tab in std::mem::take(&mut self.tabs) {
+            match units.last_mut() {
+                Some(unit) if tab.group.is_some() && unit[0].group == tab.group => unit.push(tab),
+                _ => units.push(vec![tab]),
+            }
+        }
+        if let Some(at) = units.iter().position(|unit| unit[0].group == Some(id)) {
+            let other = if up { at.checked_sub(1) } else { Some(at + 1) };
+            if let Some(other) = other.filter(|&other| other < units.len())
+                && self.is_pinned(&units[other][0]) == self.is_pinned(&units[at][0])
+            {
+                units.swap(at, other);
+            }
+        }
+        self.tabs = units.into_iter().flatten().collect();
+        self.active_tab = self.tab_of(active).unwrap_or(0);
     }
 
     pub fn active(&self) -> &Tab {
@@ -286,8 +376,9 @@ impl Workspace {
     /// Opens a tab after the active one, in the same group, and selects it.
     pub fn new_tab(&mut self) -> PaneId {
         let pane = self.allocate();
-        let mut tab = Tab::new(pane);
+        let mut tab = self.fresh_tab(pane);
         tab.group = self.active().group;
+        tab.pinned = self.active().group.is_none() && self.active().pinned;
         self.active_tab += 1;
         self.tabs.insert(self.active_tab, tab);
         pane
@@ -314,7 +405,7 @@ impl Workspace {
         }
         if self.tabs.len() == 1 {
             let fresh = self.allocate();
-            self.tabs[0] = Tab::new(fresh);
+            self.tabs[0] = self.fresh_tab(fresh);
             self.normalize();
             return Some(Closed::Replaced(fresh));
         }
@@ -413,11 +504,14 @@ impl Workspace {
         let active = self.active_pane();
         let id = GroupId(self.next_group);
         self.next_group += 1;
+        // A group made from pinned tabs stays pinned.
+        let pinned = indices.iter().all(|&index| self.tab_pinned(index));
         self.groups.push(Group {
             id,
-            name: format!("Group {}", id.0),
+            name: None,
             color: (id.0 as usize - 1) % GROUP_COLORS,
             collapsed: false,
+            pinned,
         });
         let mut block = self.take(indices);
         for tab in &mut block {
@@ -458,6 +552,8 @@ impl Workspace {
         let mut block = self.take(indices);
         for tab in &mut block {
             tab.group = None;
+            // Tabs leaving a group are unpinned, as in Warp.
+            tab.pinned = false;
         }
         let at = self
             .tabs
@@ -486,18 +582,23 @@ impl Workspace {
         groups.all(|group| group == Some(first)).then_some(first)
     }
 
-    /// Moves the tab at `from` to sit before index `to` (`to == len` appends) and sets its group.
-    pub fn move_tab(&mut self, from: usize, to: usize, group: Option<GroupId>) {
-        if from >= self.tabs.len() || to > self.tabs.len() {
+    /// Moves the tabs at `indices` to sit before index `to` (`to == len` appends), in
+    /// their order, and sets their group.
+    pub fn move_tabs(&mut self, indices: &[usize], to: usize, group: Option<GroupId>) {
+        if to > self.tabs.len() || indices.iter().any(|&index| index >= self.tabs.len()) {
             return;
         }
+        let group = group.filter(|id| self.group(*id).is_some());
         let active = self.active_pane();
-        let mut tab = self.tabs.remove(from);
-        tab.group = group.filter(|id| self.group(*id).is_some());
-        let to = if from < to { to - 1 } else { to };
-        self.tabs.insert(to, tab);
-        self.active_tab = self.tab_of(active).unwrap_or(0);
-        self.normalize();
+        let before = indices.iter().filter(|&&index| index < to).count();
+        let mut block = self.take(indices);
+        for tab in &mut block {
+            if tab.group != group {
+                tab.pinned = false;
+            }
+            tab.group = group;
+        }
+        self.put(to - before, block, active);
     }
 
     pub fn toggle_group(&mut self, id: GroupId) {
@@ -533,10 +634,16 @@ impl Workspace {
                 }
             }
         }
-        self.active_tab = self.tab_of(active).unwrap_or(0);
         let tabs = &self.tabs;
         self.groups
             .retain(|group| tabs.iter().any(|tab| tab.group == Some(group.id)));
+        // Pinned tabs and groups lead the list; the partition keeps groups contiguous
+        // because every member shares its group's pin.
+        let (pinned, rest): (Vec<Tab>, Vec<Tab>) = std::mem::take(&mut self.tabs)
+            .into_iter()
+            .partition(|tab| self.is_pinned(tab));
+        self.tabs = pinned.into_iter().chain(rest).collect();
+        self.active_tab = self.tab_of(active).unwrap_or(0);
     }
 
     pub fn select_tab(&mut self, index: usize) -> bool {
@@ -629,7 +736,7 @@ mod tests {
         let c = ws.new_tab();
         let group = ws.new_group(&[0]).unwrap();
         // c joins by being dropped onto the group; it moves next to a.
-        ws.move_tab(2, 3, Some(group));
+        ws.move_tabs(&[2], 3, Some(group));
         let order = |ws: &Workspace| ws.tabs.iter().map(|t| t.active_pane).collect::<Vec<_>>();
         assert_eq!(order(&ws), [a, c, b]);
         assert_eq!(ws.active_pane(), c);
@@ -690,6 +797,53 @@ mod tests {
         ws.select_tab(0);
         ws.select_range(1);
         assert!(!ws.group(group).unwrap().collapsed);
+    }
+
+    #[test]
+    fn pins_lead_the_list_and_groups_move_within_their_region() {
+        let (mut ws, a) = Workspace::new();
+        let b = ws.new_tab();
+        let c = ws.new_tab();
+        let d = ws.new_tab();
+        let order = |ws: &Workspace| ws.tabs.iter().map(|t| t.active_pane).collect::<Vec<_>>();
+        ws.set_tab_pinned(2, true);
+        assert_eq!(order(&ws), [c, a, b, d]);
+        assert_eq!(ws.active_pane(), d);
+        let group = ws.new_group(&[2, 3]).unwrap();
+        assert_eq!(order(&ws), [c, a, b, d]);
+        ws.move_group(group, true);
+        assert_eq!(order(&ws), [c, b, d, a]);
+        // The pinned tab blocks moving further up.
+        ws.move_group(group, true);
+        assert_eq!(order(&ws), [c, b, d, a]);
+        ws.set_group_pinned(group, true);
+        assert!(ws.tab_pinned(2));
+        // Leaving a pinned group unpins the tab and sends it after the pinned region.
+        ws.remove_from_group(&[1]);
+        assert_eq!(order(&ws), [c, d, b, a]);
+        assert!(!ws.tab_pinned(2));
+    }
+
+    #[test]
+    fn several_tabs_move_together_and_titles_can_be_renamed() {
+        let (mut ws, a) = Workspace::new();
+        let b = ws.new_tab();
+        let c = ws.new_tab();
+        let d = ws.new_tab();
+        let order = |ws: &Workspace| ws.tabs.iter().map(|t| t.active_pane).collect::<Vec<_>>();
+        ws.move_tabs(&[0, 2], 4, None);
+        assert_eq!(order(&ws), [b, d, a, c]);
+        ws.move_tabs(&[2, 3], 0, None);
+        assert_eq!(order(&ws), [a, c, b, d]);
+        let id = ws.tabs[0].id;
+        ws.rename_tab(id, "  server  ");
+        assert_eq!(ws.tabs[0].title.as_deref(), Some("server"));
+        ws.rename_tab(id, " ");
+        assert_eq!(ws.tabs[0].title, None);
+        let group = ws.new_group(&[0]).unwrap();
+        assert_eq!(ws.group(group).unwrap().name, None);
+        ws.rename_group(group, "작업");
+        assert_eq!(ws.group(group).unwrap().name.as_deref(), Some("작업"));
     }
 
     #[test]

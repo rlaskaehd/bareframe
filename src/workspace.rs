@@ -1,12 +1,13 @@
 use crate::{
     app::{self, *},
     pane::{PaneEvent, TerminalPane},
+    rename::{RenameEvent, RenameInput},
     theme::{self, Theme, hsla},
 };
 use bareframe_core::{
     config::LaunchConfig,
     settings::{Settings, ThemeName},
-    workspace::{Axis, Closed, Direction, GroupId, Layout, PaneId, Tab, Workspace},
+    workspace::{Axis, Closed, Direction, GroupId, Layout, PaneId, Tab, TabId, Workspace},
 };
 use gpui::{
     AnyElement, Bounds, Context, CursorStyle, Entity, FocusHandle, MouseButton, MouseDownEvent,
@@ -21,10 +22,10 @@ const SIDEBAR_DEFAULT_WIDTH: f32 = 248.0;
 const SIDEBAR_MIN_WIDTH: f32 = 200.0;
 const SIDEBAR_MAX_SHARE: f32 = 0.5;
 
-/// A tab being dragged in the sidebar; also renders the drag preview.
+/// Tabs being dragged in the sidebar (the selection, or one tab); also renders the preview.
 #[derive(Clone)]
 struct DraggedTab {
-    index: usize,
+    indices: Vec<usize>,
     title: String,
     background: u32,
     text: u32,
@@ -48,13 +49,24 @@ impl Render for DraggedTab {
 /// terminal's native surface covers anything drawn over it.
 const MENU_WIDTH: f32 = 188.0;
 
+#[derive(Clone, Copy, PartialEq)]
+enum RenameTarget {
+    Tab(TabId),
+    Group(GroupId),
+}
+
 #[derive(Clone)]
 enum MenuAction {
+    Rename(RenameTarget),
     NewGroup(Vec<usize>),
+    /// Replaces the menu with the destination groups, as Warp's submenu does.
+    ShowMoveTargets(Vec<usize>),
     MoveToGroup(Vec<usize>, GroupId),
     RemoveFromGroup(Vec<usize>),
+    PinTab(usize, bool),
+    PinGroup(GroupId, bool),
+    MoveGroup(GroupId, bool),
     CloseTabs(Vec<usize>),
-    CloseOtherTabs(usize),
     NewTabInGroup(GroupId),
     Ungroup(GroupId),
     CloseGroup(GroupId),
@@ -88,6 +100,7 @@ pub struct WorkspaceView {
     sidebar_width: f32,
     resizing_sidebar: bool,
     menu: Option<ContextMenu>,
+    renaming: Option<(RenameTarget, Entity<RenameInput>, Subscription)>,
     focus: FocusHandle,
     _quit: Subscription,
 }
@@ -113,6 +126,7 @@ impl WorkspaceView {
             sidebar_width: SIDEBAR_DEFAULT_WIDTH,
             resizing_sidebar: false,
             menu: None,
+            renaming: None,
             focus: cx.focus_handle(),
             _quit: cx.on_app_quit(|view, cx| {
                 view.shutdown(cx);
@@ -247,7 +261,7 @@ impl WorkspaceView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.model.move_tab(dragged.index, to, group);
+        self.model.move_tabs(&dragged.indices, to, group);
         self.sync(window, cx);
     }
 
@@ -330,12 +344,17 @@ impl WorkspaceView {
         &mut self,
         index: usize,
         modifiers: gpui::Modifiers,
+        click_count: usize,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if modifiers.shift {
             self.model.select_range(index);
             cx.notify();
+        } else if click_count == 2 {
+            if let Some(tab) = self.model.tabs.get(index) {
+                self.start_rename(RenameTarget::Tab(tab.id), window, cx);
+            }
         } else if modifiers.platform {
             self.model.toggle_selected(index);
             cx.notify();
@@ -364,12 +383,77 @@ impl WorkspaceView {
     fn group_label(&self, id: GroupId) -> String {
         self.model
             .group(id)
-            .map_or_else(|| "group".into(), |group| group.name.clone())
+            .and_then(|group| group.name.clone())
+            .unwrap_or_else(|| "New Group".into())
+    }
+
+    fn start_rename(&mut self, target: RenameTarget, window: &mut Window, cx: &mut Context<Self>) {
+        let text = match target {
+            RenameTarget::Tab(id) => match self.model.tab_index(id) {
+                Some(index) => self.tab_title(&self.model.tabs[index], cx),
+                None => return,
+            },
+            RenameTarget::Group(id) => match self.model.group(id) {
+                Some(group) => group.name.clone().unwrap_or_default(),
+                None => return,
+            },
+        };
+        let accent = self.theme().accent;
+        let input = cx.new(|cx| RenameInput::new(&text, accent, window, cx));
+        let subscription = cx.subscribe_in(&input, window, move |view, _, event, window, cx| {
+            view.finish_rename(target, event, window, cx)
+        });
+        self.renaming = Some((target, input, subscription));
+        cx.notify();
+    }
+
+    fn finish_rename(
+        &mut self,
+        target: RenameTarget,
+        event: &RenameEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.renaming.as_ref().map(|(current, _, _)| *current) != Some(target) {
+            return;
+        }
+        self.renaming = None;
+        if let RenameEvent::Confirm(text) = event {
+            match target {
+                RenameTarget::Tab(id) => self.model.rename_tab(id, text),
+                RenameTarget::Group(id) => self.model.rename_group(id, text),
+            }
+        }
+        self.sync(window, cx);
+    }
+
+    /// The rename field for `target`, if it is being renamed.
+    fn rename_field(&self, target: RenameTarget) -> Option<AnyElement> {
+        let (current, input, _) = self.renaming.as_ref()?;
+        let theme = self.theme();
+        (*current == target).then(|| {
+            div()
+                .flex_1()
+                .min_w_0()
+                .overflow_hidden()
+                .px_1()
+                .rounded_sm()
+                .bg(hsla(theme.terminal_background))
+                .border_1()
+                .border_color(hsla(theme.accent))
+                .text_color(hsla(theme.text))
+                .child(input.clone())
+                .into_any_element()
+        })
     }
 
     /// Right-clicking a tab in a multi-selection acts on the selection; any other
     /// tab clears the selection and gets its own menu.
     fn open_tab_menu(&mut self, index: usize, position: Point<Pixels>, cx: &mut Context<Self>) {
+        let Some(tab) = self.model.tabs.get(index) else {
+            return;
+        };
+        let (id, grouped) = (tab.id, tab.group.is_some());
         let selection = self.model.selected_indices();
         let targets = if selection.len() > 1 && selection.contains(&index) {
             selection
@@ -377,22 +461,34 @@ impl WorkspaceView {
             self.model.clear_selection();
             vec![index]
         };
-        let mut items = Vec::new();
-        if targets.len() > 1 {
+        let multiple = targets.len() > 1;
+        let mut items: Vec<(String, MenuAction)> = Vec::new();
+        if !multiple {
             items.push((
-                "Create group from tabs".into(),
-                MenuAction::NewGroup(targets.clone()),
+                "Rename tab".into(),
+                MenuAction::Rename(RenameTarget::Tab(id)),
             ));
-        } else {
-            items.push((
-                "New group with tab".into(),
-                MenuAction::NewGroup(targets.clone()),
-            ));
+            if !grouped {
+                let pinned = self.model.tab_pinned(index);
+                items.push((
+                    if pinned { "Unpin tab" } else { "Pin tab" }.into(),
+                    MenuAction::PinTab(index, !pinned),
+                ));
+            }
         }
-        for group in self.model.destination_groups(&targets) {
+        items.push((
+            if multiple {
+                "Create group from tabs"
+            } else {
+                "New group with tab"
+            }
+            .into(),
+            MenuAction::NewGroup(targets.clone()),
+        ));
+        if !self.model.destination_groups(&targets).is_empty() {
             items.push((
-                format!("Move to {}", self.group_label(group)),
-                MenuAction::MoveToGroup(targets.clone(), group),
+                "Move to group ›".into(),
+                MenuAction::ShowMoveTargets(targets.clone()),
             ));
         }
         if self.model.shared_group(&targets).is_some() {
@@ -401,24 +497,46 @@ impl WorkspaceView {
                 MenuAction::RemoveFromGroup(targets.clone()),
             ));
         }
-        if targets.len() > 1 {
+        let count = self.model.tabs.len();
+        if multiple {
             items.push((
                 format!("Close {} tabs", targets.len()),
                 MenuAction::CloseTabs(targets),
             ));
         } else {
             items.push(("Close tab".into(), MenuAction::CloseTabs(targets)));
-            if self.model.tabs.len() > 1 {
-                items.push(("Close other tabs".into(), MenuAction::CloseOtherTabs(index)));
+            if count > 1 {
+                let others = (0..count).filter(|&i| i != index).collect();
+                items.push(("Close other tabs".into(), MenuAction::CloseTabs(others)));
+            }
+            if index > 0 {
+                items.push((
+                    "Close tabs above".into(),
+                    MenuAction::CloseTabs((0..index).collect()),
+                ));
+            }
+            if index + 1 < count {
+                items.push((
+                    "Close tabs below".into(),
+                    MenuAction::CloseTabs((index + 1..count).collect()),
+                ));
             }
         }
         self.open_menu(position, items, cx);
     }
 
     fn open_group_menu(&mut self, id: GroupId, position: Point<Pixels>, cx: &mut Context<Self>) {
-        let collapsed = self.model.group(id).is_some_and(|group| group.collapsed);
+        let Some(group) = self.model.group(id) else {
+            return;
+        };
+        let (collapsed, pinned) = (group.collapsed, group.pinned);
         self.model.clear_selection();
-        let items = vec![
+        let members = self.model.group_tabs(id);
+        let others: Vec<usize> = (0..self.model.tabs.len())
+            .filter(|index| !members.contains(index))
+            .collect();
+        let mut items: Vec<(String, MenuAction)> = vec![
+            ("Rename".into(), MenuAction::Rename(RenameTarget::Group(id))),
             ("New tab in group".into(), MenuAction::NewTabInGroup(id)),
             (
                 if collapsed {
@@ -429,9 +547,18 @@ impl WorkspaceView {
                 .into(),
                 MenuAction::ToggleGroup(id),
             ),
+            (
+                if pinned { "Unpin group" } else { "Pin group" }.into(),
+                MenuAction::PinGroup(id, !pinned),
+            ),
+            ("Move group up".into(), MenuAction::MoveGroup(id, true)),
+            ("Move group down".into(), MenuAction::MoveGroup(id, false)),
             ("Ungroup tabs".into(), MenuAction::Ungroup(id)),
             ("Close all tabs in group".into(), MenuAction::CloseGroup(id)),
         ];
+        if !others.is_empty() {
+            items.push(("Close other tabs".into(), MenuAction::CloseTabs(others)));
+        }
         self.open_menu(position, items, cx);
     }
 
@@ -447,19 +574,37 @@ impl WorkspaceView {
     }
 
     fn run_menu_action(&mut self, action: MenuAction, window: &mut Window, cx: &mut Context<Self>) {
+        if let MenuAction::ShowMoveTargets(tabs) = &action {
+            let items = self
+                .model
+                .destination_groups(tabs)
+                .into_iter()
+                .map(|group| {
+                    (
+                        self.group_label(group),
+                        MenuAction::MoveToGroup(tabs.clone(), group),
+                    )
+                })
+                .collect();
+            if let Some(menu) = &mut self.menu {
+                menu.items = items;
+            }
+            cx.notify();
+            return;
+        }
         self.menu = None;
         match action {
+            MenuAction::Rename(target) => return self.start_rename(target, window, cx),
             MenuAction::NewGroup(tabs) => {
                 self.model.new_group(&tabs);
             }
+            MenuAction::ShowMoveTargets(_) => {}
             MenuAction::MoveToGroup(tabs, group) => self.model.move_to_group(&tabs, group),
             MenuAction::RemoveFromGroup(tabs) => self.model.remove_from_group(&tabs),
+            MenuAction::PinTab(index, pinned) => self.model.set_tab_pinned(index, pinned),
+            MenuAction::PinGroup(group, pinned) => self.model.set_group_pinned(group, pinned),
+            MenuAction::MoveGroup(group, up) => self.model.move_group(group, up),
             MenuAction::CloseTabs(tabs) => self.close_tabs(&tabs, window, cx),
-            MenuAction::CloseOtherTabs(keep) => {
-                let others: Vec<usize> =
-                    (0..self.model.tabs.len()).filter(|&i| i != keep).collect();
-                self.close_tabs(&others, window, cx);
-            }
             MenuAction::NewTabInGroup(group) => self.new_tab_in_group(group, window, cx),
             MenuAction::Ungroup(group) => {
                 let tabs = self.model.group_tabs(group);
@@ -520,10 +665,13 @@ impl WorkspaceView {
         .with_priority(1)
     }
 
+    /// A custom title wins over the shell's, as in Warp.
     fn tab_title(&self, tab: &Tab, cx: &Context<Self>) -> String {
-        self.panes
-            .get(&tab.active_pane)
-            .map_or_else(String::new, |(pane, _)| pane.read(cx).title())
+        tab.title.clone().unwrap_or_else(|| {
+            self.panes
+                .get(&tab.active_pane)
+                .map_or_else(String::new, |(pane, _)| pane.read(cx).title())
+        })
     }
 
     /// The second line of a tab row: the `~` path, unless the title already shows it.
@@ -537,6 +685,17 @@ impl WorkspaceView {
         let mut rows = Vec::new();
         let mut previous = None;
         for (index, tab) in self.model.tabs.iter().enumerate() {
+            if index > 0 && self.model.tab_pinned(index - 1) && !self.model.tab_pinned(index) {
+                rows.push(
+                    div()
+                        .flex_shrink_0()
+                        .h(px(1.0))
+                        .mx_2()
+                        .my_1()
+                        .bg(hsla(theme.border))
+                        .into_any_element(),
+                );
+            }
             if tab.group != previous {
                 if let Some(group) = tab.group {
                     rows.push(self.render_group_header(group, cx));
@@ -692,7 +851,7 @@ impl WorkspaceView {
             .flex_shrink_0()
             .items_center()
             .gap_2()
-            .h(px(26.0))
+            .min_h(px(34.0))
             .mt_1()
             .px_2()
             .rounded_md()
@@ -720,20 +879,31 @@ impl WorkspaceView {
                     .child(if group.collapsed { "▸" } else { "▾" }),
             )
             .child(div().size(px(8.0)).rounded_full().bg(color))
-            .child(
-                div()
+            .child(match self.rename_field(RenameTarget::Group(id)) {
+                Some(field) => field,
+                None => div()
                     .flex_1()
                     .min_w_0()
-                    .truncate()
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .child(group.name.clone()),
-            )
-            .child(
-                div()
-                    .text_color(hsla(theme.text_muted))
-                    .group_hover(hover.clone(), |style| style.invisible())
-                    .child(tabs.len().to_string()),
-            )
+                    .flex()
+                    .flex_col()
+                    .child(
+                        div()
+                            .truncate()
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .child(self.group_label(id)),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(11.0))
+                            .text_color(hsla(theme.text_muted))
+                            .child(match tabs.len() {
+                                1 => "1 tab".to_owned(),
+                                count => format!("{count} tabs"),
+                            }),
+                    )
+                    .into_any_element(),
+            })
+            .when(group.pinned, |this| this.child(pin_mark(theme)))
             .child(
                 div()
                     .flex()
@@ -773,8 +943,16 @@ impl WorkspaceView {
             .map(|group| hsla(theme.group_colors[group.color]));
         let hover = format!("tab-{index}");
         let dragged = DraggedTab {
-            index,
-            title: title.clone(),
+            title: if selected {
+                format!("{} tabs", selection.len())
+            } else {
+                title.clone()
+            },
+            indices: if selected {
+                selection.clone()
+            } else {
+                vec![index]
+            },
             background: theme.tab_active,
             text: theme.text,
         };
@@ -806,7 +984,7 @@ impl WorkspaceView {
             })
             .on_click(
                 cx.listener(move |view, event: &gpui::ClickEvent, window, cx| {
-                    view.click_tab(index, event.modifiers(), window, cx)
+                    view.click_tab(index, event.modifiers(), event.click_count(), window, cx)
                 }),
             )
             .on_mouse_down(
@@ -825,8 +1003,9 @@ impl WorkspaceView {
             .when_some(color, |this, color| {
                 this.child(div().w(px(3.0)).h(px(14.0)).rounded_sm().bg(color))
             })
-            .child(
-                div()
+            .child(match self.rename_field(RenameTarget::Tab(tab.id)) {
+                Some(field) => field,
+                None => div()
                     .flex_1()
                     .min_w_0()
                     .flex()
@@ -840,8 +1019,12 @@ impl WorkspaceView {
                                 .text_color(hsla(theme.text_muted))
                                 .child(subtitle),
                         )
-                    }),
-            )
+                    })
+                    .into_any_element(),
+            })
+            .when(group.is_none() && tab.pinned, |this| {
+                this.child(pin_mark(theme))
+            })
             .child(
                 icon_button(("close-tab", index), "×", theme)
                     .when(!active, |this| {
@@ -1152,4 +1335,12 @@ fn sidebar_icon(color: u32) -> impl IntoElement {
         .border_1()
         .border_color(hsla(color))
         .child(div().w(px(4.5)).h_full().bg(hsla(color)))
+}
+
+fn pin_mark(theme: &Theme) -> impl IntoElement {
+    div()
+        .flex_shrink_0()
+        .text_size(px(10.0))
+        .text_color(hsla(theme.text_muted))
+        .child("📌")
 }

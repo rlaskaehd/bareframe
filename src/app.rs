@@ -110,6 +110,7 @@ pub fn run(config: LaunchConfig) {
     let settings = load_settings();
     gpui_platform::application().run(move |cx: &mut App| {
         cx.on_action(|_: &Quit, cx| cx.quit());
+        cx.bind_keys(crate::rename::key_bindings());
         cx.bind_keys([
             KeyBinding::new("cmd-q", Quit, None),
             KeyBinding::new("cmd-shift-w", CloseWindow, None),
