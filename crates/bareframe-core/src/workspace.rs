@@ -195,6 +195,8 @@ pub struct Tab {
     pub pinned: bool,
     /// The active pane fills the tab; any layout change ends it, as in Warp.
     pub maximized: bool,
+    /// Index into the UI's color list; tints the tab's sidebar row.
+    pub color: Option<usize>,
 }
 
 impl Tab {
@@ -208,6 +210,7 @@ impl Tab {
             title: None,
             pinned: false,
             maximized: false,
+            color: None,
         }
     }
 
@@ -328,6 +331,37 @@ impl Workspace {
         if let Some(tab) = self.tabs.get_mut(index).filter(|tab| tab.group.is_none()) {
             tab.pinned = pinned;
             self.normalize();
+        }
+    }
+
+    pub fn set_tab_color(&mut self, index: usize, color: Option<usize>) {
+        if let Some(tab) = self.tabs.get_mut(index) {
+            tab.color = color.filter(|&color| color < GROUP_COLORS);
+        }
+    }
+
+    /// The neighbour a tab can swap with: same group and same pinned region.
+    pub fn can_move_tab(&self, index: usize, up: bool) -> bool {
+        let other = if up {
+            index.checked_sub(1)
+        } else {
+            index.checked_add(1)
+        };
+        let Some(other) = other else {
+            return false;
+        };
+        match (self.tabs.get(index), self.tabs.get(other)) {
+            (Some(tab), Some(neighbour)) => {
+                tab.group == neighbour.group && self.tab_pinned(index) == self.tab_pinned(other)
+            }
+            _ => false,
+        }
+    }
+
+    pub fn move_tab(&mut self, index: usize, up: bool) {
+        if self.can_move_tab(index, up) {
+            let group = self.tabs[index].group;
+            self.move_tabs(&[index], if up { index - 1 } else { index + 2 }, group);
         }
     }
 
@@ -726,6 +760,28 @@ mod tests {
         assert_eq!(ws.close(first), Some(Closed::Replaced(PaneId(5))));
         assert_eq!(ws.active().layout, Layout::Pane(PaneId(5)));
         assert_eq!(ws.close(PaneId(99)), None);
+    }
+
+    #[test]
+    fn move_tab_stays_inside_its_group_and_pin_region() {
+        let (mut ws, a) = Workspace::new();
+        let b = ws.new_tab();
+        let c = ws.new_tab();
+        ws.set_tab_pinned(0, true);
+        assert!(
+            !ws.can_move_tab(0, false),
+            "pinned tab can't pass unpinned ones"
+        );
+        assert!(!ws.can_move_tab(0, true));
+        ws.move_tab(2, true);
+        assert_eq!(ws.panes().collect::<Vec<_>>(), [a, c, b]);
+        assert_eq!(ws.active_pane(), c, "the active tab follows its pane");
+        ws.new_group(&[1]);
+        assert!(!ws.can_move_tab(2, true), "can't leave its group by moving");
+        ws.set_tab_color(2, Some(1));
+        assert_eq!(ws.tabs[2].color, Some(1));
+        ws.set_tab_color(2, Some(99));
+        assert_eq!(ws.tabs[2].color, None);
     }
 
     #[test]

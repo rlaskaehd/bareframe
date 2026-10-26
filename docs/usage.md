@@ -40,7 +40,9 @@ MVP 1의 셸 실행 모드는 zsh를 기준으로 한다. 다른 셸을 지정�
 | `Cmd+Shift+B` | 탭 사이드바 열기·닫기(상단 바 왼쪽 버튼과 같음) |
 | `Cmd+Shift+W` | 창 닫기 |
 
-- 탭은 왼쪽 사이드바에 세로로 표시된다. 사이드바 위의 `+`로 새 탭을 열고, 탭의 `×`로 그 탭의 모든 Pane을 닫는다.
+- 탭은 왼쪽 사이드바에 Warp처럼 `>_` 아이콘, 제목, 위치 순의 카드로 표시되고 탭 사이는 선으로 나뉜다. 분할된 탭은 활성 Pane 하나만 보여 준다.
+- 사이드바 위 `+`로 새 탭을 연다. 탭에 마우스를 올리면 오른쪽 위에 `⋮`(우클릭 메뉴와 같음)와 `×`(그 탭의 모든 Pane 닫기)가 나타난다.
+- 사이드바 위 `Search tabs...`에 입력하면 제목이나 위치에 그 글자가 있는 탭만 보인다(한글 입력 가능). `Enter`는 첫 결과로 이동하며 검색을 끝내고, `Esc`는 검색을 지운다.
 - 사이드바 오른쪽 가장자리를 끌어 너비를 바꾼다(기본 248, 최소 200, 최대 창 너비의 절반).
 - 탭 제목은 셸 통합이 알려 준다. 프롬프트에서는 `~/Sandbox/bareframe` 같은 위치, 명령이 실행 중이면 그 명령이다. 제목이 위치와 다르면 둘째 줄에 위치를 표시한다. clean shell은 통합이 없어 시작 위치만 표시한다.
 - 새 탭과 분할은 활성 Pane의 현재 위치에서 시작한다.
@@ -49,9 +51,9 @@ MVP 1의 셸 실행 모드는 zsh를 기준으로 한다. 다른 셸을 지정�
 ### 탭 그룹
 
 - 여러 탭 선택(Warp와 같음): Shift+클릭은 활성 탭부터 클릭한 탭까지, Cmd+클릭은 한 탭씩 추가·제외한다. 일반 클릭은 선택을 풀고 그 탭으로 간다.
-- 탭 우클릭 메뉴: 여러 탭을 고른 상태면 `Create group from tabs`, `Move to group ›`, `Remove from group`, `Close N tabs`. 한 탭이면 `Rename tab`, `Pin/Unpin tab`(그룹 밖 탭), `New group with tab`, `Move to group ›`, `Remove from group`, `Close tab`, `Close other tabs`, `Close tabs above/below`.
+- 탭 우클릭 메뉴: 여러 탭을 고른 상태면 `Create group from tabs`, `Move to group ›`, `Remove from group`, `Close N tabs`. 한 탭이면 Warp 순서대로 구분선으로 나뉜 `Pin/Unpin tab`(그룹 밖 탭) / `New group with tab`, `Move to group ›`, `Remove from group` / `Copy pane title`, `Copy working directory` / `Rename tab`, `Move tab up/down`(같은 그룹·고정 영역 안에서) / `Close tab`, `Close other tabs`, `Close tabs above/below` / 탭 색상(없음과 6색, 고른 색으로 탭 카드가 물든다).
 - 그룹 헤더 우클릭 메뉴: `Rename`, `New tab in group`, `Collapse/Expand group`, `Pin/Unpin group`, `Move group up/down`, `Ungroup tabs`, `Close all tabs in group`, `Close other tabs`.
-- `Move to group ›`를 누르면 메뉴가 이동할 그룹 목록으로 바뀐다. 메뉴는 터미널 화면에 가리지 않도록 사이드바 안에만 그린다.
+- `Move to group ›`를 누르면 메뉴가 이동할 그룹 목록으로 바뀐다. 메뉴가 열린 동안 터미널은 정지 화면으로 바뀌어 메뉴가 터미널 위로 겹쳐도 가리지 않는다.
 
 ### 이름 변경과 고정
 
@@ -67,7 +69,6 @@ MVP 1의 셸 실행 모드는 zsh를 기준으로 한다. 다른 셸을 지정�
 - 탭이 모두 빠진 그룹은 사라진다.
 - Pane 경계를 끌어 크기를 조절한다. 클릭한 Pane이 활성 Pane이 된다.
 - Pane이 둘 이상이면 각 Pane 위에 헤더가 붙는다. 가운데에 제목, 오른쪽에 `⋮`(오른쪽/아래 분할, 최대화) 메뉴와 `×`(Pane 닫기)가 있고, 활성 Pane은 헤더 왼쪽 위에 파란 삼각형이 표시된다.
-- 분할된 탭은 사이드바에서 Pane마다 한 줄씩 펼쳐 보여 준다. 줄을 누르면 그 탭과 Pane으로 이동한다.
 
 ## 테마와 폰트
 

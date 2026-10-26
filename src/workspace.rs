@@ -73,6 +73,13 @@ enum MenuAction {
     ToggleGroup(GroupId),
     ToggleMaximize,
     Split(Axis),
+    CopyText(String),
+    MoveTab(usize, bool),
+    SetTabColor(usize, Option<usize>),
+    /// Rendered as a divider line.
+    Separator,
+    /// Rendered as the row of color dots for this tab.
+    TabColors(usize),
 }
 
 struct ContextMenu {
@@ -106,6 +113,8 @@ pub struct WorkspaceView {
     /// The shown surfaces are swapped for snapshots while a pane menu covers them.
     frozen: bool,
     renaming: Option<(RenameTarget, Entity<RenameInput>, Subscription)>,
+    /// The sidebar's tab filter: the field plus its event and change subscriptions.
+    search: Option<(Entity<RenameInput>, [Subscription; 2])>,
     focus: FocusHandle,
     _quit: Subscription,
 }
@@ -133,6 +142,7 @@ impl WorkspaceView {
             menu: None,
             frozen: false,
             renaming: None,
+            search: None,
             focus: cx.focus_handle(),
             _quit: cx.on_app_quit(|view, cx| {
                 view.shutdown(cx);
@@ -406,14 +416,64 @@ impl WorkspaceView {
         items: Vec<(String, MenuAction)>,
         cx: &mut Context<Self>,
     ) {
-        let x = f32::from(position.x)
-            .min(self.sidebar_width - MENU_WIDTH - 4.0)
-            .max(4.0);
-        self.menu = Some(ContextMenu {
-            position: gpui::point(px(x), position.y),
-            items,
-        });
+        self.menu = Some(ContextMenu { position, items });
+        // Menus may hang over the terminals, which native surfaces would otherwise cover.
+        if !self.frozen {
+            self.set_frozen(true, cx);
+        }
         cx.notify();
+    }
+
+    fn start_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.search.is_some() {
+            return;
+        }
+        let accent = self.theme().accent;
+        let input = cx.new(|cx| RenameInput::search(accent, window, cx));
+        let events = cx.subscribe_in(&input, window, |view, _, event, window, cx| {
+            view.finish_search(event, window, cx)
+        });
+        let changes = cx.observe(&input, |_, _, cx| cx.notify());
+        self.search = Some((input, [events, changes]));
+        cx.notify();
+    }
+
+    /// Enter jumps to the first match; Esc clears the filter.
+    fn finish_search(&mut self, event: &RenameEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if let RenameEvent::Confirm(_) = event
+            && let Some(matches) = self.search_matches(cx)
+        {
+            let Some(&first) = matches.first() else {
+                return;
+            };
+            self.model.clear_selection();
+            self.model.select_tab(first);
+        }
+        self.search = None;
+        self.sync(window, cx);
+    }
+
+    /// Tabs whose title or path contains the query, or `None` when not searching.
+    fn search_matches(&self, cx: &Context<Self>) -> Option<Vec<usize>> {
+        let (input, _) = self.search.as_ref()?;
+        let query = input.read(cx).text().trim().to_lowercase();
+        if query.is_empty() {
+            return None;
+        }
+        let found = |text: String| text.to_lowercase().contains(&query);
+        Some(
+            (0..self.model.tabs.len())
+                .filter(|&index| {
+                    let tab = &self.model.tabs[index];
+                    let title = self.tab_title(tab, cx);
+                    let path = self
+                        .panes
+                        .get(&tab.active_pane)
+                        .map(|(pane, _)| pane.read(cx).display_cwd());
+                    found(title) || path.is_some_and(found)
+                })
+                .collect(),
+        )
     }
 
     fn group_label(&self, id: GroupId) -> String {
@@ -484,12 +544,12 @@ impl WorkspaceView {
     }
 
     /// Right-clicking a tab in a multi-selection acts on the selection; any other
-    /// tab clears the selection and gets its own menu.
+    /// tab clears the selection and gets its own menu. Sections follow Warp's order.
     fn open_tab_menu(&mut self, index: usize, position: Point<Pixels>, cx: &mut Context<Self>) {
         let Some(tab) = self.model.tabs.get(index) else {
             return;
         };
-        let (id, grouped) = (tab.id, tab.group.is_some());
+        let (id, grouped, pane) = (tab.id, tab.group.is_some(), tab.active_pane);
         let selection = self.model.selected_indices();
         let targets = if selection.len() > 1 && selection.contains(&index) {
             selection
@@ -498,21 +558,15 @@ impl WorkspaceView {
             vec![index]
         };
         let multiple = targets.len() > 1;
-        let mut items: Vec<(String, MenuAction)> = Vec::new();
-        if !multiple {
-            items.push((
-                "Rename tab".into(),
-                MenuAction::Rename(RenameTarget::Tab(id)),
-            ));
-            if !grouped {
-                let pinned = self.model.tab_pinned(index);
-                items.push((
-                    if pinned { "Unpin tab" } else { "Pin tab" }.into(),
-                    MenuAction::PinTab(index, !pinned),
-                ));
-            }
+        let mut sections: Vec<Vec<(String, MenuAction)>> = Vec::new();
+        if !multiple && !grouped {
+            let pinned = self.model.tab_pinned(index);
+            sections.push(vec![(
+                if pinned { "Unpin tab" } else { "Pin tab" }.into(),
+                MenuAction::PinTab(index, !pinned),
+            )]);
         }
-        items.push((
+        let mut grouping = vec![(
             if multiple {
                 "Create group from tabs"
             } else {
@@ -520,43 +574,74 @@ impl WorkspaceView {
             }
             .into(),
             MenuAction::NewGroup(targets.clone()),
-        ));
+        )];
         if !self.model.destination_groups(&targets).is_empty() {
-            items.push((
+            grouping.push((
                 "Move to group ›".into(),
                 MenuAction::ShowMoveTargets(targets.clone()),
             ));
         }
         if self.model.shared_group(&targets).is_some() {
-            items.push((
+            grouping.push((
                 "Remove from group".into(),
                 MenuAction::RemoveFromGroup(targets.clone()),
             ));
         }
+        sections.push(grouping);
         let count = self.model.tabs.len();
         if multiple {
-            items.push((
+            sections.push(vec![(
                 format!("Close {} tabs", targets.len()),
                 MenuAction::CloseTabs(targets),
-            ));
+            )]);
         } else {
-            items.push(("Close tab".into(), MenuAction::CloseTabs(targets)));
+            if let Some((pane, _)) = self.panes.get(&pane) {
+                let pane = pane.read(cx);
+                sections.push(vec![
+                    ("Copy pane title".into(), MenuAction::CopyText(pane.title())),
+                    (
+                        "Copy working directory".into(),
+                        MenuAction::CopyText(pane.cwd().display().to_string()),
+                    ),
+                ]);
+            }
+            let mut editing = vec![(
+                "Rename tab".into(),
+                MenuAction::Rename(RenameTarget::Tab(id)),
+            )];
+            if self.model.can_move_tab(index, true) {
+                editing.push(("Move tab up".into(), MenuAction::MoveTab(index, true)));
+            }
+            if self.model.can_move_tab(index, false) {
+                editing.push(("Move tab down".into(), MenuAction::MoveTab(index, false)));
+            }
+            sections.push(editing);
+            let mut closing = vec![("Close tab".into(), MenuAction::CloseTabs(targets))];
             if count > 1 {
                 let others = (0..count).filter(|&i| i != index).collect();
-                items.push(("Close other tabs".into(), MenuAction::CloseTabs(others)));
+                closing.push(("Close other tabs".into(), MenuAction::CloseTabs(others)));
             }
             if index > 0 {
-                items.push((
+                closing.push((
                     "Close tabs above".into(),
                     MenuAction::CloseTabs((0..index).collect()),
                 ));
             }
             if index + 1 < count {
-                items.push((
+                closing.push((
                     "Close tabs below".into(),
                     MenuAction::CloseTabs((index + 1..count).collect()),
                 ));
             }
+            sections.push(closing);
+            sections.push(vec![(String::new(), MenuAction::TabColors(index))]);
+        }
+        let mut items = Vec::new();
+        for section in sections {
+            if !items.is_empty() {
+                items.push((String::new(), MenuAction::Separator));
+            }
+            items.extend(section);
         }
         self.open_menu(position, items, cx);
     }
@@ -628,6 +713,9 @@ impl WorkspaceView {
             cx.notify();
             return;
         }
+        if matches!(action, MenuAction::Separator | MenuAction::TabColors(_)) {
+            return;
+        }
         self.dismiss_menu(cx);
         match action {
             MenuAction::Rename(target) => return self.start_rename(target, window, cx),
@@ -650,6 +738,12 @@ impl WorkspaceView {
             MenuAction::ToggleGroup(group) => self.model.toggle_group(group),
             MenuAction::ToggleMaximize => self.model.toggle_maximized(),
             MenuAction::Split(axis) => return self.split(axis, window, cx),
+            MenuAction::CopyText(text) => {
+                cx.write_to_clipboard(gpui::ClipboardItem::new_string(text))
+            }
+            MenuAction::MoveTab(index, up) => self.model.move_tab(index, up),
+            MenuAction::SetTabColor(index, color) => self.model.set_tab_color(index, color),
+            MenuAction::Separator | MenuAction::TabColors(_) => {}
         }
         self.sync(window, cx);
     }
@@ -670,23 +764,19 @@ impl WorkspaceView {
         } else {
             "Maximize pane\t⇧⌘↵"
         };
-        self.menu = Some(ContextMenu {
-            position: gpui::point(position.x - px(MENU_WIDTH - 12.0), position.y + px(12.0)),
-            items: vec![
-                (
-                    "Split pane right\t⌘D".into(),
-                    MenuAction::Split(Axis::Horizontal),
-                ),
-                (
-                    "Split pane down\t⇧⌘D".into(),
-                    MenuAction::Split(Axis::Vertical),
-                ),
-                (maximize.into(), MenuAction::ToggleMaximize),
-            ],
-        });
-        // The menu hangs over the terminals, which native surfaces would otherwise cover.
-        self.set_frozen(true, cx);
-        cx.notify();
+        let items = vec![
+            (
+                "Split pane right\t⌘D".into(),
+                MenuAction::Split(Axis::Horizontal),
+            ),
+            (
+                "Split pane down\t⇧⌘D".into(),
+                MenuAction::Split(Axis::Vertical),
+            ),
+            (maximize.into(), MenuAction::ToggleMaximize),
+        ];
+        let below = gpui::point(position.x - px(MENU_WIDTH - 12.0), position.y + px(12.0));
+        self.open_menu(below, items, cx);
     }
 
     fn render_menu(&self, menu: &ContextMenu, cx: &mut Context<Self>) -> impl IntoElement {
@@ -695,24 +785,35 @@ impl WorkspaceView {
             .items
             .iter()
             .enumerate()
-            .map(|(index, (label, action))| {
-                let action = action.clone();
-                let (label, shortcut) = label.split_once('\t').unwrap_or((label, ""));
-                div()
-                    .id(("menu-item", index))
-                    .flex()
-                    .gap_2()
-                    .px_2()
-                    .py(px(5.0))
-                    .mx_1()
-                    .rounded_sm()
-                    .hover(|style| style.bg(hsla(theme.accent)).text_color(hsla(theme.chrome)))
-                    .on_click(cx.listener(move |view, _, window, cx| {
-                        view.run_menu_action(action.clone(), window, cx)
-                    }))
-                    .child(div().flex_1().min_w_0().truncate().child(label.to_owned()))
-                    .child(div().opacity(0.6).child(shortcut.to_owned()))
-            });
+            .map(|(index, (label, action))| match action {
+                MenuAction::Separator => div()
+                    .h(px(1.0))
+                    .mx_2()
+                    .my_1()
+                    .bg(hsla(theme.border))
+                    .into_any_element(),
+                MenuAction::TabColors(tab) => self.render_color_row(*tab, cx),
+                action => {
+                    let action = action.clone();
+                    let (label, shortcut) = label.split_once('\t').unwrap_or((label, ""));
+                    div()
+                        .id(("menu-item", index))
+                        .flex()
+                        .gap_2()
+                        .px_2()
+                        .py(px(5.0))
+                        .mx_1()
+                        .rounded_sm()
+                        .hover(|style| style.bg(hsla(theme.accent)).text_color(hsla(theme.chrome)))
+                        .on_click(cx.listener(move |view, _, window, cx| {
+                            view.run_menu_action(action.clone(), window, cx)
+                        }))
+                        .child(div().flex_1().min_w_0().truncate().child(label.to_owned()))
+                        .child(div().opacity(0.6).child(shortcut.to_owned()))
+                        .into_any_element()
+                }
+            })
+            .collect::<Vec<_>>();
         deferred(
             anchored().position(menu.position).snap_to_window().child(
                 div()
@@ -738,6 +839,56 @@ impl WorkspaceView {
         .with_priority(1)
     }
 
+    /// "No color" then each color; the tab's current choice is ringed.
+    fn render_color_row(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.theme();
+        let current = self.model.tabs.get(index).and_then(|tab| tab.color);
+        let swatch = |slot: usize, color: Option<usize>| {
+            div()
+                .id(("tab-color", slot))
+                .size(px(18.0))
+                .rounded_full()
+                .border_2()
+                .border_color(hsla(if current == color {
+                    theme.text
+                } else {
+                    theme.tab_active
+                }))
+                .on_click(cx.listener(move |view, _, window, cx| {
+                    view.run_menu_action(MenuAction::SetTabColor(index, color), window, cx)
+                }))
+        };
+        div()
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .px_2()
+            .py_1()
+            .child(
+                swatch(0, None).child(
+                    div()
+                        .size_full()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_size(px(11.0))
+                        .text_color(hsla(theme.text_muted))
+                        .child("⊘"),
+                ),
+            )
+            .children(
+                theme
+                    .group_colors
+                    .iter()
+                    .enumerate()
+                    .map(|(color, &value)| {
+                        swatch(color + 1, Some(color))
+                            .child(div().size_full().rounded_full().bg(hsla(value)))
+                    }),
+            )
+            .into_any_element()
+    }
+
     /// A custom title wins over the shell's, as in Warp.
     fn tab_title(&self, tab: &Tab, cx: &Context<Self>) -> String {
         tab.title.clone().unwrap_or_else(|| {
@@ -756,34 +907,53 @@ impl WorkspaceView {
     fn render_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = self.theme();
         let mut rows = Vec::new();
-        let mut previous = None;
-        for (index, tab) in self.model.tabs.iter().enumerate() {
-            if index > 0 && self.model.tab_pinned(index - 1) && !self.model.tab_pinned(index) {
+        if let Some(matches) = self.search_matches(cx) {
+            // A filtered list is flat: groups and the pin divider would only get in the way.
+            if matches.is_empty() {
                 rows.push(
                     div()
-                        .flex_shrink_0()
-                        .h(px(1.0))
-                        .mx_2()
-                        .my_1()
-                        .bg(hsla(theme.border))
+                        .px_3()
+                        .py_2()
+                        .text_color(hsla(theme.text_muted))
+                        .child("No matching tabs")
                         .into_any_element(),
                 );
             }
-            if tab.group != previous {
-                if let Some(group) = tab.group {
-                    rows.push(self.render_group_header(group, cx));
-                }
-                previous = tab.group;
+            for index in matches {
+                rows.push(self.render_tab_row(index, &self.model.tabs[index], cx));
             }
-            let collapsed = tab
-                .group
-                .and_then(|group| self.model.group(group))
-                .is_some_and(|group| group.collapsed);
-            if !collapsed {
-                rows.push(self.render_tab_row(index, tab, cx));
+        } else {
+            let mut previous = None;
+            for (index, tab) in self.model.tabs.iter().enumerate() {
+                if index > 0 && self.model.tab_pinned(index - 1) && !self.model.tab_pinned(index) {
+                    rows.push(
+                        div()
+                            .flex_shrink_0()
+                            .h(px(1.0))
+                            .bg(hsla(theme.text_muted).opacity(0.5))
+                            .into_any_element(),
+                    );
+                }
+                if tab.group != previous {
+                    if let Some(group) = tab.group {
+                        rows.push(self.render_group_header(group, cx));
+                    }
+                    previous = tab.group;
+                }
+                let collapsed = tab
+                    .group
+                    .and_then(|group| self.model.group(group))
+                    .is_some_and(|group| group.collapsed);
+                if !collapsed {
+                    rows.push(self.render_tab_row(index, tab, cx));
+                }
             }
         }
         let end = self.model.tabs.len();
+        let search = self.search.as_ref().map(|(input, _)| input.clone());
+        let searching = search
+            .as_ref()
+            .is_some_and(|input| !input.read(cx).text().is_empty());
         div()
             .w(px(self.sidebar_width))
             .flex_shrink_0()
@@ -798,9 +968,45 @@ impl WorkspaceView {
                     .flex()
                     .flex_shrink_0()
                     .items_center()
-                    .justify_end()
-                    .h(px(34.0))
-                    .px_2()
+                    .gap_2()
+                    .h(px(40.0))
+                    .pl_3()
+                    .pr_2()
+                    .border_b_1()
+                    .border_color(hsla(theme.border))
+                    .child(
+                        gpui::svg()
+                            .path("icons/search.svg")
+                            .flex_shrink_0()
+                            .size(px(14.0))
+                            .text_color(hsla(theme.text_muted)),
+                    )
+                    .child(
+                        div()
+                            .id("tab-search")
+                            .relative()
+                            .flex_1()
+                            .min_w_0()
+                            .h(px(24.0))
+                            .flex()
+                            .items_center()
+                            .overflow_hidden()
+                            .cursor_text()
+                            .text_color(hsla(theme.text))
+                            .on_click(
+                                cx.listener(|view, _, window, cx| view.start_search(window, cx)),
+                            )
+                            .when(!searching, |this| {
+                                this.child(
+                                    div()
+                                        .absolute()
+                                        .left_0()
+                                        .text_color(hsla(theme.text_muted))
+                                        .child("Search tabs..."),
+                                )
+                            })
+                            .children(search),
+                    )
                     .child(
                         icon_button("new-tab", "+", theme)
                             .text_size(px(16.0))
@@ -818,8 +1024,6 @@ impl WorkspaceView {
                     .overflow_y_scroll()
                     .flex()
                     .flex_col()
-                    .gap(px(2.0))
-                    .px_2()
                     .children(rows)
                     // Dropping below the list moves a tab to the end, outside any group.
                     .child(
@@ -827,7 +1031,6 @@ impl WorkspaceView {
                             .id("tab-list-end")
                             .flex_1()
                             .min_h(px(32.0))
-                            .rounded_md()
                             .drag_over::<DraggedTab>(move |style, _, _, _| {
                                 style.bg(hsla(theme.tab_hover))
                             })
@@ -1002,6 +1205,8 @@ impl WorkspaceView {
             .into_any_element()
     }
 
+    /// A Warp-style session card: terminal icon, title and path, separated by lines, with
+    /// a menu and close button floating on hover.
     fn render_tab_row(&self, index: usize, tab: &Tab, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.theme();
         let active = index == self.model.active_tab;
@@ -1011,9 +1216,10 @@ impl WorkspaceView {
         let selection = self.model.selected_indices();
         let selected = selection.len() > 1 && selection.contains(&index);
         let group = tab.group;
-        let color = group
+        let group_color = group
             .and_then(|group| self.model.group(group))
             .map(|group| hsla(theme.group_colors[group.color]));
+        let tint = tab.color.map(|color| hsla(theme.group_colors[color]));
         let hover = format!("tab-{index}");
         let dragged = DraggedTab {
             title: if selected {
@@ -1029,32 +1235,69 @@ impl WorkspaceView {
             background: theme.tab_active,
             text: theme.text,
         };
-        div()
-            .id(("tab", index))
-            .group(hover.clone())
+        let card = div()
             .flex()
-            .flex_shrink_0()
             .items_center()
-            .gap_2()
-            .min_h(px(30.0))
-            .py(px(5.0))
-            .pl(px(if group.is_some() { 18.0 } else { 10.0 }))
-            .pr_1()
+            .gap(px(10.0))
+            .px(px(10.0))
+            .py(px(8.0))
             .rounded_md()
+            .border_1()
+            .border_color(gpui::transparent_black())
             .text_color(hsla(if active || selected {
                 theme.text
             } else {
                 theme.text_muted
             }))
-            .when(active, |this| this.bg(hsla(theme.tab_active)))
+            .map(|this| match (tint, active) {
+                (Some(tint), _) => this.bg(tint.opacity(if active { 0.3 } else { 0.15 })),
+                (None, true) => this.bg(hsla(theme.tab_active)),
+                (None, false) => {
+                    this.group_hover(hover.clone(), |style| style.bg(hsla(theme.tab_hover)))
+                }
+            })
+            .when(active, |this| {
+                this.border_color(hsla(theme.text).opacity(0.2))
+            })
             .when(selected, |this| {
                 this.bg(hsla(theme.accent).opacity(0.22))
-                    .border_1()
                     .border_color(hsla(theme.accent).opacity(0.5))
             })
-            .when(!active && !selected, |this| {
-                this.hover(|style| style.bg(hsla(theme.tab_hover)))
+            .when_some(group_color, |this, color| {
+                this.child(div().w(px(3.0)).h(px(26.0)).rounded_sm().bg(color))
             })
+            .child(terminal_icon(theme, active))
+            .child(match self.rename_field(RenameTarget::Tab(tab.id)) {
+                Some(field) => field,
+                None => div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .child(div().truncate().text_size(px(13.0)).child(title))
+                    .when_some(subtitle, |this, subtitle| {
+                        this.child(
+                            div()
+                                .truncate()
+                                .text_size(px(11.5))
+                                .text_color(hsla(theme.text_muted))
+                                .child(subtitle),
+                        )
+                    })
+                    .into_any_element(),
+            })
+            .when(group.is_none() && tab.pinned, |this| {
+                this.child(pin_mark(theme))
+            });
+        div()
+            .id(("tab", index))
+            .group(hover.clone())
+            .relative()
+            .flex_shrink_0()
+            .p(px(6.0))
+            .when(group.is_some(), |this| this.pl(px(14.0)))
+            .border_b_1()
+            .border_color(hsla(theme.border))
             .on_click(
                 cx.listener(move |view, event: &gpui::ClickEvent, window, cx| {
                     view.click_tab(index, event.modifiers(), event.click_count(), window, cx)
@@ -1073,41 +1316,37 @@ impl WorkspaceView {
             .on_drop(cx.listener(move |view, dragged: &DraggedTab, window, cx| {
                 view.drop_tab(dragged, index, group, window, cx)
             }))
-            .when_some(color, |this, color| {
-                this.child(div().w(px(3.0)).h(px(14.0)).rounded_sm().bg(color))
-            })
-            .child(match self.rename_field(RenameTarget::Tab(tab.id)) {
-                Some(field) => field,
-                None if tab.layout.panes().len() > 1 => self.render_pane_rows(tab, active, cx),
-                None => div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .child(div().truncate().child(title))
-                    .when_some(subtitle, |this, subtitle| {
-                        this.child(
-                            div()
-                                .truncate()
-                                .text_size(px(11.0))
-                                .text_color(hsla(theme.text_muted))
-                                .child(subtitle),
-                        )
-                    })
-                    .into_any_element(),
-            })
-            .when(group.is_none() && tab.pinned, |this| {
-                this.child(pin_mark(theme))
-            })
+            .child(card)
             .child(
-                icon_button(("close-tab", index), "×", theme)
-                    .when(!active, |this| {
-                        this.invisible().group_hover(hover, |style| style.visible())
-                    })
-                    .on_click(cx.listener(move |view, _, window, cx| {
-                        cx.stop_propagation();
-                        view.close_tab(index, window, cx)
-                    })),
+                div()
+                    .absolute()
+                    .top(px(2.0))
+                    .right(px(4.0))
+                    .flex()
+                    .gap(px(2.0))
+                    .p(px(2.0))
+                    .rounded_md()
+                    .bg(hsla(theme.chrome))
+                    .border_1()
+                    .border_color(hsla(theme.border))
+                    .invisible()
+                    .group_hover(hover, |style| style.visible())
+                    .child(
+                        icon_button(("tab-menu", index), "⋮", theme).on_click(cx.listener(
+                            move |view, event: &gpui::ClickEvent, _, cx| {
+                                cx.stop_propagation();
+                                view.open_tab_menu(index, event.position(), cx)
+                            },
+                        )),
+                    )
+                    .child(
+                        icon_button(("close-tab", index), "×", theme).on_click(cx.listener(
+                            move |view, _, window, cx| {
+                                cx.stop_propagation();
+                                view.close_tab(index, window, cx)
+                            },
+                        )),
+                    ),
             )
             .into_any_element()
     }
@@ -1173,65 +1412,6 @@ impl WorkspaceView {
                         )),
                     ),
             )
-            .into_any_element()
-    }
-
-    /// A split tab lists its panes, as Warp's vertical tabs do; clicking one focuses it.
-    /// A plain click also bubbles to the tab row, which selects the tab.
-    fn render_pane_rows(&self, tab: &Tab, active: bool, cx: &mut Context<Self>) -> AnyElement {
-        let theme = self.theme();
-        let rows = tab.layout.panes().into_iter().map(|id| {
-            let focused = active && id == tab.active_pane;
-            let (title, path) = self
-                .panes
-                .get(&id)
-                .map_or_else(Default::default, |(pane, _)| {
-                    let pane = pane.read(cx);
-                    (pane.title(), pane.display_cwd())
-                });
-            let overlay = hsla(theme.text);
-            div()
-                .id(("pane-row", id.0 as usize))
-                .flex()
-                .flex_col()
-                .px(px(6.0))
-                .py(px(3.0))
-                .rounded_md()
-                .text_color(hsla(if focused {
-                    theme.text
-                } else {
-                    theme.text_muted
-                }))
-                .when(focused, |this| this.bg(overlay.opacity(0.08)))
-                .hover(|style| style.bg(overlay.opacity(0.05)))
-                .on_click(cx.listener(move |view, event: &gpui::ClickEvent, _, _| {
-                    let modifiers = event.modifiers();
-                    if !modifiers.shift && !modifiers.platform {
-                        view.model.focus(id);
-                    }
-                }))
-                .child(div().truncate().child(title.clone()))
-                .when(path != title, |this| {
-                    this.child(div().truncate().text_size(px(11.0)).child(path))
-                })
-        });
-        div()
-            .flex_1()
-            .min_w_0()
-            .flex()
-            .flex_col()
-            .gap(px(1.0))
-            .when_some(tab.title.clone(), |this, title| {
-                this.child(
-                    div()
-                        .truncate()
-                        .px(px(6.0))
-                        .text_size(px(11.0))
-                        .text_color(hsla(theme.text_muted))
-                        .child(title),
-                )
-            })
-            .children(rows)
             .into_any_element()
     }
 
@@ -1544,6 +1724,26 @@ fn sidebar_icon(color: u32) -> impl IntoElement {
         .border_1()
         .border_color(hsla(color))
         .child(div().w(px(4.5)).h_full().bg(hsla(color)))
+}
+
+/// Warp's session icon: a prompt glyph in a circle.
+fn terminal_icon(theme: &Theme, active: bool) -> impl IntoElement {
+    div()
+        .flex_none()
+        .size(px(28.0))
+        .rounded_full()
+        .flex()
+        .items_center()
+        .justify_center()
+        .bg(hsla(if active {
+            theme.border
+        } else {
+            theme.tab_active
+        }))
+        .text_size(px(11.0))
+        .font_weight(gpui::FontWeight::BOLD)
+        .text_color(hsla(theme.text))
+        .child(">_")
 }
 
 fn pin_mark(theme: &Theme) -> impl IntoElement {

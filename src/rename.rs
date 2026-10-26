@@ -48,7 +48,8 @@ pub struct RenameInput {
     scroll: Pixels,
     accent: u32,
     finished: bool,
-    _blur: Subscription,
+    /// Rename fields commit on blur and finish once; the search field never finishes.
+    blur: Option<Subscription>,
 }
 
 impl EventEmitter<RenameEvent> for RenameInput {}
@@ -56,16 +57,24 @@ impl EventEmitter<RenameEvent> for RenameInput {}
 impl RenameInput {
     /// Starts focused with `text` selected, so typing replaces it.
     pub fn new(text: &str, accent: u32, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let mut input = Self::search(accent, window, cx);
+        input.content = text.to_owned();
+        input.selected_range = 0..text.len();
+        // Clicking elsewhere commits, as in Warp.
+        input.blur = Some(cx.on_blur(&input.focus, window, |input: &mut Self, _, cx| {
+            input.finish(true, cx)
+        }));
+        input
+    }
+
+    /// An empty, focused field that reports Enter and Esc every time.
+    pub fn search(accent: u32, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus = cx.focus_handle();
         focus.focus(window, cx);
-        // Clicking elsewhere commits, as in Warp.
-        let blur = cx.on_blur(&focus, window, |input: &mut Self, _, cx| {
-            input.finish(true, cx)
-        });
         Self {
             focus,
-            selected_range: 0..text.len(),
-            content: text.to_owned(),
+            selected_range: 0..0,
+            content: String::new(),
             selection_reversed: false,
             marked_range: None,
             last_layout: None,
@@ -73,12 +82,16 @@ impl RenameInput {
             scroll: Pixels::ZERO,
             accent,
             finished: false,
-            _blur: blur,
+            blur: None,
         }
     }
 
+    pub fn text(&self) -> &str {
+        &self.content
+    }
+
     fn finish(&mut self, confirm: bool, cx: &mut Context<Self>) {
-        if std::mem::replace(&mut self.finished, true) {
+        if self.blur.is_some() && std::mem::replace(&mut self.finished, true) {
             return;
         }
         cx.emit(if confirm {

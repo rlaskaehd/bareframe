@@ -70,6 +70,11 @@ impl gpui::AssetSource for Assets {
     fn load(&self, path: &str) -> gpui::Result<Option<std::borrow::Cow<'static, [u8]>>> {
         Ok(match path {
             "icons/pin.svg" => Some(include_bytes!("../assets/icons/pin.svg").as_slice().into()),
+            "icons/search.svg" => Some(
+                include_bytes!("../assets/icons/search.svg")
+                    .as_slice()
+                    .into(),
+            ),
             "icons/corner.svg" => Some(
                 include_bytes!("../assets/icons/corner.svg")
                     .as_slice()
@@ -80,7 +85,11 @@ impl gpui::AssetSource for Assets {
     }
 
     fn list(&self, _: &str) -> gpui::Result<Vec<gpui::SharedString>> {
-        Ok(vec!["icons/pin.svg".into(), "icons/corner.svg".into()])
+        Ok(vec![
+            "icons/pin.svg".into(),
+            "icons/corner.svg".into(),
+            "icons/search.svg".into(),
+        ])
     }
 }
 
