@@ -36,15 +36,15 @@ MVP 1 수용 행렬의 입력·IME·TUI·종료 항목이 분할 Pane 안에서�
 
 제외: 하단 고정 입력 편집기, 명령 Block. 커맨드 팔레트는 기능이 늘어난 뒤 추가한다.
 
-## MVP 3 — Workspace
+## MVP 3 — 도구 패널, 설정, 편집 도구
 
-- Sidebar.
-- Workspace 레이아웃, 작업 디렉터리 등 저장 가능한 상태의 저장과 복원.
-- 커맨드 팔레트.
-- MVP 2에서 넘어온 것: 위험한 붙여넣기·OSC 52 읽기 확인 창(지금은 거부), 메뉴·단축키로 바꾼 테마·폰트 저장, OSC 7 경로 신뢰 범위 재검토.
+상세 계획은 [MVP 3 구현 계획](mvp-3-plan.md)을 따른다(계획 단계).
 
-완료 기준: 앱 재실행 후 저장한 탭·분할 구성을 복원한다.
-종료된 PTY 프로세스 자체의 재개 여부는 별도 기능으로 정의한다.
+- **MVP 3a**: MVP 2에서 넘어온 항목(위험한 붙여넣기 확인 창, 설정 저장, OSC 7 재검토), Tools panel(Project explorer·Global search), 톱니 아이콘의 Settings(텔레메트리·계정·AI 항목 제외)와 Keyboard shortcuts(기본값은 Ghostty, 수정 가능).
+- **MVP 3b**: Markdown viewer·편집, Diff 버튼과 Code review 창, Code editor.
+- 원래 MVP 3에 있던 레이아웃 저장·복원과 커맨드 팔레트의 위치는 계획의 "결정이 필요한 것"에서 정한다.
+
+완료 기준: 3a는 파일 탐색·검색과 설정·단축키 변경이 재시작 후에도 유지되는 것, 3b는 같은 작업 영역에서 터미널과 Markdown·편집기·Diff를 함께 쓰는 것.
 
 ## 보류 — 명령 Block
 
@@ -53,10 +53,8 @@ Shell Integration 기반 명령 Block(명령·출력 연결, 접기, 재실행)�
 
 ## MVP 4 — 개발 도구 확장
 
-- Code Editor Pane.
-- Git Diff Viewer Pane.
-- File Explorer.
 - WKWebView 기반 Browser Pane.
+- Code Editor·Git Diff·File Explorer는 MVP 3으로 옮겼다.
 
 완료 기준: 하나의 Workspace에서 서로 다른 도구를 함께 배치하고, 포커스와 파일·경로 전달이 정상 동작한다.
 AI Agent 통합은 이 구조 위의 후속 범위로 두고, 구체적인 요구가 정해지면 계획을 추가한다.
