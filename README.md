@@ -35,3 +35,13 @@ Rust 1.98.1은 `rust-toolchain.toml`로 선택하며 전역 기본 toolchain을 
 - `reference/`: 변경하지 않는 upstream 참조 자료.
 
 MVP 2 계획은 [MVP 2 구현 계획](docs/mvp-2-plan.md)에 있다. 보류한 명령 Block 조사는 [명령 Block 확장 경계](docs/block-boundary.md)에 남겼다.
+
+## 라이선스
+
+bareframe는 [GNU Affero General Public License v3.0 이상](LICENSE)(`AGPL-3.0-or-later`)으로 배포한다.
+상업적 사용을 포함해 누구나 쓰고 고칠 수 있지만, 수정본을 배포하거나 네트워크 서비스로 제공하면 전체 소스를 같은 라이선스로 공개해야 한다.
+
+함께 배포하는 구성 요소는 각자의 라이선스를 따른다.
+- `vendor/gpui-libghostty`: MIT([LICENSE](vendor/gpui-libghostty/LICENSE)). 그 안의 Ghostty: MIT.
+- Ghostty zsh 셸 통합(`Contents/Resources/shell-integration`): GPL-3.0([resources/shell-integration](resources/shell-integration)).
+- GPUI: Apache-2.0.

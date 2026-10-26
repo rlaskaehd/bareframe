@@ -1,6 +1,6 @@
 # MVP 3 구현 계획 — 도구 패널, 설정, 편집 도구
 
-기준: `mvp-2` 태그(2026-10-26). 상태: 계획, 2026-10-27 사용자 결정 반영. MVP 3을 두 단계로 나눈다.
+기준: `mvp-2` 태그(2026-10-26). 상태: 2026-10-27 승인, 3a-1부터 구현. MVP 3을 두 단계로 나눈다.
 
 - **MVP 3a**: MVP 2에서 넘어온 항목, 레이아웃 저장·복원, 커맨드 팔레트, Tools panel(Project explorer·Global search), 톱니 아이콘의 Settings·Keyboard shortcuts.
 - **MVP 3b**: Markdown viewer·편집, Diff 버튼과 Code review 창, Code editor.
@@ -229,5 +229,5 @@ Warp 화면: 파일을 열면 오른쪽 분할 Pane의 편집기에 열리고, �
 1. 레이아웃 저장·복원과 커맨드 팔레트는 3a에 넣는다(A0-1, A0-2).
 2. 설정은 `~/.config/bareframe/config`(Ghostty식, `keybind` 포함) 하나로 두고, 단축키는 Keyboard shortcuts 화면에서 수정할 수 있어야 한다.
 3. 탭 그룹 `Cmd+G`/`Cmd+Shift+G`는 지금 키를 유지한다. 사이드바 열기·닫기에 `Cmd+B`를 추가했다(`Cmd+Shift+B`도 유지).
-4. 라이선스는 사용자 검토 중이다. 배포 전에 정한다.
+4. 라이선스는 `AGPL-3.0-or-later`로 정했다(상업적 사용 허용, 배포·서비스 시 전체 소스 공개). `LICENSE`와 README에 기록했다. About 화면에 같은 고지를 넣는다.
 5. Code review 창에 Commit 버튼과 헝크 되돌리기를 넣는다(B2).

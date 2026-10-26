@@ -5,6 +5,7 @@ edition = "2024"
 rust-version = "1.98"
 publish = false
 description = "A modular terminal workspace built with GPUI and Ghostty"
+license = "AGPL-3.0-or-later"
 
 [features]
 default = ["runtime-shaders"]
