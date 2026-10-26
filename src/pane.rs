@@ -1,6 +1,6 @@
 use crate::{terminal::adapter::GhosttyAdapter, theme};
 use bareframe_core::{
-    config::LaunchConfig,
+    config::{LaunchConfig, display_path},
     session::{SessionId, SessionState, SessionStatus, TerminalEvent, TerminalEventKind},
     workspace::PaneId,
 };
@@ -87,15 +87,19 @@ impl TerminalPane {
         cx.notify();
     }
 
+    /// The shell integration's title: the `~` path at a prompt, the command while one runs.
     pub fn title(&self) -> String {
         match &self.session.status {
             SessionStatus::Failed(_) => "Could not start".into(),
             _ if self.session.title != "Terminal" => self.session.title.clone(),
-            _ => self
-                .session
-                .cwd
-                .file_name()
-                .map_or_else(|| "/".into(), |name| name.to_string_lossy().into_owned()),
+            _ => self.display_cwd(),
+        }
+    }
+
+    pub fn display_cwd(&self) -> String {
+        match crate::app::home_dir() {
+            Some(home) => display_path(&self.session.cwd, &home),
+            None => self.session.cwd.display().to_string(),
         }
     }
 

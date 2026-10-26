@@ -7,7 +7,7 @@ use gpui::{
     App, AppContext, Bounds, KeyBinding, Menu, MenuItem, TitlebarOptions, WindowBounds,
     WindowOptions, actions, point, px, size,
 };
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 actions!(
     bareframe,
@@ -43,6 +43,7 @@ actions!(
         UseLightTheme,
         GroupTab,
         UngroupTab,
+        ToggleSidebar,
     ]
 );
 
@@ -59,6 +60,25 @@ pub fn name() -> &'static str {
     } else {
         "bareframe"
     }
+}
+
+/// The vendored Ghostty zsh integration: in the app bundle, else in the source tree.
+pub fn zsh_integration_dir() -> Option<PathBuf> {
+    let bundled = std::env::current_exe()
+        .ok()
+        .and_then(|exe| Some(exe.parent()?.join("../Resources/shell-integration/zsh")));
+    let source = PathBuf::from(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/vendor/gpui-libghostty/crates/gpui-ghostty/vendor/ghostty/src/shell-integration/zsh"
+    ));
+    bundled
+        .into_iter()
+        .chain([source])
+        .find(|dir| dir.join(".zshenv").is_file())
+}
+
+pub fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME").map(PathBuf::from)
 }
 
 /// The validation instance ignores the user's file so results are reproducible.
@@ -121,6 +141,7 @@ pub fn run(config: LaunchConfig) {
             KeyBinding::new("cmd-0", ResetFontSize, None),
             KeyBinding::new("cmd-g", GroupTab, None),
             KeyBinding::new("cmd-shift-g", UngroupTab, None),
+            KeyBinding::new("cmd-shift-b", ToggleSidebar, None),
         ]);
         cx.set_menus(vec![
             Menu::new("bareframe").items([MenuItem::action("Quit bareframe", Quit)]),
@@ -142,6 +163,8 @@ pub fn run(config: LaunchConfig) {
                 MenuItem::action("Paste", Paste),
             ]),
             Menu::new("View").items([
+                MenuItem::action("Toggle Tabs Sidebar", ToggleSidebar),
+                MenuItem::separator(),
                 MenuItem::action("Dark Theme", UseDarkTheme),
                 MenuItem::action("Light Theme", UseLightTheme),
                 MenuItem::separator(),

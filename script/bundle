@@ -10,6 +10,14 @@ if [[ "${1:-}" == --validation ]]; then
 fi
 bundle_dir="$CARGO_TARGET_DIR/$bundle_name.app/Contents"
 mkdir -p "$bundle_dir/MacOS" "$bundle_dir/Resources"
+# Shell integration (GPLv3) that the app finds at ../Resources/shell-integration/zsh.
+integration="$bundle_dir/Resources/shell-integration"
+rm -rf "$integration"
+mkdir -p "$integration/zsh"
+cp vendor/gpui-libghostty/crates/gpui-ghostty/vendor/ghostty/src/shell-integration/zsh/.zshenv \
+    vendor/gpui-libghostty/crates/gpui-ghostty/vendor/ghostty/src/shell-integration/zsh/ghostty-integration \
+    "$integration/zsh/"
+cp resources/shell-integration/README resources/shell-integration/COPYING "$integration/"
 cp "$CARGO_TARGET_DIR/debug/bareframe" "$bundle_dir/MacOS/bareframe"
 cat > "$bundle_dir/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>

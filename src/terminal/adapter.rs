@@ -45,7 +45,12 @@ impl GhosttyAdapter {
         window: &mut Window,
         cx: &mut Context<T>,
     ) -> Result<Entity<Self>, String> {
-        let mut options = TerminalOptions::new(config.command(), config.cwd.clone());
+        let user_zdotdir = std::env::var_os("ZDOTDIR").map(std::path::PathBuf::from);
+        let command = config.command_with_zsh_integration(
+            crate::app::zsh_integration_dir().as_deref(),
+            user_zdotdir.as_deref(),
+        );
+        let mut options = TerminalOptions::new(command, config.cwd.clone());
         options.quiet_login = true;
         options.configuration = TerminalConfiguration::Custom(theme.clone());
         options.clipboard_approval = Some(std::sync::Arc::new(|request| {

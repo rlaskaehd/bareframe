@@ -15,7 +15,10 @@ use gpui::{
 use gpui_libghostty::TerminalTheme;
 use std::collections::HashMap;
 
-const SIDEBAR_WIDTH: f32 = 220.0;
+/// Sidebar width bounds follow Warp's vertical tabs panel.
+const SIDEBAR_DEFAULT_WIDTH: f32 = 248.0;
+const SIDEBAR_MIN_WIDTH: f32 = 200.0;
+const SIDEBAR_MAX_SHARE: f32 = 0.5;
 
 /// A tab being dragged in the sidebar; also renders the drag preview.
 #[derive(Clone)]
@@ -58,6 +61,9 @@ pub struct WorkspaceView {
     /// Split containers of the active tab, recorded during prepaint for resizing.
     split_bounds: HashMap<Vec<bool>, Bounds<Pixels>>,
     should_move_window: bool,
+    sidebar_open: bool,
+    sidebar_width: f32,
+    resizing_sidebar: bool,
     focus: FocusHandle,
     _quit: Subscription,
 }
@@ -79,6 +85,9 @@ impl WorkspaceView {
             resize: None,
             split_bounds: HashMap::new(),
             should_move_window: false,
+            sidebar_open: true,
+            sidebar_width: SIDEBAR_DEFAULT_WIDTH,
+            resizing_sidebar: false,
             focus: cx.focus_handle(),
             _quit: cx.on_app_quit(|view, cx| {
                 view.shutdown(cx);
@@ -252,7 +261,18 @@ impl WorkspaceView {
         self.apply_settings(cx);
     }
 
-    fn drag_divider(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+    fn drag_divider(&mut self, event: &MouseMoveEvent, window: &Window, cx: &mut Context<Self>) {
+        if self.resizing_sidebar {
+            if !event.dragging() {
+                self.resizing_sidebar = false;
+                return;
+            }
+            let max = (f32::from(window.viewport_size().width) * SIDEBAR_MAX_SHARE)
+                .max(SIDEBAR_MIN_WIDTH);
+            self.sidebar_width = f32::from(event.position.x).clamp(SIDEBAR_MIN_WIDTH, max);
+            cx.notify();
+            return;
+        }
         let Some(resize) = &self.resize else {
             return;
         };
@@ -285,6 +305,12 @@ impl WorkspaceView {
             .map_or_else(String::new, |(pane, _)| pane.read(cx).title())
     }
 
+    /// The second line of a tab row: the `~` path, unless the title already shows it.
+    fn tab_subtitle(&self, tab: &Tab, title: &str, cx: &Context<Self>) -> Option<String> {
+        let (pane, _) = self.panes.get(&tab.active_pane)?;
+        Some(pane.read(cx).display_cwd()).filter(|path| path != title)
+    }
+
     fn render_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = self.theme();
         let mut rows = Vec::new();
@@ -306,24 +332,22 @@ impl WorkspaceView {
         }
         let end = self.model.tabs.len();
         div()
-            .w(px(SIDEBAR_WIDTH))
+            .w(px(self.sidebar_width))
             .flex_shrink_0()
             .h_full()
             .flex()
             .flex_col()
             .bg(hsla(theme.chrome))
-            .border_r_1()
-            .border_color(hsla(theme.border))
             .font_family(theme::UI_FONT)
             .text_size(px(12.5))
             .child(
-                self.title_bar("title-bar", cx)
+                div()
                     .flex()
                     .flex_shrink_0()
                     .items_center()
                     .justify_end()
-                    .h(px(app::TITLE_BAR_HEIGHT))
-                    .pr_2()
+                    .h(px(34.0))
+                    .px_2()
                     .child(
                         icon_button("new-tab", "+", theme)
                             .text_size(px(16.0))
@@ -387,20 +411,46 @@ impl WorkspaceView {
             })
     }
 
-    /// Window-move area above the terminal, showing the active tab's title.
-    fn render_title_strip(&self, title: String, cx: &mut Context<Self>) -> impl IntoElement {
+    /// Full-width bar under the traffic lights. The middle is reserved for a search box.
+    fn render_top_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = self.theme();
-        self.title_bar("title-strip", cx)
+        let open = self.sidebar_open;
+        self.title_bar("top-bar", cx)
             .flex()
             .flex_shrink_0()
             .items_center()
-            .justify_center()
             .h(px(app::TITLE_BAR_HEIGHT))
-            .px_3()
-            .font_family(theme::UI_FONT)
-            .text_size(px(12.5))
-            .text_color(hsla(theme.text_muted))
-            .child(div().truncate().child(title))
+            // Leaves room for the traffic lights drawn over the transparent title bar.
+            .pl(px(80.0))
+            .pr_2()
+            .bg(hsla(theme.chrome))
+            .border_b_1()
+            .border_color(hsla(theme.border))
+            .child(
+                div()
+                    .id("toggle-sidebar")
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .size(px(26.0))
+                    .rounded_md()
+                    .when(open, |this| this.bg(hsla(theme.tab_active)))
+                    .hover(|style| style.bg(hsla(theme.tab_hover)))
+                    .on_click(cx.listener(|view, _, _, cx| {
+                        cx.stop_propagation();
+                        view.toggle_sidebar(cx)
+                    }))
+                    .child(sidebar_icon(if open {
+                        theme.text
+                    } else {
+                        theme.text_muted
+                    })),
+            )
+    }
+
+    fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
+        self.sidebar_open = !self.sidebar_open;
+        cx.notify();
     }
 
     fn render_group_header(&self, id: GroupId, cx: &mut Context<Self>) -> AnyElement {
@@ -486,6 +536,7 @@ impl WorkspaceView {
         let theme = self.theme();
         let active = index == self.model.active_tab;
         let title = self.tab_title(tab, cx);
+        let subtitle = self.tab_subtitle(tab, &title, cx);
         let group = tab.group;
         let color = group
             .and_then(|group| self.model.group(group))
@@ -504,7 +555,8 @@ impl WorkspaceView {
             .flex_shrink_0()
             .items_center()
             .gap_2()
-            .h(px(30.0))
+            .min_h(px(30.0))
+            .py(px(5.0))
             .pl(px(if group.is_some() { 18.0 } else { 10.0 }))
             .pr_1()
             .rounded_md()
@@ -524,7 +576,23 @@ impl WorkspaceView {
             .when_some(color, |this, color| {
                 this.child(div().w(px(3.0)).h(px(14.0)).rounded_sm().bg(color))
             })
-            .child(div().flex_1().min_w_0().truncate().child(title))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .child(div().truncate().child(title))
+                    .when_some(subtitle, |this, subtitle| {
+                        this.child(
+                            div()
+                                .truncate()
+                                .text_size(px(11.0))
+                                .text_color(hsla(theme.text_muted))
+                                .child(subtitle),
+                        )
+                    }),
+            )
             .child(
                 icon_button(("close-tab", index), "×", theme)
                     .when(!active, |this| {
@@ -670,29 +738,26 @@ impl Render for WorkspaceView {
             .get(&self.model.active_pane())
             .map_or_else(String::new, |(pane, _)| pane.read(cx).title());
         window.set_window_title(&format!("{title} — {}", app::name()));
-        let title = match self
-            .model
-            .active()
-            .group
-            .and_then(|id| self.model.group(id))
-        {
-            Some(group) => format!("{} · {title}", group.name),
-            None => title,
-        };
         let layout = self.model.active().layout.clone();
         let content = self.render_layout(&layout, &mut Vec::new(), cx);
         div()
             .track_focus(&self.focus)
             .size_full()
             .flex()
-            .flex_row()
+            .flex_col()
             .bg(hsla(theme.terminal_background))
             .text_color(hsla(theme.text))
-            .on_mouse_move(cx.listener(|view, event, _, cx| view.drag_divider(event, cx)))
+            .on_mouse_move(
+                cx.listener(|view, event, window, cx| view.drag_divider(event, window, cx)),
+            )
             .on_mouse_up(
                 MouseButton::Left,
-                cx.listener(|view, _, _, _| view.resize = None),
+                cx.listener(|view, _, _, _| {
+                    view.resize = None;
+                    view.resizing_sidebar = false;
+                }),
             )
+            .on_action(cx.listener(|view, _: &ToggleSidebar, _, cx| view.toggle_sidebar(cx)))
             .on_action(cx.listener(|view, _: &CloseWindow, window, cx| {
                 view.shutdown(cx);
                 window.remove_window();
@@ -774,16 +839,35 @@ impl Render for WorkspaceView {
                 view.model.ungroup(view.model.active_tab);
                 cx.notify()
             }))
-            .child(self.render_sidebar(cx))
+            .child(self.render_top_bar(cx))
             .child(
                 div()
                     .flex_1()
-                    .min_w_0()
-                    .h_full()
+                    .min_h_0()
                     .flex()
-                    .flex_col()
-                    .child(self.render_title_strip(title, cx))
-                    .child(div().flex_1().min_h_0().child(content)),
+                    .flex_row()
+                    .when(self.sidebar_open, |this| {
+                        this.child(self.render_sidebar(cx)).child(
+                            // Drag handle on the sidebar's right edge.
+                            div()
+                                .flex_none()
+                                .w(px(5.0))
+                                .h_full()
+                                .flex()
+                                .justify_center()
+                                .bg(hsla(theme.chrome))
+                                .cursor(CursorStyle::ResizeLeftRight)
+                                .child(div().w(px(1.0)).h_full().bg(hsla(theme.border)))
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(|view, _, _, cx| {
+                                        cx.stop_propagation();
+                                        view.resizing_sidebar = true;
+                                    }),
+                                ),
+                        )
+                    })
+                    .child(div().flex_1().min_w_0().h_full().child(content)),
             )
     }
 }
@@ -804,4 +888,16 @@ fn icon_button(
         .text_color(hsla(theme.text_muted))
         .hover(|style| style.bg(hsla(theme.border)).text_color(hsla(theme.text)))
         .child(label)
+}
+
+/// Outline of a window with its left panel filled, drawn so no icon font is needed.
+fn sidebar_icon(color: u32) -> impl IntoElement {
+    div()
+        .flex()
+        .w(px(15.0))
+        .h(px(12.0))
+        .rounded(px(2.5))
+        .border_1()
+        .border_color(hsla(color))
+        .child(div().w(px(4.5)).h_full().bg(hsla(color)))
 }

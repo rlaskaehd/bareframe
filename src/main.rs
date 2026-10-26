@@ -21,7 +21,10 @@ fn main() {
     args.extend(std::env::args_os().skip(1));
     let request = std::env::current_dir()
         .map_err(|error| error.to_string())
-        .and_then(|cwd| LaunchConfig::parse(args, &cwd));
+        .and_then(|cwd| {
+            let home = std::env::var_os("HOME").map_or_else(|| cwd.clone(), Into::into);
+            LaunchConfig::parse(args, &cwd, &home)
+        });
     match request {
         Ok(LaunchRequest::Help) => println!("{HELP}"),
         Ok(LaunchRequest::Version) => println!("bareframe {}", env!("CARGO_PKG_VERSION")),
