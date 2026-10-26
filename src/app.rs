@@ -47,6 +47,8 @@ actions!(
         UngroupTab,
         ToggleSidebar,
         OpenSettings,
+        ToggleToolsPanel,
+        ShowProjectExplorer,
     ]
 );
 
@@ -68,7 +70,7 @@ pub fn name() -> &'static str {
 /// Icons compiled into the binary; GPUI renders them as masks in the text color.
 struct Assets;
 
-const ICONS: [(&str, &[u8]); 4] = [
+const ICONS: [(&str, &[u8]); 9] = [
     ("icons/pin.svg", include_bytes!("../assets/icons/pin.svg")),
     (
         "icons/corner.svg",
@@ -79,6 +81,23 @@ const ICONS: [(&str, &[u8]); 4] = [
         include_bytes!("../assets/icons/search.svg"),
     ),
     ("icons/gear.svg", include_bytes!("../assets/icons/gear.svg")),
+    (
+        "icons/wrench.svg",
+        include_bytes!("../assets/icons/wrench.svg"),
+    ),
+    (
+        "icons/folder.svg",
+        include_bytes!("../assets/icons/folder.svg"),
+    ),
+    ("icons/file.svg", include_bytes!("../assets/icons/file.svg")),
+    (
+        "icons/chevron-right.svg",
+        include_bytes!("../assets/icons/chevron-right.svg"),
+    ),
+    (
+        "icons/chevron-down.svg",
+        include_bytes!("../assets/icons/chevron-down.svg"),
+    ),
 ];
 
 impl gpui::AssetSource for Assets {
@@ -174,6 +193,7 @@ pub fn run(config: LaunchConfig, restore: bool) {
         .run(move |cx: &mut App| {
             cx.on_action(|_: &Quit, cx| cx.quit());
             cx.bind_keys(crate::rename::key_bindings());
+            cx.bind_keys(crate::explorer::key_bindings());
             cx.bind_keys([
                 KeyBinding::new("cmd-q", Quit, None),
                 KeyBinding::new("cmd-shift-w", CloseWindow, None),
@@ -210,6 +230,8 @@ pub fn run(config: LaunchConfig, restore: bool) {
                 KeyBinding::new("cmd-b", ToggleSidebar, None),
                 KeyBinding::new("cmd-shift-b", ToggleSidebar, None),
                 KeyBinding::new("cmd-,", OpenSettings, None),
+                KeyBinding::new("cmd-\\", ToggleToolsPanel, None),
+                KeyBinding::new("ctrl-1", ShowProjectExplorer, None),
             ]);
             cx.set_menus(vec![
                 Menu::new("bareframe").items([
@@ -237,6 +259,8 @@ pub fn run(config: LaunchConfig, restore: bool) {
                 ]),
                 Menu::new("View").items([
                     MenuItem::action("Toggle Tabs Sidebar", ToggleSidebar),
+                    MenuItem::action("Toggle Tools Panel", ToggleToolsPanel),
+                    MenuItem::action("Project Explorer", ShowProjectExplorer),
                     MenuItem::separator(),
                     MenuItem::action("Dark Theme", UseDarkTheme),
                     MenuItem::action("Light Theme", UseLightTheme),

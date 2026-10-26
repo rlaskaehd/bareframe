@@ -145,6 +145,12 @@ impl TerminalPane {
         }
     }
 
+    pub fn type_text(&self, text: &str, cx: &mut Context<Self>) {
+        if let Some(terminal) = &self.terminal {
+            terminal.update(cx, |terminal, _| terminal.type_text(text));
+        }
+    }
+
     /// Native surfaces sit above GPUI and stay on screen unless hidden explicitly.
     pub fn set_visible(&self, visible: bool, cx: &mut Context<Self>) {
         if let Some(terminal) = &self.terminal {

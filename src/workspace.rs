@@ -1,5 +1,6 @@
 use crate::{
     app::{self, *},
+    explorer::Explorer,
     pane::{PaneEvent, TerminalPane},
     rename::RenameInput,
     settings_pane::SettingsPane,
@@ -23,6 +24,7 @@ use std::collections::HashMap;
 mod layout;
 mod menu;
 mod sidebar;
+mod tools;
 
 #[derive(Clone, Copy, PartialEq)]
 enum RenameTarget {
@@ -103,6 +105,13 @@ pub struct WorkspaceView {
     sidebar_open: bool,
     sidebar_width: f32,
     resizing_sidebar: bool,
+    tools_open: bool,
+    tools_width: f32,
+    /// The tools panel's left edge, recorded on render for resizing.
+    tools_left: f32,
+    resizing_tools: bool,
+    explorer: Entity<Explorer>,
+    _explorer_events: Subscription,
     /// Tabs being dragged in the sidebar; their rows show an empty slot meanwhile.
     dragging: Vec<TabId>,
     menu: Option<ContextMenu>,
@@ -131,6 +140,11 @@ impl WorkspaceView {
         cx: &mut Context<Self>,
     ) -> Self {
         let (model, first) = Workspace::new();
+        let theme = Theme::get(settings.theme);
+        let explorer = cx.new(|cx| Explorer::new(theme, cx));
+        let explorer_events = cx.subscribe_in(&explorer, window, |view, _, event, window, cx| {
+            view.on_explorer_event(event, window, cx)
+        });
         let mut view = Self {
             model,
             panes: HashMap::new(),
@@ -143,6 +157,12 @@ impl WorkspaceView {
             sidebar_open: true,
             sidebar_width: SIDEBAR_DEFAULT_WIDTH,
             resizing_sidebar: false,
+            tools_open: false,
+            tools_width: tools::TOOLS_DEFAULT_WIDTH,
+            tools_left: 0.0,
+            resizing_tools: false,
+            explorer,
+            _explorer_events: explorer_events,
             dragging: Vec::new(),
             menu: None,
             frozen: false,
@@ -186,6 +206,12 @@ impl WorkspaceView {
         self.model = saved.workspace;
         self.sidebar_open = saved.sidebar_open;
         self.sidebar_width = saved.sidebar_width;
+        self.tools_width = saved.tools_width;
+        if saved.tools_open {
+            self.tools_open = true;
+            self.explorer
+                .update(cx, |explorer, cx| explorer.set_active(true, cx));
+        }
         let kinds: HashMap<PaneId, SavedPane> = saved.panes.into_iter().collect();
         let panes: Vec<PaneId> = self.model.panes().collect();
         for id in panes {
@@ -225,6 +251,8 @@ impl WorkspaceView {
             panes,
             sidebar_open: self.sidebar_open,
             sidebar_width: self.sidebar_width,
+            tools_open: self.tools_open,
+            tools_width: self.tools_width,
             window: self.window_bounds,
         }
     }
@@ -280,7 +308,10 @@ impl WorkspaceView {
                 window,
                 move |view, _, event, window, cx| match event {
                     PaneEvent::Exited => view.close_pane(id, window, cx),
-                    PaneEvent::TitleChanged => cx.notify(),
+                    PaneEvent::TitleChanged => {
+                        view.refresh_explorer_roots(cx);
+                        cx.notify()
+                    }
                 },
             );
         self.panes
@@ -371,11 +402,18 @@ impl WorkspaceView {
             pane.focus(window, cx);
         }
         self.split_bounds.clear();
+        self.refresh_explorer_roots(cx);
         cx.notify();
     }
 
     fn new_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let cwd = self.active_cwd(cx);
+        let pane = self.model.new_tab();
+        self.open_pane(pane, cwd, window, cx);
+        self.sync(window, cx);
+    }
+
+    fn new_tab_at(&mut self, cwd: std::path::PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         let pane = self.model.new_tab();
         self.open_pane(pane, cwd, window, cx);
         self.sync(window, cx);
@@ -449,6 +487,8 @@ impl WorkspaceView {
                 PaneView::Settings(pane) => pane.update(cx, |pane, cx| pane.set_theme(ui, cx)),
             }
         }
+        self.explorer
+            .update(cx, |explorer, cx| explorer.set_theme(ui, cx));
         cx.notify();
     }
 
@@ -463,6 +503,10 @@ impl WorkspaceView {
     }
 
     fn drag_divider(&mut self, event: &MouseMoveEvent, window: &Window, cx: &mut Context<Self>) {
+        if self.drag_tools_edge(event, window) {
+            cx.notify();
+            return;
+        }
         if self.resizing_sidebar {
             if !event.dragging() {
                 self.resizing_sidebar = false;
@@ -563,6 +607,32 @@ impl WorkspaceView {
                         theme.text_muted
                     })),
             )
+            .child(
+                div()
+                    .id("toggle-tools")
+                    .ml_1()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .size(px(26.0))
+                    .rounded_md()
+                    .when(self.tools_open, |this| this.bg(hsla(theme.tab_active)))
+                    .hover(|style| style.bg(hsla(theme.tab_hover)))
+                    .on_click(cx.listener(|view, _, window, cx| {
+                        cx.stop_propagation();
+                        view.toggle_tools(window, cx)
+                    }))
+                    .child(
+                        gpui::svg()
+                            .path("icons/wrench.svg")
+                            .size(px(14.0))
+                            .text_color(hsla(if self.tools_open {
+                                theme.text
+                            } else {
+                                theme.text_muted
+                            })),
+                    ),
+            )
             .child(div().flex_1())
             .child(
                 div()
@@ -586,6 +656,14 @@ impl WorkspaceView {
             )
     }
 
+    /// Re-clamped on every render, so shrinking the window can't squeeze the terminals
+    /// behind a sidebar sized for a wider one.
+    fn sidebar_shown_width(&self, window: &Window) -> f32 {
+        self.sidebar_width
+            .min(f32::from(window.viewport_size().width) * SIDEBAR_MAX_SHARE)
+            .max(SIDEBAR_MIN_WIDTH)
+    }
+
     fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
         self.sidebar_open = !self.sidebar_open;
         cx.notify();
@@ -605,6 +683,11 @@ impl Render for WorkspaceView {
             self.window_title = title;
         }
         let bounds = window.bounds();
+        self.tools_left = if self.sidebar_open {
+            self.sidebar_shown_width(window) + 5.0
+        } else {
+            0.0
+        };
         self.window_bounds = Some([
             f32::from(bounds.origin.x),
             f32::from(bounds.origin.y),
@@ -634,6 +717,7 @@ impl Render for WorkspaceView {
                 cx.listener(|view, _, _, cx| {
                     view.resize = None;
                     view.resizing_sidebar = false;
+                    view.resizing_tools = false;
                     if !view.dragging.is_empty() {
                         view.dragging.clear();
                         cx.notify();
@@ -644,6 +728,17 @@ impl Render for WorkspaceView {
             .on_action(
                 cx.listener(|view, _: &OpenSettings, window, cx| view.open_settings(window, cx)),
             )
+            .on_action(
+                cx.listener(|view, _: &ToggleToolsPanel, window, cx| view.toggle_tools(window, cx)),
+            )
+            .on_action(cx.listener(|view, _: &ShowProjectExplorer, window, cx| {
+                if view.tools_open {
+                    view.explorer
+                        .update(cx, |explorer, cx| explorer.focus(window, cx));
+                } else {
+                    view.toggle_tools(window, cx)
+                }
+            }))
             .on_action(cx.listener(|view, _: &CloseWindow, window, cx| {
                 view.shutdown(cx);
                 window.remove_window();
@@ -750,12 +845,7 @@ impl Render for WorkspaceView {
                     .flex()
                     .flex_row()
                     .when(self.sidebar_open, |this| {
-                        // Re-clamped here too, so shrinking the window can't squeeze the
-                        // terminals behind a sidebar sized for a wider one.
-                        let width = self
-                            .sidebar_width
-                            .min(f32::from(window.viewport_size().width) * SIDEBAR_MAX_SHARE)
-                            .max(SIDEBAR_MIN_WIDTH);
+                        let width = self.sidebar_shown_width(window);
                         this.child(self.render_sidebar(width, cx)).child(
                             // Drag handle on the sidebar's right edge. The line sits flush with
                             // the sidebar so cards keep equal left and right margins.
@@ -775,6 +865,11 @@ impl Render for WorkspaceView {
                                     }),
                                 ),
                         )
+                    })
+                    .when(self.tools_open, |this| {
+                        let width = self.tools_shown_width(window);
+                        this.child(self.render_tools(width, cx))
+                            .child(self.render_tools_edge(cx))
                     })
                     .child(div().flex_1().min_w_0().h_full().child(content)),
             )

@@ -29,6 +29,10 @@ pub(super) enum MenuAction {
     CopyText(String),
     MoveTab(usize, bool),
     SetTabColor(usize, Option<usize>),
+    OpenPath(std::path::PathBuf),
+    Reveal(std::path::PathBuf),
+    CdTo(std::path::PathBuf),
+    NewTabAt(std::path::PathBuf),
     /// Rendered as a divider line.
     Separator,
     /// Rendered as the row of color dots for this tab.
@@ -50,7 +54,7 @@ impl WorkspaceView {
         cx.notify();
     }
 
-    fn open_menu(
+    pub(super) fn open_menu(
         &mut self,
         position: Point<Pixels>,
         items: Vec<(String, MenuAction)>,
@@ -264,6 +268,10 @@ impl WorkspaceView {
                 cx.write_to_clipboard(gpui::ClipboardItem::new_string(text))
             }
             MenuAction::MoveTab(index, up) => self.model.move_tab(index, up),
+            MenuAction::OpenPath(path) => super::tools::open_externally(&path),
+            MenuAction::Reveal(path) => super::tools::reveal_in_finder(&path),
+            MenuAction::CdTo(path) => self.cd_to(&path, cx),
+            MenuAction::NewTabAt(path) => return self.new_tab_at(path, window, cx),
             MenuAction::SetTabColor(index, color) => self.model.set_tab_color(index, color),
             MenuAction::Separator | MenuAction::TabColors(_) => {}
         }

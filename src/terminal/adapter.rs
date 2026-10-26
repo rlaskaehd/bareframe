@@ -315,6 +315,24 @@ impl GhosttyAdapter {
         }
     }
 
+    /// Sends `text` as if typed, through Ghostty's `text:` binding action, whose argument
+    /// is a Zig string literal.
+    pub fn type_text(&mut self, text: &str) {
+        let mut action = String::from("text:");
+        for ch in text.chars() {
+            match ch {
+                '\\' => action.push_str("\\\\"),
+                ch if ch.is_ascii_control() => {
+                    action.push_str(&format!("\\x{:02x}", u32::from(ch)))
+                }
+                ch => action.push(ch),
+            }
+        }
+        if let Ok(action) = CString::new(action) {
+            self.binding(&action);
+        }
+    }
+
     fn binding(&mut self, action: &std::ffi::CStr) {
         self.send_committed();
         if let Some(surface) = &mut self.surface {
