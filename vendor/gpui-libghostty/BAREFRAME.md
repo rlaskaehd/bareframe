@@ -13,6 +13,11 @@ Local changes are limited to macOS embedding:
 - A bounded queue for title, working directory and command-finished observations.
 - Explicit gap events if observations exceed the queue or text size limit.
 - TERM_PROGRAM identifies bareframe.
+- `TerminalOptions::environment` adds host variables to the surface command's
+  environment after the shim's defaults, so they override Ghostty's values.
+  `TerminalOptions::extra_config` is written to a temporary file that the shim
+  loads after the user and theme files. It applies at spawn only; theme updates
+  do not reload it. Both shims (macOS, Linux) take the new arguments.
 - `send_key` gives Control chords their printable character as text, as Ghostty's
   AppKit view does. GPUI drops the text while Control is held, and without it
   Ghostty's encoder emitted nothing for chords such as ctrl+shift+a or ctrl+@

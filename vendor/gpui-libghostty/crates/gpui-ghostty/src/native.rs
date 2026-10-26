@@ -35,6 +35,26 @@ struct HostEvent {
     text: [std::ffi::c_char; 4096],
 }
 
+/// One host variable in the C shim's `ghostty_env_var_s` layout.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[repr(C)]
+struct RawEnvVar {
+    key: *const std::ffi::c_char,
+    value: *const std::ffi::c_char,
+}
+
+/// The pointers borrow `environment` and are valid only while it is alive.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn raw_environment(environment: &[(std::ffi::CString, std::ffi::CString)]) -> Vec<RawEnvVar> {
+    environment
+        .iter()
+        .map(|(key, value)| RawEnvVar {
+            key: key.as_ptr(),
+            value: value.as_ptr(),
+        })
+        .collect()
+}
+
 struct NativeCallbacks {
     sender: Sender<()>,
     approval: OnceLock<ClipboardApprovalCallback>,
@@ -256,7 +276,10 @@ mod platform {
             command: *const c_char,
             load_user_config: bool,
             theme_config_path: *const c_char,
+            extra_config_path: *const c_char,
             quiet_login: bool,
+            extra_env: *const RawEnvVar,
+            extra_env_count: usize,
             wakeup_userdata: *mut c_void,
             wakeup: unsafe extern "C" fn(*mut c_void),
             approve_clipboard: unsafe extern "C" fn(*mut c_void, i32, *const c_char) -> bool,
@@ -351,9 +374,12 @@ mod platform {
             command: CString,
             load_user_config: bool,
             theme_config_path: Option<&CStr>,
+            extra_config_path: Option<&CStr>,
             quiet_login: bool,
+            environment: &[(CString, CString)],
         ) -> Result<Self, &'static str> {
             let wakeup = NativeWakeup::new();
+            let environment = raw_environment(environment);
             // SAFETY: The C shim validates creation failures. The parent pointer and
             // main-thread lifetime requirements are this method's documented boundary.
             let raw = unsafe {
@@ -363,7 +389,10 @@ mod platform {
                     command.as_ptr(),
                     load_user_config,
                     theme_config_path.map_or(std::ptr::null(), CStr::as_ptr),
+                    extra_config_path.map_or(std::ptr::null(), CStr::as_ptr),
                     quiet_login,
+                    environment.as_ptr(),
+                    environment.len(),
                     wakeup.userdata(),
                     native_wakeup,
                     native_clipboard_approval,
@@ -618,10 +647,10 @@ mod platform {
         use super::*;
 
         /// The shim defines this constructor with these parameters in this order,
-        /// including the quiet-login flag between the theme path and the wakeup
-        /// data. Binding the declared type here fails the build when the two
-        /// drift apart, instead of passing a mismatched argument list across the
-        /// C boundary.
+        /// including the extra configuration path after the theme path and the
+        /// host environment after the quiet-login flag. Binding the declared type
+        /// here fails the build when the two drift apart, instead of passing a
+        /// mismatched argument list across the C boundary.
         #[test]
         fn surface_constructor_type_matches_the_shim() {
             let _: unsafe extern "C" fn(
@@ -630,7 +659,10 @@ mod platform {
                 *const c_char,
                 bool,
                 *const c_char,
+                *const c_char,
                 bool,
+                *const RawEnvVar,
+                usize,
                 *mut c_void,
                 unsafe extern "C" fn(*mut c_void),
                 unsafe extern "C" fn(*mut c_void, i32, *const c_char) -> bool,
@@ -683,7 +715,9 @@ impl NativeSurface {
         _command: CString,
         _load_user_config: bool,
         _theme_config_path: Option<&CStr>,
+        _extra_config_path: Option<&CStr>,
         _quiet_login: bool,
+        _environment: &[(CString, CString)],
     ) -> Result<Self, &'static str> {
         Err("libghostty native surfaces require macOS or Wayland")
     }

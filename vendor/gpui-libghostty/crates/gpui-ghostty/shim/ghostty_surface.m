@@ -229,7 +229,10 @@ gpui_ghostty_surface *gpui_ghostty_surface_new(
     const char *command,
     bool load_user_config,
     const char *theme_config_path,
+    const char *extra_config_path,
     bool quiet_login,
+    const ghostty_env_var_s *extra_env,
+    size_t extra_env_count,
     void *wakeup_userdata,
     gpui_ghostty_wakeup_cb wakeup,
     gpui_ghostty_approve_clipboard_cb approve_clipboard
@@ -263,6 +266,10 @@ gpui_ghostty_surface *gpui_ghostty_surface_new(
     if (theme_config_path != NULL) {
         ghostty_config_load_file(state->config, theme_config_path);
     }
+    // Host configuration applies at spawn only; theme updates do not reload it.
+    if (extra_config_path != NULL) {
+        ghostty_config_load_file(state->config, extra_config_path);
+    }
     ghostty_config_finalize(state->config);
 
     ghostty_runtime_config_s runtime = {
@@ -283,14 +290,23 @@ gpui_ghostty_surface *gpui_ghostty_surface_new(
     surface_config.platform.macos.nsview = state->view;
     surface_config.userdata = state;
     surface_config.scale_factor = state->parent.window.backingScaleFactor ?: NSScreen.mainScreen.backingScaleFactor;
-    ghostty_env_var_s environment[] = {
+    ghostty_env_var_s base_environment[] = {
         { .key = "TERM", .value = "xterm-256color" },
         { .key = "COLORTERM", .value = "truecolor" },
         { .key = "TERM_PROGRAM", .value = "bareframe" },
         { .key = "GHOSTTY_QUIET_LOGIN", .value = "1" },
     };
-    size_t environment_count = sizeof(environment) / sizeof(environment[0]);
-    if (!quiet_login) environment_count -= 1;
+    size_t base_count = sizeof(base_environment) / sizeof(base_environment[0]);
+    if (!quiet_login) base_count -= 1;
+    // Host variables come last so they override the defaults above. Ghostty
+    // copies every entry while creating the surface.
+    size_t environment_count = base_count + extra_env_count;
+    ghostty_env_var_s *environment = calloc(environment_count, sizeof(*environment));
+    if (environment == NULL) goto fail;
+    memcpy(environment, base_environment, base_count * sizeof(*environment));
+    if (extra_env_count > 0) {
+        memcpy(environment + base_count, extra_env, extra_env_count * sizeof(*environment));
+    }
     surface_config.working_directory = working_directory;
     surface_config.command = command;
     surface_config.env_vars = environment;
@@ -298,6 +314,7 @@ gpui_ghostty_surface *gpui_ghostty_surface_new(
     surface_config.wait_after_command = false;
     surface_config.context = GHOSTTY_SURFACE_CONTEXT_WINDOW;
     state->surface = ghostty_surface_new(state->app, &surface_config);
+    free(environment);
     if (state->surface == NULL) goto fail;
 
     // Count presented frames from here on. The renderer may not have installed the

@@ -77,6 +77,12 @@ pub struct TerminalOptions {
     pub quiet_login: bool,
     /// Approval policy for protected clipboard operations; absent means deny.
     pub clipboard_approval: Option<ClipboardApprovalCallback>,
+    /// Variables for the command's environment. They override Ghostty's own
+    /// values, so a host can inject its own shell integration.
+    pub environment: Vec<(String, String)>,
+    /// Ghostty configuration lines loaded after the user and theme files. They
+    /// apply when the surface spawns; theme updates do not reload them.
+    pub extra_config: String,
 }
 
 impl TerminalOptions {
@@ -88,6 +94,8 @@ impl TerminalOptions {
             configuration: TerminalConfiguration::Default,
             quiet_login: false,
             clipboard_approval: None,
+            environment: Vec::new(),
+            extra_config: String::new(),
         }
     }
 }
@@ -106,11 +114,35 @@ fn theme_config_contents(theme: &TerminalTheme) -> String {
 }
 
 fn write_theme_config(theme: &TerminalTheme) -> Result<tempfile::NamedTempFile, String> {
+    write_config(&theme_config_contents(theme), "theme")
+}
+
+fn write_config(contents: &str, purpose: &str) -> Result<tempfile::NamedTempFile, String> {
     let mut file = tempfile::NamedTempFile::new()
-        .map_err(|error| format!("create temporary Ghostty theme: {error}"))?;
-    file.write_all(theme_config_contents(theme).as_bytes())
-        .map_err(|error| format!("write temporary Ghostty theme: {error}"))?;
+        .map_err(|error| format!("create temporary Ghostty {purpose}: {error}"))?;
+    file.write_all(contents.as_bytes())
+        .map_err(|error| format!("write temporary Ghostty {purpose}: {error}"))?;
     Ok(file)
+}
+
+fn native_environment(
+    environment: Vec<(String, String)>,
+) -> Result<Vec<(CString, CString)>, String> {
+    environment
+        .into_iter()
+        .map(|(key, value)| {
+            if key.is_empty() || key.contains('=') {
+                return Err(format!(
+                    "invalid terminal environment variable name: {key:?}"
+                ));
+            }
+            let key = CString::new(key)
+                .map_err(|_| "terminal environment name contains a NUL byte".to_owned())?;
+            let value = CString::new(value)
+                .map_err(|_| "terminal environment value contains a NUL byte".to_owned())?;
+            Ok((key, value))
+        })
+        .collect()
 }
 
 /// Holds the temporary theme file a surface was configured from so a later
@@ -174,7 +206,19 @@ pub unsafe fn spawn_surface(
         configuration,
         quiet_login,
         clipboard_approval,
+        environment,
+        extra_config,
     } = options;
+    let environment = native_environment(environment)?;
+    // Ghostty reads the file while creating the surface, so it can go afterwards.
+    let extra_config = (!extra_config.is_empty())
+        .then(|| write_config(&extra_config, "configuration"))
+        .transpose()?;
+    let extra_config_path = extra_config
+        .as_ref()
+        .map(|file| CString::new(file.path().to_string_lossy().as_bytes()))
+        .transpose()
+        .map_err(|_| "temporary Ghostty configuration path contains a NUL byte".to_owned())?;
     let working_directory =
         CString::new(working_directory.to_string_lossy().as_bytes()).map_err(|_| {
             format!(
@@ -207,7 +251,9 @@ pub unsafe fn spawn_surface(
             command,
             load_user_config,
             theme_config_path.as_deref(),
+            extra_config_path.as_deref(),
             quiet_login,
+            &environment,
         )
     }
     .map_err(|error| format!("initialize libghostty: {error}"))?;
@@ -800,6 +846,28 @@ mod tests {
     fn terminal_options_use_bare_defaults_by_default() {
         let options = TerminalOptions::new("sh", ".");
         assert_eq!(options.configuration, TerminalConfiguration::Default);
+        assert!(options.environment.is_empty());
+        assert!(options.extra_config.is_empty());
+    }
+
+    /// Host variables keep their order, since later entries win in Ghostty's
+    /// map, and names a C environment cannot hold are refused before spawning.
+    #[test]
+    fn host_environment_keeps_order_and_rejects_unrepresentable_names() {
+        let environment = native_environment(vec![
+            ("ZDOTDIR".into(), "/a b/zsh".into()),
+            ("GHOSTTY_ZSH_ZDOTDIR".into(), "/home/u".into()),
+        ])
+        .expect("valid variables");
+        assert_eq!(environment[0].0.as_bytes(), b"ZDOTDIR");
+        assert_eq!(environment[0].1.as_bytes(), b"/a b/zsh");
+        assert_eq!(environment[1].0.as_bytes(), b"GHOSTTY_ZSH_ZDOTDIR");
+        for (key, value) in [("", "x"), ("A=B", "x"), ("A\0", "x"), ("A", "x\0")] {
+            assert!(
+                native_environment(vec![(key.into(), value.into())]).is_err(),
+                "{key:?}={value:?}"
+            );
+        }
     }
 
     #[test]
