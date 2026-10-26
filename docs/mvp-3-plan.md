@@ -1,8 +1,8 @@
 # MVP 3 구현 계획 — 도구 패널, 설정, 편집 도구
 
-기준: `mvp-2` 태그(2026-10-26). 상태: 계획(승인 전). MVP 3을 두 단계로 나눈다.
+기준: `mvp-2` 태그(2026-10-26). 상태: 계획, 2026-10-27 사용자 결정 반영. MVP 3을 두 단계로 나눈다.
 
-- **MVP 3a**: MVP 2에서 넘어온 항목, Tools panel(Project explorer·Global search), 톱니 아이콘의 Settings·Keyboard shortcuts.
+- **MVP 3a**: MVP 2에서 넘어온 항목, 레이아웃 저장·복원, 커맨드 팔레트, Tools panel(Project explorer·Global search), 톱니 아이콘의 Settings·Keyboard shortcuts.
 - **MVP 3b**: Markdown viewer·편집, Diff 버튼과 Code review 창, Code editor.
 
 ## 근거와 원칙
@@ -33,6 +33,23 @@
 | 위험한 붙여넣기·OSC 52 읽기 확인 | 지금은 거부한다. 확인 창(붙여넣을 내용 미리보기, 붙여넣기/취소)을 GPUI 팝업으로 만든다. 설정 Features의 `Clipboard access (OSC 52)`(Deny/Ask/Allow)와 연결한다 |
 | 테마·폰트 저장 | Settings에서 바꾼 값은 설정 파일에 저장한다(A5). 메뉴·단축키로 바꾼 값도 같은 경로로 저장한다 |
 | OSC 7 경로 신뢰 | Project explorer 루트가 OSC 7 경로를 따르므로 함께 재검토한다. 셸 통합이 프롬프트 직후 보낸 OSC 7만 받는 방안을 검토한다 |
+
+### A0-1. 레이아웃 저장·복원
+
+| 항목 | 계획 |
+| --- | --- |
+| 저장 대상 | 창 크기·위치, 탭 순서, 탭 그룹(이름·색·접힘·고정), 탭 고정·색·이름, 분할 트리와 비율, 활성 탭·Pane, 최대화, 각 터미널 Pane의 작업 디렉터리, 사이드바·Tools panel 열림과 너비. 3b 이후에는 Markdown·편집기 Pane의 파일 경로 |
+| 저장 시점 | 변경이 생기면 1초 묶어서, 그리고 종료할 때. `~/.config/bareframe/state.json`(설정 파일과 분리) |
+| 복원 | 설정 Features의 `Restore windows, tabs, and panes on startup`(기본 켬). 터미널은 저장한 디렉터리에서 새 셸로 시작하고, 끝난 프로세스는 다시 실행하지 않는다. 디렉터리가 없으면 홈에서 시작 |
+| 모델 | `bareframe-core`의 `Workspace`를 직렬화한다(`serde`). Pane id는 복원 시 다시 매긴다. 깨진 파일은 무시하고 경고만 남긴다 |
+
+### A0-2. 커맨드 팔레트
+
+| 항목 | 계획 |
+| --- | --- |
+| 열기 | `Cmd+Shift+P`(Ghostty `toggle_command_palette`와 같음). 상단 바 가운데 검색 자리에 맞춘 팝업 |
+| 내용 | 앱의 모든 동작(Keyboard shortcuts 목록과 같은 출처)과 단축키 표시, 열린 탭·세션으로 이동, Settings 섹션 열기. 이름 퍼지 검색 |
+| 실행 | Enter로 실행하고 닫는다. 팝업이 터미널 위에 겹치므로 지금 메뉴처럼 터미널을 정지 화면으로 바꾼다 |
 
 ### A1. Tools panel
 
@@ -104,11 +121,11 @@ Warp 화면: `Configure keyboard shortcuts` 제목, `Search by name or by keys` 
 | 항목 | 계획 |
 | --- | --- |
 | 목록 | 앱이 정의한 모든 동작: 이름, 설명, 그룹, 기본 키, 사용자 키. 이름순 |
-| 기본값 | Ghostty macOS 기본값(아래 표). 앱 고유 동작(사이드바·Tools panel·Settings 등)은 Warp 기본값 |
+| 기본값 | Ghostty macOS 기본값(아래 표). 앱 고유 동작(사이드바·Tools panel·Settings 등)은 Warp 기본값. 예외: 탭 그룹 `Cmd+G`/`Cmd+Shift+G`와 사이드바 `Cmd+B`/`Cmd+Shift+B`는 지금 키를 유지한다 |
 | 녹화 | 행을 누르면 `cx.intercept_keystrokes`로 키 하나를 녹화한다. 녹화 중에는 앱 단축키가 실행되지 않는다. `Clear`(해제), `Default`(기본값), `Cancel`, `Save` |
 | 충돌 | 같은 키를 쓰는 동작이 둘 이상이면 키 캡을 주황색으로 표시하고 "This shortcut conflicts with other keybinds"를 보인다. 저장은 막지 않는다 |
 | 검색 | 이름 부분 일치 + 키 조합(`cmd d`) 일치 |
-| 저장 | 바꾼 것만 설정 파일에 Ghostty 문법으로 쓴다: `keybind = cmd+t=new_tab`, 해제는 `keybind = cmd+g=unbind`. 같은 줄을 손으로 써도 된다 |
+| 저장 | 화면에서 바꾸면 바꾼 것만 설정 파일에 Ghostty 문법으로 쓴다: `keybind = cmd+t=new_tab`, 해제는 `keybind = cmd+g=unbind`. 같은 줄을 손으로 써도 되고, 어느 쪽으로 바꿔도 화면과 파일이 같은 값을 보인다 |
 | 터미널 동작 | `clear_screen`·`select_all`·`scroll_*`·`jump_to_prompt` 같은 터미널 동작은 shim의 `ghostty_surface_binding_action`으로 Ghostty에 이름 그대로 넘긴다 |
 
 Ghostty macOS 기본값 중 이번에 넣는 것(`src/config/Config.zig` `Keybinds.init`):
@@ -125,7 +142,7 @@ Ghostty macOS 기본값 중 이번에 넣는 것(`src/config/Config.zig` `Keybin
 | 스크롤, 프롬프트 이동 | `cmd+home`/`end`/`pgup`/`pgdn`, `cmd+up`/`down` | 없음 |
 | open_config / reload_config | `cmd+,` / `cmd+shift+,` | 없음(`cmd+,`는 Settings 열기로) |
 | toggle_fullscreen | `cmd+enter`, `cmd+ctrl+f` | 없음 |
-| start_search 등 스크롤백 검색 | `cmd+f`, `cmd+g`/`cmd+shift+g` | 없음. libghostty 검색 지원 여부를 먼저 확인(결정 3) |
+| start_search 등 스크롤백 검색 | `cmd+f`. 다음·이전은 Ghostty의 `cmd+g`/`cmd+shift+g` 대신 검색 칸의 `Enter`/`Shift+Enter`(탭 그룹 키 유지) | 없음. libghostty 검색 지원 여부를 먼저 확인 |
 
 ## MVP 3b
 
@@ -153,7 +170,9 @@ Warp 화면: 상단 바 오른쪽에 `± +N −M` 버튼(초록·빨강). 누르
 | 데이터 | `git` CLI: `status --porcelain=2 -z --untracked-files=all`, `diff --numstat`, `diff -z HEAD -- 파일`, `show HEAD:경로`. 큰 diff(4MB, 한 줄 5000자 초과)는 접어 둔다 |
 | 표시 | 파일 카드 접기·펼치기, 통합 diff(추가 초록, 삭제 빨강, 양쪽 줄 번호). `uniform_list`로 보이는 줄만 그린다 |
 | 동작 | 경로 복사, 파일 변경 되돌리기(확인 창 후 `git restore`·추적하지 않은 파일은 휴지통), 편집기에서 열기(B3) |
-| 제외 | Commit·Push·PR, 리뷰 코멘트·AI 컨텍스트, 헝크 단위 스테이징, 나란히 보기(결정 5) |
+| Commit | 패널 머리의 `Commit` 버튼: 메시지 입력 창, 변경 전체 또는 고른 파일을 `git add`·`git commit`. 저장소 상태(충돌·병합 중)면 막고 이유를 표시 |
+| 헝크 되돌리기 | diff의 헝크마다 되돌리기 버튼. 확인 후 해당 헝크만 작업 트리에서 되돌린다(`git apply -R`에 그 헝크 패치를 넘김). 편집기에 열린 파일이면 버퍼도 다시 읽는다 |
+| 제외 | Push·PR, 리뷰 코멘트·AI 컨텍스트, 헝크 단위 스테이징, 나란히 보기 |
 
 ### B3. Code editor
 
@@ -175,13 +194,15 @@ Warp 화면: 파일을 열면 오른쪽 분할 Pane의 편집기에 열리고, �
 | 단계 | 내용 | 완료 기준 |
 | --- | --- | --- |
 | 3a-1 | Pane 종류 일반화, 상단 바 버튼 자리(렌치·톱니) | 터미널 동작 회귀 없음, 빈 GPUI Pane을 분할로 열고 닫기 |
+| 3a-1b | 레이아웃 저장·복원 | 탭·그룹·분할·작업 디렉터리를 재시작 후 그대로 복원, 깨진 상태 파일에서도 시작 |
 | 3a-2 | Tools panel + Project explorer | cd에 따라 루트 변경, 큰 저장소(이 저장소의 `reference/`)에서 펼치기 지연 없음, gitignore 표시, 파일 변경 반영 |
 | 3a-3 | Global search | `reference/` 전체 검색 중 입력해도 UI가 멈추지 않음, 취소·재검색, 결과 클릭으로 열기 |
 | 3a-4 | Settings 화면과 저장 | 모든 항목이 파일에 저장되고 재시작 후 유지, 파일을 직접 고쳐도 반영, 검색 |
 | 3a-5 | Keyboard shortcuts | 녹화·해제·기본값·충돌 표시, 저장 후 재시작해도 유지, Ghostty 기본값표와 일치 |
 | 3a-6 | 붙여넣기 확인 창, OSC 7 재검토 | 위험한 붙여넣기가 확인 후에만 들어감 |
+| 3a-7 | 커맨드 팔레트 | 모든 동작을 이름으로 찾아 실행, 탭 이동, 단축키 표시가 Keyboard shortcuts와 일치 |
 | 3b-1 | Markdown viewer | 이 저장소 `docs/*.md`가 Warp와 같은 요소로 보임, 링크·이미지·코드 복사 |
-| 3b-2 | Diff 버튼과 Code review 창 | `+N −M`이 `git diff --numstat`과 일치, 파일별 diff, 되돌리기 |
+| 3b-2 | Diff 버튼과 Code review 창 | `+N −M`이 `git diff --numstat`과 일치, 파일별 diff, 파일·헝크 되돌리기, Commit 후 버튼 숫자 갱신 |
 | 3b-3 | Code editor | 한글 IME, 1만 줄 파일 스크롤이 매끄러움, 저장·변경 표시·닫기 확인, 구문 강조 |
 | 3b-4 | 연결 | Markdown `Raw` 전환, Explorer·Search·Diff에서 편집기로 열기(줄·열) |
 
@@ -191,7 +212,7 @@ Warp 화면: 파일을 열면 오른쪽 분할 Pane의 편집기에 열리고, �
 
 | 단계 | 크레이트 | 라이선스 |
 | --- | --- | --- |
-| 3a | `ignore` 0.4, `grep` 0.4, `notify` 8 + `notify-debouncer-full`, `regex` 1, `trash`(삭제 시) | MIT/Unlicense, CC0/Artistic(notify), MIT |
+| 3a | `ignore` 0.4, `grep` 0.4, `notify` 8 + `notify-debouncer-full`, `regex` 1, `trash`(삭제 시), `serde`·`serde_json`(상태 저장), 퍼지 검색은 직접 구현하거나 `nucleo-matcher` | MIT/Unlicense, CC0/Artistic(notify), MIT, MIT/Apache, MPL-2.0(nucleo) |
 | 3b | `pulldown-cmark` 0.13, `ropey` 1, `tree-sitter` 0.25+, `arborium` 2, `similar` 2 또는 `imara-diff` 0.2 | MIT, MIT, MIT, MIT/Apache, Apache |
 
 설치 전 각 크레이트의 라이선스 원문을 다시 확인하고 `deny`식 목록으로 기록한다.
@@ -203,10 +224,10 @@ Warp 화면: 파일을 열면 오른쪽 분할 Pane의 편집기에 열리고, �
 - **큰 저장소**: 탐색·검색·diff를 모두 백그라운드에서 하고 결과를 묶어서 UI로 보낸다.
 - **설정 재적용 범위**: libghostty가 실행 중 바꿀 수 없는 설정은 새 세션부터 적용한다고 표시한다.
 
-## 결정이 필요한 것
+## 결정 사항 (2026-10-27)
 
-1. **MVP 3의 원래 항목**: 레이아웃 저장·복원과 커맨드 팔레트를 3a에 넣을지, 뒤로 미룰지. Warp에는 둘 다 있다(Features의 "Restore windows, tabs, and panes on startup").
-2. **설정 파일 형식**: 지금의 Ghostty식 `~/.config/bareframe/config`(`keybind = ...` 포함)를 유지(권장)할지, Warp처럼 TOML·YAML로 나눌지.
-3. **단축키 충돌**: Ghostty 기본값을 따르면 `Cmd+G`/`Cmd+Shift+G`(지금은 탭 그룹)가 스크롤백 검색과 겹친다. 탭 그룹 단축키를 없앨지(Warp는 기본 키 없음) 다른 키로 옮길지.
-4. **bareframe 라이선스**: 아직 정하지 않았다. 코드는 가져오지 않지만, 이미 GPLv3인 셸 통합을 번들에 포함하므로 배포 전에 정한다.
-5. **Code review 창 범위**: Commit 버튼과 헝크 되돌리기를 3b에 넣을지.
+1. 레이아웃 저장·복원과 커맨드 팔레트는 3a에 넣는다(A0-1, A0-2).
+2. 설정은 `~/.config/bareframe/config`(Ghostty식, `keybind` 포함) 하나로 두고, 단축키는 Keyboard shortcuts 화면에서 수정할 수 있어야 한다.
+3. 탭 그룹 `Cmd+G`/`Cmd+Shift+G`는 지금 키를 유지한다. 사이드바 열기·닫기에 `Cmd+B`를 추가했다(`Cmd+Shift+B`도 유지).
+4. 라이선스는 사용자 검토 중이다. 배포 전에 정한다.
+5. Code review 창에 Commit 버튼과 헝크 되돌리기를 넣는다(B2).

@@ -174,6 +174,8 @@ pub fn run(config: LaunchConfig) {
                 KeyBinding::new("cmd-0", ResetFontSize, None),
                 KeyBinding::new("cmd-g", GroupTab, None),
                 KeyBinding::new("cmd-shift-g", UngroupTab, None),
+                // Warp's tabs panel key, plus the earlier Cmd+Shift+B.
+                KeyBinding::new("cmd-b", ToggleSidebar, None),
                 KeyBinding::new("cmd-shift-b", ToggleSidebar, None),
             ]);
             cx.set_menus(vec![
