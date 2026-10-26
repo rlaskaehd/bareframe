@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+set -euo pipefail
+source "$(dirname "$0")/env"
+cd "$BAREFRAME_ROOT"
+cargo build --locked
+bundle_name=bareframe
+if [[ "${1:-}" == --validation ]]; then
+    bundle_name=bareframe-validation
+    mkdir -p target/validation
+fi
+bundle_dir="$CARGO_TARGET_DIR/$bundle_name.app/Contents"
+mkdir -p "$bundle_dir/MacOS" "$bundle_dir/Resources"
+cp "$CARGO_TARGET_DIR/debug/bareframe" "$bundle_dir/MacOS/bareframe"
+cat > "$bundle_dir/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>dev.bareframe.app</string>
+<key>CFBundleName</key><string>bareframe</string>
+<key>CFBundleDisplayName</key><string>bareframe</string>
+<key>CFBundleExecutable</key><string>bareframe</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleShortVersionString</key><string>0.1.0</string>
+<key>CFBundleVersion</key><string>1</string>
+<key>LSMinimumSystemVersion</key><string>14.0</string>
+<key>NSHighResolutionCapable</key><true/>
+</dict></plist>
+PLIST
+if [[ "$bundle_name" == bareframe-validation ]]; then
+    /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier dev.bareframe.validation' \
+        -c 'Set :CFBundleName bareframe-validation' \
+        -c 'Set :CFBundleDisplayName bareframe validation' \
+        -c 'Add :LSEnvironment dict' \
+        -c 'Add :LSEnvironment:BAREFRAME_VALIDATION string 1' "$bundle_dir/Info.plist"
+fi
+codesign --force --sign - "$CARGO_TARGET_DIR/$bundle_name.app"
+echo "$CARGO_TARGET_DIR/$bundle_name.app"

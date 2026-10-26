@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+launch_directory="$PWD"
+source "$(dirname "$0")/env"
+cd "$BAREFRAME_ROOT"
+if [[ -z "${ZIG:-}" || ! -f Cargo.lock ]]; then
+    echo 'Run ./script/bootstrap before starting bareframe.' >&2
+    exit 1
+fi
+cargo build --locked
+binary_path="$(cd "$CARGO_TARGET_DIR/debug" && pwd)/bareframe"
+cd "$launch_directory"
+exec "$binary_path" "$@"
+

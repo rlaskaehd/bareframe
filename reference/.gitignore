@@ -1,0 +1,7 @@
+# Upstream source snapshots are local references. Track the index and lock file.
+/ghostty/
+/gpui-libghostty/
+/zed/
+/warp/
+/wezterm/
+.DS_Store

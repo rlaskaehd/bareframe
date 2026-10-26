@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Source this file from the other scripts; keep build data inside the project.
+# Outside bash BASH_SOURCE is empty and the root would resolve to the parent directory.
+if [[ -z "${BASH_SOURCE[0]:-}" ]]; then
+    echo "script/env: source it from bash (the project scripts do this)" >&2
+    return 1 2>/dev/null || exit 1
+fi
+BAREFRAME_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export CARGO_HOME="${CARGO_HOME:-$BAREFRAME_ROOT/.cache/cargo}"
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$BAREFRAME_ROOT/target}"
+if [[ -z "${ZIG:-}" ]]; then
+    if [[ -x "$BAREFRAME_ROOT/.tools/zig-aarch64-macos-0.16.0/zig" ]]; then
+        export ZIG="$BAREFRAME_ROOT/.tools/zig-aarch64-macos-0.16.0/zig"
+    elif command -v zig >/dev/null 2>&1; then
+        export ZIG="$(command -v zig)"
+    fi
+fi
+

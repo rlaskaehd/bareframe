@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+source "$(dirname "$0")/env"
+cd "$BAREFRAME_ROOT"
+cargo fmt --manifest-path crates/bareframe-core/Cargo.toml -- --check
+cargo clippy --manifest-path crates/bareframe-core/Cargo.toml --offline --all-targets -- -D warnings
+cargo test --manifest-path crates/bareframe-core/Cargo.toml --offline
+mkdir -p "$CARGO_TARGET_DIR/native-tests"
+xcrun clang -std=c11 -Wall -Wextra -Werror \
+    -I vendor/gpui-libghostty/crates/gpui-ghostty/shim \
+    tests/native_events.c -o "$CARGO_TARGET_DIR/native-tests/events"
+"$CARGO_TARGET_DIR/native-tests/events"
+xcrun clang -fsyntax-only -Wall -Wextra -Werror -x objective-c \
+    -I vendor/gpui-libghostty/crates/gpui-ghostty/vendor/ghostty/include \
+    vendor/gpui-libghostty/crates/gpui-ghostty/shim/ghostty_surface.m
+

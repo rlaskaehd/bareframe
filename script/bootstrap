@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+set -euo pipefail
+source "$(dirname "$0")/env"
+cd "$BAREFRAME_ROOT"
+if [[ "$(uname -s)" != Darwin || "$(uname -m)" != arm64 ]]; then
+    echo 'MVP 1 bootstrap currently targets macOS arm64.' >&2
+    exit 1
+fi
+xcrun --find clang >/dev/null
+xcrun --find metal >/dev/null
+cargo --version
+mkdir -p .tools .cache/downloads
+if [[ -z "${ZIG:-}" ]]; then
+    zig_archive="$BAREFRAME_ROOT/.cache/downloads/zig-aarch64-macos-0.16.0.tar.xz"
+    zig_sha256=b23d70deaa879b5c2d486ed3316f7eaa53e84acf6fc9cc747de152450d401489
+    if [[ ! -f "$zig_archive" ]]; then
+        curl --fail --location --retry 2 --connect-timeout 15 \
+            https://ziglang.org/download/0.16.0/zig-aarch64-macos-0.16.0.tar.xz \
+            --output "$zig_archive.part"
+        mv "$zig_archive.part" "$zig_archive"
+    fi
+    printf '%s  %s\n' "$zig_sha256" "$zig_archive" | shasum -a 256 --check
+    tar -xJf "$zig_archive" -C .tools
+    export ZIG="$BAREFRAME_ROOT/.tools/zig-aarch64-macos-0.16.0/zig"
+fi
+if [[ "$("$ZIG" version)" != 0.16.0 ]]; then
+    echo "Expected Zig 0.16.0; selected $ZIG reports a different version." >&2
+    exit 1
+fi
+if [[ "${1:-}" == --update-lockfile ]]; then
+    cargo fetch
+elif [[ -f Cargo.lock ]]; then
+    cargo fetch --locked
+else
+    cargo generate-lockfile
+fi
+# Native Zig packages are fetched by the adapter's build script.
+cargo build --locked
+echo 'Build complete. Run ./script/run --clean-shell to open bareframe.'
+

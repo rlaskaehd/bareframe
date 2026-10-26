@@ -1,0 +1,5 @@
+[env]
+GHOSTTY_NATIVE_CACHE_DIR = { value = "target/ghostty-native", relative = true }
+GHOSTTY_ZIG_PACKAGE_CACHE_DIR = { value = "target/zig-packages", relative = true }
+GHOSTTY_ZIG_GLOBAL_CACHE_DIR = { value = "target/zig-global", relative = true }
+

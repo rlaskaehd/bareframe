@@ -1,0 +1,6 @@
+/target
+.direnv
+/crates/gpui-ghostty/vendor/ghostty/zig-pkg
+/crates/gpui-ghostty/vendor/ghostty/.zig-cache
+/crates/gpui-ghostty/vendor/ghostty/zig-out
+.DS_Store
