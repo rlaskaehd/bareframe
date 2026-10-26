@@ -130,7 +130,13 @@ impl WorkspaceView {
         let Some(terminal) = self.terminal(pane) else {
             return;
         };
-        let line = format!("\u{15}cd {}\r", shell_quote(&dir.to_string_lossy()));
+        let dir = dir.to_string_lossy();
+        // Quotes don't stop a typed newline from submitting the line early.
+        if dir.chars().any(char::is_control) {
+            eprintln!("bareframe: not typing a path with control characters: {dir:?}");
+            return;
+        }
+        let line = format!("\u{15}cd {}\r", shell_quote(&dir));
         terminal.update(cx, |terminal, cx| terminal.type_text(&line, cx));
     }
 
@@ -226,13 +232,46 @@ fn tool_tab(theme: &Theme, icon: &'static str, selected: bool) -> impl IntoEleme
 }
 
 /// Opens a file with its default macOS application until bareframe has its own viewers.
+/// Anything that would run code when opened is revealed in Finder instead, so a click in
+/// the tree never executes a script or app.
 pub(super) fn open_externally(path: &Path) {
+    if launches_code(path) {
+        return reveal_in_finder(path);
+    }
     if let Err(error) = std::process::Command::new("/usr/bin/open")
         .arg(path)
         .spawn()
     {
         eprintln!("bareframe: opening {}: {error}", path.display());
     }
+}
+
+fn launches_code(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    const LAUNCHERS: [&str; 16] = [
+        "app",
+        "command",
+        "tool",
+        "terminal",
+        "workflow",
+        "action",
+        "scpt",
+        "scptd",
+        "applescript",
+        "pkg",
+        "mpkg",
+        "jar",
+        "webloc",
+        "inetloc",
+        "fileloc",
+        "url",
+    ];
+    let executable = std::fs::metadata(path)
+        .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0);
+    let extension = path
+        .extension()
+        .map(|extension| extension.to_string_lossy().to_lowercase());
+    executable || extension.is_some_and(|extension| LAUNCHERS.contains(&extension.as_str()))
 }
 
 pub(super) fn reveal_in_finder(path: &Path) {
@@ -252,7 +291,23 @@ fn shell_quote(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::shell_quote;
+    use super::{launches_code, shell_quote};
+
+    #[test]
+    fn launchers_and_executables_are_not_opened() {
+        let dir = std::env::temp_dir().join(format!("bareframe-launch-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("run");
+        std::fs::write(&script, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .unwrap();
+        let note = dir.join("notes.md");
+        std::fs::write(&note, "").unwrap();
+        assert!(launches_code(&script));
+        assert!(launches_code(&dir.join("Deploy.COMMAND")));
+        assert!(!launches_code(&note));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn quoting_survives_spaces_and_quotes() {
