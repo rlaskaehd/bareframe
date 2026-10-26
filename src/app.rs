@@ -65,11 +65,12 @@ actions!(
         ScrollPageDown,
         JumpToPreviousPrompt,
         JumpToNextPrompt,
+        ToggleCommandPalette,
     ]
 );
 
 /// The GPUI action for a keymap action name (see `bareframe_core::keymap::ACTIONS`).
-fn keymap_action(name: &str) -> Option<Box<dyn gpui::Action>> {
+pub fn keymap_action(name: &str) -> Option<Box<dyn gpui::Action>> {
     Some(match name {
         "new_tab" => Box::new(NewTab),
         "close_surface" => Box::new(ClosePane),
@@ -110,6 +111,7 @@ fn keymap_action(name: &str) -> Option<Box<dyn gpui::Action>> {
         "increase_font_size:1" => Box::new(IncreaseFontSize),
         "decrease_font_size:1" => Box::new(DecreaseFontSize),
         "reset_font_size" => Box::new(ResetFontSize),
+        "toggle_command_palette" => Box::new(ToggleCommandPalette),
         "open_config" => Box::new(OpenSettings),
         "reload_config" => Box::new(ReloadSettings),
         "toggle_fullscreen" => Box::new(ToggleFullscreen),
@@ -362,6 +364,8 @@ pub fn run(config: LaunchConfig, restore: bool) {
                     MenuItem::action("Paste", Paste),
                 ]),
                 Menu::new("View").items([
+                    MenuItem::action("Command Palette", ToggleCommandPalette),
+                    MenuItem::separator(),
                     MenuItem::action("Toggle Tabs Sidebar", ToggleSidebar),
                     MenuItem::action("Toggle Tools Panel", ToggleToolsPanel),
                     MenuItem::action("Project Explorer", ShowProjectExplorer),

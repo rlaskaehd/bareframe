@@ -20,7 +20,9 @@ pub(super) struct ClipboardPrompt {
     operation: ClipboardOperation,
     text: String,
     focus: FocusHandle,
-    shown: std::time::Instant,
+    /// When the prompt was first drawn in the active window; the confirm delay runs from
+    /// here and starts over whenever the window goes inactive.
+    shown: std::cell::Cell<Option<std::time::Instant>>,
 }
 
 impl WorkspaceView {
@@ -44,7 +46,7 @@ impl WorkspaceView {
             operation,
             text,
             focus,
-            shown: std::time::Instant::now(),
+            shown: std::cell::Cell::new(None),
         });
         // The prompt is drawn by GPUI, which native terminal surfaces would cover.
         if !self.frozen {
@@ -74,9 +76,15 @@ impl WorkspaceView {
 
     pub(super) fn render_clipboard_prompt(
         &self,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> Option<impl IntoElement> {
         let prompt = self.clipboard_prompt.as_ref()?;
+        if !window.is_window_active() {
+            prompt.shown.set(None);
+        } else if prompt.shown.get().is_none() {
+            prompt.shown.set(Some(std::time::Instant::now()));
+        }
         let theme = self.theme();
         let (title, body, confirm) = match prompt.operation {
             ClipboardOperation::Paste => (
@@ -96,11 +104,18 @@ impl WorkspaceView {
             ),
         };
         // Who is asking, so a background tab can't pass off its request as the active one's.
-        let source = self.pane(prompt.pane).map(|pane| {
-            let name = pane.name(cx);
+        // The tab number is ours; the name and location come from the program, so they are
+        // shown with nothing hidden.
+        let tab = self
+            .model
+            .tabs
+            .iter()
+            .position(|tab| tab.layout.panes().contains(&prompt.pane));
+        let source = tab.zip(self.pane(prompt.pane)).map(|(tab, pane)| {
+            let name = visible(&pane.name(cx));
             match pane.location(cx) {
-                Some(location) => format!("From {name} · {location}"),
-                None => format!("From {name}"),
+                Some(location) => format!("From tab {} ({name} · {})", tab + 1, visible(&location)),
+                None => format!("From tab {} ({name})", tab + 1),
             }
         });
         // A lone `\r` also starts a line on screen, so it can't hide what follows it.
@@ -204,7 +219,11 @@ impl WorkspaceView {
                                     .child(button("clipboard-confirm", confirm, true).on_click(
                                         cx.listener(|view, _, window, cx| {
                                             let early = view.clipboard_prompt.as_ref().is_some_and(
-                                                |prompt| prompt.shown.elapsed() < CONFIRM_DELAY,
+                                                |prompt| {
+                                                    prompt.shown.get().is_none_or(|shown| {
+                                                        shown.elapsed() < CONFIRM_DELAY
+                                                    })
+                                                },
                                             );
                                             if !early {
                                                 view.finish_clipboard_prompt(true, window, cx)

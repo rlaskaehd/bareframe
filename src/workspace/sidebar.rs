@@ -254,7 +254,7 @@ impl WorkspaceView {
     }
 
     /// A custom title wins over the shell's, as in Warp.
-    fn tab_title(&self, tab: &Tab, cx: &Context<Self>) -> String {
+    pub(super) fn tab_title(&self, tab: &Tab, cx: &Context<Self>) -> String {
         tab.title.clone().unwrap_or_else(|| {
             self.pane(tab.active_pane)
                 .map_or_else(String::new, |pane| pane.name(cx))
@@ -262,7 +262,7 @@ impl WorkspaceView {
     }
 
     /// The second line of a tab row: the active pane's `~` path.
-    fn tab_subtitle(&self, tab: &Tab, cx: &Context<Self>) -> Option<String> {
+    pub(super) fn tab_subtitle(&self, tab: &Tab, cx: &Context<Self>) -> Option<String> {
         self.pane(tab.active_pane)?.location(cx)
     }
 

@@ -23,14 +23,14 @@ pub enum Section {
 }
 
 impl Section {
-    const ALL: [Self; 4] = [
+    pub const ALL: [Self; 4] = [
         Self::Appearance,
         Self::Features,
         Self::KeyboardShortcuts,
         Self::About,
     ];
 
-    fn label(self) -> &'static str {
+    pub fn label(self) -> &'static str {
         match self {
             Self::Appearance => "Appearance",
             Self::Features => "Features",
@@ -105,6 +105,11 @@ impl SettingsPane {
 
     pub fn focus(&self, window: &mut Window, cx: &mut Context<Self>) {
         self.focus.focus(window, cx);
+    }
+
+    pub fn show_section(&mut self, section: Section, cx: &mut Context<Self>) {
+        self.section = section;
+        cx.notify();
     }
 
     pub fn set_theme(&mut self, theme: &'static Theme, cx: &mut Context<Self>) {
@@ -722,7 +727,7 @@ impl Render for SettingsPane {
 }
 
 /// Key caps as Warp draws them, outlined in orange when the shortcut is taken.
-fn caps(theme: &Theme, trigger: &Trigger, conflict: bool) -> AnyElement {
+pub fn caps(theme: &Theme, trigger: &Trigger, conflict: bool) -> AnyElement {
     div()
         .flex()
         .gap_1()

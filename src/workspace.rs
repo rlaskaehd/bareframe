@@ -25,6 +25,7 @@ use std::collections::HashMap;
 mod clipboard;
 mod layout;
 mod menu;
+mod palette;
 mod prefs;
 mod sidebar;
 mod tools;
@@ -122,6 +123,7 @@ pub struct WorkspaceView {
     dragging: Vec<TabId>,
     menu: Option<ContextMenu>,
     clipboard_prompt: Option<clipboard::ClipboardPrompt>,
+    palette: Option<palette::Palette>,
     /// The shown surfaces are swapped for snapshots while a pane menu covers them.
     frozen: bool,
     renaming: Option<(RenameTarget, Entity<RenameInput>, Subscription)>,
@@ -192,6 +194,7 @@ impl WorkspaceView {
             dragging: Vec::new(),
             menu: None,
             clipboard_prompt: None,
+            palette: None,
             frozen: false,
             renaming: None,
             search: None,
@@ -403,6 +406,7 @@ impl WorkspaceView {
     /// Shows only the active tab's surfaces and gives the active pane keyboard focus.
     fn sync(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.frozen {
+            self.palette = None;
             self.dismiss_menu(cx);
         }
         let visible = self.shown_panes();
@@ -764,6 +768,9 @@ impl Render for WorkspaceView {
                 }),
             )
             .on_action(cx.listener(|view, _: &ToggleSidebar, _, cx| view.toggle_sidebar(cx)))
+            .on_action(cx.listener(|view, _: &ToggleCommandPalette, window, cx| {
+                view.toggle_palette(window, cx)
+            }))
             .on_action(
                 cx.listener(|view, _: &OpenSettings, window, cx| view.open_settings(window, cx)),
             )
@@ -901,7 +908,8 @@ impl Render for WorkspaceView {
             .when_some(self.menu.as_ref(), |this, menu| {
                 this.child(self.render_menu(menu, cx))
             })
-            .children(self.render_clipboard_prompt(cx))
+            .children(self.render_clipboard_prompt(window, cx))
+            .children(self.render_palette(cx))
             .child(self.render_top_bar(cx))
             .child(
                 div()

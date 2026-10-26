@@ -174,6 +174,12 @@ pub const ACTIONS: &[Action] = &[
         &["cmd+digit_0"],
         Window,
     ),
+    action(
+        "toggle_command_palette",
+        "Command palette",
+        &["cmd+shift+p"],
+        Window,
+    ),
     action("open_config", "Open settings", &["cmd+comma"], Window),
     action(
         "reload_config",

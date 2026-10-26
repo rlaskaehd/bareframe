@@ -50,6 +50,7 @@
 | 열기 | `Cmd+Shift+P`(Ghostty `toggle_command_palette`와 같음). 상단 바 가운데 검색 자리에 맞춘 팝업 |
 | 내용 | 앱의 모든 동작(Keyboard shortcuts 목록과 같은 출처)과 단축키 표시, 열린 탭·세션으로 이동, Settings 섹션 열기. 이름 퍼지 검색 |
 | 실행 | Enter로 실행하고 닫는다. 팝업이 터미널 위에 겹치므로 지금 메뉴처럼 터미널을 정지 화면으로 바꾼다 |
+| 구현(3a-7) | 퍼지 검색은 `bareframe-core::fuzzy`에 직접 구현했다(새 의존성 없음). 탭 이동은 `Go to tab: <이름>`, Settings는 `Settings: <섹션>` 항목이다 |
 
 ### A1. Tools panel
 
