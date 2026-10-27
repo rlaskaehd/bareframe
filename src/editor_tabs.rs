@@ -14,6 +14,8 @@ pub enum TabsEvent {
     Close,
     /// The Markdown file asked for its rendered view.
     ShowRendered,
+    /// A file's unsaved changes were kept: a close or quit waiting on them stops.
+    Kept,
 }
 
 struct File {
@@ -161,6 +163,10 @@ impl EditorTabs {
                 cx.notify();
             }
             EditorEvent::ShowRendered => cx.emit(TabsEvent::ShowRendered),
+            EditorEvent::Kept => {
+                self.closing = false;
+                cx.emit(TabsEvent::Kept);
+            }
             // The file's question was answered: it goes, and a pane being closed goes on.
             EditorEvent::Close => {
                 let Some(index) = self.files.iter().position(|file| &file.editor == editor) else {

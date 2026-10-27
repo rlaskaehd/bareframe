@@ -360,7 +360,7 @@ fn inline(events: &mut Events) -> Inline {
 }
 
 /// Where a link points, once resolved against the file it is in.
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Target {
     Web(String),
     /// Another Markdown file, opened in the viewer.
@@ -483,10 +483,30 @@ pub struct MarkdownPane {
     mono: String,
     focus: FocusHandle,
     scroll: ScrollHandle,
+    /// Links and pictures resolved against the disk once per load, not on every redraw.
+    links: std::collections::HashMap<String, Option<Target>>,
+    pictures: std::collections::HashMap<String, Option<PathBuf>>,
     _watch: Option<Watch>,
 }
 
 impl EventEmitter<MarkdownEvent> for MarkdownPane {}
+
+/// Every run of text in `blocks`, nested ones included.
+fn inlines<'a>(blocks: &'a [Block], out: &mut Vec<&'a Inline>) {
+    for block in blocks {
+        match block {
+            Block::Heading(_, text) | Block::Paragraph(text) => out.push(text),
+            Block::Quote(blocks) => inlines(blocks, out),
+            Block::List { items, .. } => {
+                for item in items {
+                    inlines(&item.blocks, out);
+                }
+            }
+            Block::Table(rows) => out.extend(rows.iter().flatten()),
+            Block::Code { .. } | Block::Rule => {}
+        }
+    }
+}
 
 impl MarkdownPane {
     pub fn new(path: PathBuf, theme: &'static Theme, mono: String, cx: &mut Context<Self>) -> Self {
@@ -498,6 +518,8 @@ impl MarkdownPane {
             mono,
             focus: cx.focus_handle(),
             scroll: ScrollHandle::new(),
+            links: Default::default(),
+            pictures: Default::default(),
             _watch: None,
         };
         pane.load();
@@ -542,6 +564,34 @@ impl MarkdownPane {
                 self.error = Some(format!("Could not show {}: {error}", self.path.display()));
             }
         }
+        let base = self
+            .path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_default();
+        let mut texts = Vec::new();
+        inlines(&self.blocks, &mut texts);
+        let (mut links, mut pictures) = (
+            std::collections::HashMap::new(),
+            std::collections::HashMap::new(),
+        );
+        for text in texts {
+            for (_, link) in &text.links {
+                links
+                    .entry(link.clone())
+                    .or_insert_with(|| resolve(link, &base));
+            }
+            for image in &text.images {
+                pictures.entry(image.source.clone()).or_insert_with(|| {
+                    match resolve(&image.source, &base) {
+                        Some(Target::File(path)) if is_image(&path) => Some(path),
+                        _ => None,
+                    }
+                });
+            }
+        }
+        self.links = links;
+        self.pictures = pictures;
     }
 
     fn watch(&self, cx: &mut Context<Self>) -> Option<Watch> {
@@ -796,32 +846,27 @@ impl MarkdownPane {
                 }),
             })
             .collect();
-        let base = self
-            .path
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_default();
         let targets: Vec<Option<Target>> = text
             .links
             .iter()
-            .map(|(_, link)| resolve(link, &base))
+            .map(|(_, link)| self.links.get(link).cloned().flatten())
             .collect();
         let ranges = text.links.iter().map(|(range, _)| range.clone()).collect();
         let pane = cx.entity().downgrade();
         let images = text
             .images
             .iter()
-            .map(|image| match resolve(&image.source, &base) {
-                Some(Target::File(path)) if is_image(&path) => {
-                    img(path).max_w_full().into_any_element()
-                }
-                // Only files next to the document: fetching a web image would tell its
-                // server that this file was opened.
-                _ => div()
-                    .text_color(hsla(theme.text_muted))
-                    .child(format!("[image: {}]", image.alt))
-                    .into_any_element(),
-            })
+            .map(
+                |image| match self.pictures.get(&image.source).cloned().flatten() {
+                    Some(path) => img(path).max_w_full().into_any_element(),
+                    // Only files next to the document: fetching a web image would tell its
+                    // server that this file was opened.
+                    _ => div()
+                        .text_color(hsla(theme.text_muted))
+                        .child(format!("[image: {}]", image.alt))
+                        .into_any_element(),
+                },
+            )
             .collect::<Vec<_>>();
         let styled = StyledText::new(text.text.clone()).with_runs(runs);
         div()
@@ -832,13 +877,8 @@ impl MarkdownPane {
                 this.child(InteractiveText::new(("md-text", id), styled).on_click(
                     ranges,
                     move |index, _, cx: &mut App| {
-                        let Some(Some(target)) = targets.get(index) else {
+                        let Some(Some(target)) = targets.get(index).cloned() else {
                             return;
-                        };
-                        let target = match target {
-                            Target::Web(url) => Target::Web(url.clone()),
-                            Target::Markdown(path) => Target::Markdown(path.clone()),
-                            Target::File(path) => Target::File(path.clone()),
                         };
                         pane.update(cx, |pane, cx| match target {
                             // A linked document replaces this one, as in a browser.

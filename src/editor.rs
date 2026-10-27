@@ -75,6 +75,11 @@ const FILE_CONTEXT: &str = "EditorFile";
 const MARKDOWN_FILE_CONTEXT: &str = "EditorFile Markdown";
 /// Files larger than this open read-only: every edit copies a line vector this long.
 const MAX_EDITABLE: u64 = 5 << 20;
+/// Larger files aren't opened in the editor at all.
+const MAX_OPEN: u64 = 64 << 20;
+/// Lines longer than this (minified files) make the file read-only and are drawn only up
+/// to here; laying out megabytes for one line each frame would stall.
+const MAX_LINE: usize = 64 << 10;
 const LINE_HEIGHT: f32 = 1.45;
 
 pub enum EditorEvent {
@@ -84,6 +89,8 @@ pub enum EditorEvent {
     Close,
     /// A Markdown file's `Rendered` view was asked for, and nothing unsaved is in the way.
     ShowRendered,
+    /// Cancel was chosen when asked about unsaved changes: whatever asked stops.
+    Kept,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -177,7 +184,11 @@ pub fn is_text_file(path: &Path) -> bool {
     let Ok(file) = std::fs::File::open(path) else {
         return false;
     };
-    if !file.metadata().is_ok_and(|metadata| metadata.is_file()) {
+    // Larger files go to the system's app: reading them here would stall the window.
+    if !file
+        .metadata()
+        .is_ok_and(|metadata| metadata.is_file() && metadata.len() <= MAX_OPEN)
+    {
         return false;
     }
     let mut head = Vec::new();
@@ -234,6 +245,9 @@ impl EditorPane {
             _highlight: None,
             _watch: None,
         };
+        if editor.buffer.longest_line() > MAX_LINE {
+            editor.read_only = true;
+        }
         editor.language = syntax::language_for(&editor.path);
         editor._watch = editor.watch(cx);
         editor.highlight(cx);
@@ -369,7 +383,9 @@ impl EditorPane {
                 cx.background_executor().timer(Duration::from_secs(1)).await;
                 editor
                     .update(cx, |editor, cx| {
-                        if editor.buffer.is_dirty() {
+                        // Never over a change made outside while that question is open.
+                        let asking = matches!(editor.notice, Some(Notice::ChangedOnDisk));
+                        if editor.buffer.is_dirty() && !asking {
                             editor.save(cx);
                         }
                     })
@@ -413,7 +429,12 @@ impl EditorPane {
     }
 
     fn shape(&self, line: usize, window: &mut Window) -> ShapedLine {
-        let text = self.buffer.line(line).to_owned();
+        let full = self.buffer.line(line);
+        let mut cut = full.len().min(MAX_LINE);
+        while !full.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        let text = full[..cut].to_owned();
         let base = TextRun {
             len: 0,
             font: self.base_font(),
@@ -1118,6 +1139,7 @@ impl EditorPane {
                         |editor, _, _, cx| {
                             editor.notice = None;
                             editor.to_rendered = false;
+                            cx.emit(EditorEvent::Kept);
                             cx.notify();
                         },
                     )),
@@ -1186,7 +1208,7 @@ impl EditorPane {
         let theme = self.theme;
         let line = self.buffer.line(self.head.line);
         let column = line[..self.head.column.min(line.len())].chars().count() + 1;
-        let selected = self.buffer.slice(self.selection()).chars().count();
+        let selected = self.buffer.char_count(self.selection());
         div()
             .flex()
             .flex_none()
@@ -1820,8 +1842,9 @@ pub fn key_bindings() -> Vec<gpui::KeyBinding> {
         KeyBinding::new("cmd-s", Save, Some(FILE_CONTEXT)),
         KeyBinding::new("cmd-f", Find, Some(FILE_CONTEXT)),
         KeyBinding::new("cmd-alt-f", FindReplace, Some(FILE_CONTEXT)),
-        KeyBinding::new("cmd-g", FindNext, Some(FILE_CONTEXT)),
-        KeyBinding::new("cmd-shift-g", FindPrevious, Some(FILE_CONTEXT)),
+        // Cmd+G stays the tab group key; in the find field Enter goes on, Shift+Enter back.
+        KeyBinding::new("shift-enter", FindPrevious, Some(FILE_CONTEXT)),
+        KeyBinding::new("shift-enter", Newline, context),
         KeyBinding::new("ctrl-g", GoToLine, Some(FILE_CONTEXT)),
     ]
 }

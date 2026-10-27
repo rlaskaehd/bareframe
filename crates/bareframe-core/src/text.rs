@@ -58,7 +58,10 @@ pub struct Buffer {
 
 impl Buffer {
     pub fn new(text: &str) -> Self {
-        let line_ending = if text.contains("\r\n") {
+        // A file mixing both is saved with the one most of its lines use, so a small edit
+        // doesn't rewrite every line.
+        let crlf = text.matches("\r\n").count();
+        let line_ending = if crlf > text.matches('\n').count() - crlf {
             LineEnding::CrLf
         } else {
             LineEnding::Lf
@@ -305,6 +308,27 @@ impl Buffer {
         Position::new(position.line, start)..Position::new(position.line, end)
     }
 
+    /// Characters in `range`, a line break counting as one, without copying the text.
+    pub fn char_count(&self, range: Range<Position>) -> usize {
+        let (start, end) = (self.clamp(range.start), self.clamp(range.end));
+        if start.line == end.line {
+            return self.lines[start.line][start.column..end.column.max(start.column)]
+                .chars()
+                .count();
+        }
+        let first = self.lines[start.line][start.column..].chars().count();
+        let middle: usize = self.lines[start.line + 1..end.line]
+            .iter()
+            .map(|line| line.chars().count() + 1)
+            .sum();
+        first + 1 + middle + self.lines[end.line][..end.column].chars().count()
+    }
+
+    /// The longest line's length in bytes.
+    pub fn longest_line(&self) -> usize {
+        self.lines.iter().map(String::len).max().unwrap_or(0)
+    }
+
     /// Every place `query` occurs, line by line (a match never spans a line break). The
     /// case is ignored unless the query has an uppercase letter, as editors' smart case.
     pub fn find_all(&self, query: &str) -> Vec<Range<Position>> {
@@ -426,6 +450,12 @@ mod tests {
         assert_eq!((crlf.line_count(), crlf.line(0)), (3, "a"));
         assert_eq!(crlf.text(), "a\r\nb\r\n");
         assert_eq!(Buffer::new("").line_count(), 1);
+        // Mostly LF with one CRLF line stays LF.
+        assert_eq!(Buffer::new("a\nb\nc\r\nd\n").line_ending, LineEnding::Lf);
+        assert_eq!(
+            Buffer::new("한\r\nb").char_count(Position::new(0, 0)..Position::new(1, 1)),
+            3
+        );
     }
 
     #[test]

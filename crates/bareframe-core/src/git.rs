@@ -216,7 +216,9 @@ impl FileDiff {
 pub fn parse_diff(text: &str) -> Vec<FileDiff> {
     let mut files: Vec<FileDiff> = Vec::new();
     let (mut old, mut new) = (0, 0);
-    for line in text.lines() {
+    // Split on `\n` only: a CRLF file's lines keep their `\r`, or a hunk's patch would no
+    // longer match the file and `git apply -R` would refuse it.
+    for line in text.strip_suffix('\n').unwrap_or(text).split('\n') {
         if line.starts_with("diff --git ") || files.is_empty() {
             if line.starts_with("diff --git ") {
                 files.push(FileDiff::default());
@@ -399,6 +401,20 @@ Binary files a/b.bin and b/b.bin differ
         assert_eq!((second[1].new, second[2].old), (Some(11), Some(11)));
         assert_eq!(second[3].kind, LineKind::NoNewline);
         assert!(files[1].binary && files[1].hunks.is_empty());
+    }
+
+    #[test]
+    fn crlf_lines_keep_their_carriage_return() {
+        let diff =
+            "diff --git a/w.txt b/w.txt\n--- a/w.txt\n+++ b/w.txt\n@@ -1 +1 @@\n-old\r\n+new\r\n";
+        let files = parse_diff(diff);
+        assert_eq!(files[0].hunks[0].lines[1].text, "new\r");
+        assert!(
+            files[0]
+                .hunk_patch(0)
+                .unwrap()
+                .ends_with("-old\r\n+new\r\n")
+        );
     }
 
     #[test]

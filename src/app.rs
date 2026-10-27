@@ -436,6 +436,9 @@ pub fn run(config: LaunchConfig, restore: bool) {
                             let closing = view.confirm_unsaved(window, cx);
                             if closing {
                                 view.shutdown(cx);
+                            } else {
+                                // Closes the window once the questions are answered.
+                                view.wait_to_close();
                             }
                             closing
                         });

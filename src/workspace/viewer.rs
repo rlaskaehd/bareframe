@@ -9,6 +9,13 @@ use bareframe_core::workspace::{Axis, PaneId};
 use gpui::{AppContext, Context, Window};
 use std::path::{Path, PathBuf};
 
+/// What waits on answers about unsaved changes.
+#[derive(Clone, Copy)]
+pub enum Exit {
+    Quit,
+    CloseWindow,
+}
+
 impl WorkspaceView {
     /// Markdown opens in the viewer and other text in the editor when Settings say so;
     /// anything else goes to the system.
@@ -129,7 +136,11 @@ impl WorkspaceView {
             window,
             move |view, _, event, window, cx| match event {
                 TabsEvent::Changed => cx.notify(),
-                TabsEvent::Close => view.close_pane(id, window, cx),
+                TabsEvent::Close => {
+                    view.close_pane(id, window, cx);
+                    view.resume_exit(window, cx);
+                }
+                TabsEvent::Kept => view.pending_exit = None,
                 TabsEvent::ShowRendered => view.swap_view(id, false, window, cx),
             },
         );
@@ -167,6 +178,33 @@ impl WorkspaceView {
         let numbers = LineNumbers::from_setting(self.settings.get("editor-line-numbers"));
         let autosave = self.settings.flag("editor-autosave");
         pane.update(cx, |pane, cx| pane.set_options(numbers, autosave, cx));
+    }
+
+    /// Quits or closes the window, unless an editor has unsaved changes: then it asks, and
+    /// the exit goes on once every such editor is answered (Cancel stops it).
+    pub fn exit(&mut self, exit: Exit, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.confirm_unsaved(window, cx) {
+            self.pending_exit = Some(exit);
+            return;
+        }
+        match exit {
+            Exit::Quit => cx.quit(),
+            Exit::CloseWindow => {
+                self.shutdown(cx);
+                window.remove_window();
+            }
+        }
+    }
+
+    /// The window's close button found unsaved changes; close once they are answered.
+    pub fn wait_to_close(&mut self) {
+        self.pending_exit = Some(Exit::CloseWindow);
+    }
+
+    fn resume_exit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(exit) = self.pending_exit.take() {
+            self.exit(exit, window, cx);
+        }
     }
 
     /// Before quitting or closing the window: the first editor with unsaved changes asks,
@@ -230,7 +268,9 @@ impl WorkspaceView {
                 MarkdownEvent::Open(Target::Markdown(path)) => {
                     view.open_markdown(path.clone(), window, cx)
                 }
-                MarkdownEvent::Open(Target::File(path)) => open_externally(path),
+                // Through the same door as the explorer: text opens in the editor, and only
+                // plain documents ever reach the system's apps.
+                MarkdownEvent::Open(Target::File(path)) => view.open_file(path, window, cx),
                 MarkdownEvent::Insert(text) => view.insert_into_terminal(id, text, window, cx),
                 MarkdownEvent::ShowRaw => view.swap_view(id, true, window, cx),
             },

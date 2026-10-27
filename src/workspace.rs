@@ -26,6 +26,7 @@ use gpui_libghostty::TerminalTheme;
 use menu::ContextMenu;
 use sidebar::{SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_SHARE, SIDEBAR_MIN_WIDTH};
 use std::collections::HashMap;
+pub use viewer::Exit;
 
 mod changes;
 mod clipboard;
@@ -190,6 +191,8 @@ pub struct WorkspaceView {
     dragging: Vec<TabId>,
     menu: Option<ContextMenu>,
     clipboard_prompt: Option<clipboard::ClipboardPrompt>,
+    /// A quit or window close waiting for answers about unsaved editor changes.
+    pending_exit: Option<viewer::Exit>,
     palette: Option<palette::Palette>,
     /// The shown surfaces are swapped for snapshots while a pane menu covers them.
     frozen: bool,
@@ -278,6 +281,7 @@ impl WorkspaceView {
             dragging: Vec::new(),
             menu: None,
             clipboard_prompt: None,
+            pending_exit: None,
             palette: None,
             frozen: false,
             frozen_panes: Vec::new(),
@@ -350,7 +354,12 @@ impl WorkspaceView {
                         .filter(|path| path.is_file())
                         .cloned()
                         .collect();
-                    self.insert_editor_pane(id, files, *active, window, cx)
+                    // Found by path: a deleted file before it would shift the index.
+                    let shown = paths
+                        .get(*active)
+                        .and_then(|path| files.iter().position(|file| file == path))
+                        .unwrap_or(0);
+                    self.insert_editor_pane(id, files, shown, window, cx)
                 }
                 kind => {
                     let cwd = match kind {
@@ -1011,16 +1020,9 @@ impl Render for WorkspaceView {
             .on_action(cx.listener(|_, _: &ToggleFullscreen, window, _| window.toggle_fullscreen()))
             .on_action(cx.listener(|view, _: &ReloadSettings, _, cx| view.reload_from_disk(cx)))
             .on_action(cx.listener(|view, _: &CloseWindow, window, cx| {
-                if view.confirm_unsaved(window, cx) {
-                    view.shutdown(cx);
-                    window.remove_window();
-                }
+                view.exit(Exit::CloseWindow, window, cx)
             }))
-            .on_action(cx.listener(|view, _: &Quit, window, cx| {
-                if view.confirm_unsaved(window, cx) {
-                    cx.quit();
-                }
-            }))
+            .on_action(cx.listener(|view, _: &Quit, window, cx| view.exit(Exit::Quit, window, cx)))
             .on_action(cx.listener(|view, _: &ClosePane, window, cx| {
                 let pane = view.model.active_pane();
                 // With several files open, Cmd+W closes the shown file, as editors do.

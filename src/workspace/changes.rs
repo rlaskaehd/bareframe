@@ -58,6 +58,11 @@ impl WorkspaceView {
     // ponytail: a build writing thousands of ignored files still wakes this once a
     // second; filter through the repository's ignore rules if that shows up.
     fn watch_repo(&mut self, root: PathBuf, cx: &mut Context<Self>) -> Option<Watch> {
+        // A dotfiles repository at the home folder would mean watching everything under it;
+        // there the numbers update on commands and focus changes only.
+        if crate::app::home_dir().is_some_and(|home| home == root) {
+            return None;
+        }
         watch(
             &root,
             RecursiveMode::Recursive,

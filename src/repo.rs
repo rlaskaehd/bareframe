@@ -22,6 +22,8 @@ const MAX_LINE: usize = 5000;
 /// Untracked files are diffed one git call each; past this many they are only listed.
 const MAX_UNTRACKED: usize = 200;
 const MAX_COUNTED: u64 = 1 << 20;
+const MAX_COUNTED_FILES: usize = 2000;
+const MAX_COUNTED_TOTAL: u64 = 8 << 20;
 
 fn git(root: &Path) -> Command {
     let mut command = Command::new("git");
@@ -92,9 +94,10 @@ fn without_filters(root: &Path) -> Vec<String> {
     args
 }
 
-/// A read: filters other than git-lfs's are off and submodules are left alone.
-fn read(root: &Path, args: &[&str], ok: &[i32]) -> Result<String, String> {
-    let mut full: Vec<String> = without_filters(root);
+/// A read: filters other than git-lfs's are off (`filters`, from `without_filters`, looked
+/// up once per refresh) and submodules are left alone.
+fn read(root: &Path, filters: &[String], args: &[&str], ok: &[i32]) -> Result<String, String> {
+    let mut full: Vec<String> = filters.to_vec();
     if let Some((command, rest)) = args.split_first() {
         full.push((*command).to_owned());
         if matches!(*command, "status" | "diff") {
@@ -112,9 +115,10 @@ pub fn root_of(dir: &Path) -> Option<PathBuf> {
     Some(PathBuf::from(out.trim_end_matches('\n')))
 }
 
-fn status(root: &Path) -> Result<Status, String> {
+fn status(root: &Path, filters: &[String]) -> Result<Status, String> {
     let out = read(
         root,
+        filters,
         &[
             "status",
             "--porcelain=v2",
@@ -136,10 +140,12 @@ pub struct Summary {
 }
 
 pub fn summary(root: &Path) -> Result<Summary, String> {
-    let status = status(root)?;
+    let filters = without_filters(root);
+    let status = status(root, &filters)?;
     let head = status.head.as_deref().unwrap_or(EMPTY_TREE);
     let stats = read(
         root,
+        &filters,
         &[
             "diff",
             "--numstat",
@@ -158,9 +164,20 @@ pub fn summary(root: &Path) -> Result<Summary, String> {
             removed += minus;
         }
     }
-    for entry in &status.entries {
-        if entry.change == Change::Untracked {
-            added += count_lines(&root.join(&entry.path));
+    // A big folder git doesn't ignore (an unlisted node_modules) is counted only so far,
+    // since this runs on every refresh.
+    let mut budget = MAX_COUNTED_TOTAL;
+    for entry in status
+        .entries
+        .iter()
+        .filter(|entry| entry.change == Change::Untracked)
+        .take(MAX_COUNTED_FILES)
+    {
+        let (lines, read) = count_lines(&root.join(&entry.path), budget);
+        added += lines;
+        budget = budget.saturating_sub(read);
+        if budget == 0 {
+            break;
         }
     }
     Ok(Summary {
@@ -172,20 +189,23 @@ pub fn summary(root: &Path) -> Result<Summary, String> {
 
 /// Lines in a new text file; large or binary files count as none, as git's numstat does.
 /// Only a regular file is read (not a link to a device), and never past the cap.
-fn count_lines(path: &Path) -> u64 {
+fn count_lines(path: &Path, budget: u64) -> (u64, u64) {
     use std::io::Read;
     if !std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_file()) {
-        return 0;
+        return (0, 0);
     }
+    let cap = MAX_COUNTED.min(budget);
     let mut bytes = Vec::new();
-    let read = std::fs::File::open(path)
-        .and_then(|file| file.take(MAX_COUNTED + 1).read_to_end(&mut bytes));
+    let read =
+        std::fs::File::open(path).and_then(|file| file.take(cap + 1).read_to_end(&mut bytes));
+    let used = bytes.len() as u64;
     match read {
-        Ok(_) if bytes.len() as u64 <= MAX_COUNTED && !bytes.contains(&0) => {
+        Ok(_) if used <= cap && !bytes.contains(&0) => {
             let lines = bytes.iter().filter(|byte| **byte == b'\n').count();
-            (lines + usize::from(bytes.last().is_some_and(|byte| *byte != b'\n'))) as u64
+            let last = usize::from(bytes.last().is_some_and(|byte| *byte != b'\n'));
+            ((lines + last) as u64, used)
         }
-        _ => 0,
+        _ => (0, used),
     }
 }
 
@@ -213,7 +233,8 @@ pub struct Review {
 }
 
 pub fn review(root: &Path, base: &Base) -> Result<Review, String> {
-    let status = status(root)?;
+    let filters = without_filters(root);
+    let status = status(root, &filters)?;
     let head = status.head.clone().unwrap_or_else(|| EMPTY_TREE.to_owned());
     let rev = match base {
         Base::Uncommitted => head,
@@ -225,11 +246,11 @@ pub fn review(root: &Path, base: &Base) -> Result<Review, String> {
     let mut numstat = vec!["diff", "--numstat", "-z"];
     numstat.extend(flags);
     numstat.push(&rev);
-    let stats = git::parse_numstat(&read(root, &numstat, &[0])?);
+    let stats = git::parse_numstat(&read(root, &filters, &numstat, &[0])?);
     let mut patch = vec!["diff"];
     patch.extend(flags);
     patch.push(&rev);
-    let diffs = git::parse_diff(&read(root, &patch, &[0])?);
+    let diffs = git::parse_diff(&read(root, &filters, &patch, &[0])?);
     let mut files = Vec::new();
     // Both listings come in git's path order, so the n-th patch is the n-th path.
     for (index, stat) in stats.iter().enumerate() {
@@ -253,6 +274,7 @@ pub fn review(root: &Path, base: &Base) -> Result<Review, String> {
         let diff = if files.len() < stats.len() + MAX_UNTRACKED {
             read(
                 root,
+                &filters,
                 &[
                     "diff",
                     "--no-index",
@@ -528,6 +550,27 @@ mod tests {
             after.status.entries.len(),
             1,
             "new.txt is still uncommitted"
+        );
+    }
+
+    #[test]
+    fn a_crlf_file_hunk_reverts() {
+        let repo = Repo::new("crlf");
+        repo.write("w.txt", "one\r\ntwo\r\nthree\r\n");
+        repo.git(&["add", "w.txt"]);
+        repo.git(&["commit", "--quiet", "-m", "first"]);
+        repo.write("w.txt", "one\r\nTWO\r\nthree\r\n");
+        let review = review(&repo.0, &Base::Uncommitted).unwrap();
+        let patch = review.files[0]
+            .diff
+            .as_ref()
+            .unwrap()
+            .hunk_patch(0)
+            .unwrap();
+        revert_hunk(&repo.0, &patch).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(repo.0.join("w.txt")).unwrap(),
+            "one\r\ntwo\r\nthree\r\n"
         );
     }
 

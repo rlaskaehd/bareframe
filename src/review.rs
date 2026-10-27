@@ -57,6 +57,12 @@ pub struct CodeReview {
     list: ListState,
     loading: bool,
     error: Option<String>,
+    /// Why the last revert or commit failed; kept until the next one, through reloads.
+    failure: Option<String>,
+    /// A revert or commit is running. Reloads wait for it, so a refresh set off by its own
+    /// writes to the index can't drop it and lose its outcome.
+    changing: bool,
+    _change: Option<Task<()>>,
     choosing_base: bool,
     /// Why committing is blocked (a merge in progress, conflicts), read with the changes.
     blocker: Option<&'static str>,
@@ -84,6 +90,9 @@ impl CodeReview {
             list: ListState::new(0, ListAlignment::Top, px(400.0)),
             loading: false,
             error: None,
+            failure: None,
+            changing: false,
+            _change: None,
             choosing_base: false,
             blocker: None,
             pending: None,
@@ -124,6 +133,10 @@ impl CodeReview {
             self.rebuild_rows();
             return cx.notify();
         };
+        if self.changing {
+            // The change reloads when it is done.
+            return;
+        }
         let base = self.base.clone();
         self.loading = true;
         cx.notify();
@@ -227,19 +240,23 @@ impl CodeReview {
         let Some(root) = self.root.clone() else {
             return;
         };
+        if self.changing {
+            return;
+        }
         self.pending = None;
+        self.failure = None;
         self.loading = true;
+        self.changing = true;
         cx.notify();
-        self._load = Some(cx.spawn(async move |this, cx| {
+        self._change = Some(cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
                 .spawn(async move { work(&root) })
                 .await;
             this.update(cx, |this, cx| {
+                this.changing = false;
                 this.loading = false;
-                if let Err(error) = result {
-                    this.error = Some(error);
-                }
+                this.failure = result.err();
                 cx.emit(ReviewEvent::Changed);
                 this.reload(cx);
             })
@@ -321,7 +338,8 @@ impl CodeReview {
         };
         let message = form.input.read(cx).text().trim().to_owned();
         let paths = self.commit_paths();
-        if message.is_empty() || paths.is_empty() || self.loading {
+        // Enter in the message field must respect a merge in progress as the button does.
+        if message.is_empty() || paths.is_empty() || self.loading || self.blocker.is_some() {
             return;
         }
         // Everything ticked: let git take every change, deletions and renames included.
@@ -420,14 +438,17 @@ impl CodeReview {
             .when(self.choosing_base, |this| this.child(self.render_bases(cx)))
             .children(self.render_commit_form(cx))
             .children(self.render_pending(cx))
-            .when_some(self.error.clone(), |this, error| {
-                this.child(
-                    div()
-                        .text_size(px(12.0))
-                        .text_color(hsla(theme.group_colors[3]))
-                        .child(error),
-                )
-            })
+            .when_some(
+                self.failure.clone().or(self.error.clone()),
+                |this, error| {
+                    this.child(
+                        div()
+                            .text_size(px(12.0))
+                            .text_color(hsla(theme.group_colors[3]))
+                            .child(error),
+                    )
+                },
+            )
             .into_any_element()
     }
 
@@ -709,7 +730,7 @@ impl CodeReview {
                     .when(line.kind == LineKind::NoNewline, |this| {
                         this.text_color(hsla(theme.text_muted))
                     })
-                    .child(line.text.clone()),
+                    .child(line.text.trim_end_matches('\r').to_owned()),
             )
             .into_any_element()
     }
