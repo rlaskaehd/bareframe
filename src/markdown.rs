@@ -10,6 +10,10 @@ use gpui::{
     div, img, prelude::*, px,
 };
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+use std::{
+    ops::Range,
+    path::{Path, PathBuf},
+};
 
 gpui::actions!(markdown, [ToggleRaw]);
 
@@ -66,10 +70,6 @@ pub fn view_switch(
                 .child(segment("view-raw", "Raw", raw)),
         )
 }
-use std::{
-    ops::Range,
-    path::{Path, PathBuf},
-};
 
 const TEXT_SIZE: f32 = 14.0;
 /// Quotes and lists nested deeper than this are read into the level above, so a hostile

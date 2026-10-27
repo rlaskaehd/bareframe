@@ -526,6 +526,87 @@ impl EditorPane {
         }));
     }
 
+    /// Scrolls so the cursor is in view, after a move or an edit.
+    fn reveal_cursor(
+        &mut self,
+        bounds: Bounds<Pixels>,
+        text_left: Pixels,
+        em: Pixels,
+        window: &mut Window,
+    ) {
+        let line_height = self.line_height();
+        let top = line_height * self.head.line as f32;
+        if top < self.scroll.y {
+            self.scroll.y = top;
+        } else if top + line_height > self.scroll.y + bounds.size.height {
+            self.scroll.y = top + line_height - bounds.size.height;
+        }
+        let x = self.x_of(self.head, window);
+        let room = bounds.right() - text_left - em * 2.0;
+        if x < self.scroll.x {
+            self.scroll.x = (x - em * 4.0).max(Pixels::ZERO);
+        } else if x > self.scroll.x + room {
+            self.scroll.x = x - room;
+        }
+    }
+
+    /// The numbers of `lines`, each with the x that right-aligns it to `right`.
+    fn shape_gutter(
+        &self,
+        lines: Range<usize>,
+        right: Pixels,
+        window: &mut Window,
+    ) -> Vec<(ShapedLine, Pixels)> {
+        if self.line_numbers == LineNumbers::Off {
+            return Vec::new();
+        }
+        lines
+            .map(|line| {
+                // Relative numbers count from the cursor's line, which shows its own.
+                let label = match self.line_numbers {
+                    LineNumbers::Relative if line != self.head.line => {
+                        line.abs_diff(self.head.line).to_string()
+                    }
+                    _ => (line + 1).to_string(),
+                };
+                let color = hsla(if line == self.head.line {
+                    self.theme.text
+                } else {
+                    self.theme.text_muted
+                });
+                let runs = [TextRun {
+                    len: label.len(),
+                    font: self.base_font(),
+                    color,
+                    background_color: None,
+                    underline: None,
+                    strikethrough: None,
+                }];
+                let shaped =
+                    window
+                        .text_system()
+                        .shape_line(label.into(), px(self.font_size), &runs, None);
+                let x = right - shaped.width;
+                (shaped, x)
+            })
+            .collect()
+    }
+
+    /// Find matches on `lines`, the index of the first of them among all matches, and
+    /// the current match's index.
+    fn matches_in(&self, lines: Range<usize>) -> (Vec<Range<Position>>, usize, Option<usize>) {
+        let Some(find) = &self.find else {
+            return (Vec::new(), 0, None);
+        };
+        let low = find
+            .matches
+            .partition_point(|range| range.start.line < lines.start);
+        let high = find
+            .matches
+            .partition_point(|range| range.start.line < lines.end);
+        (find.matches[low..high].to_vec(), low, find.current)
+    }
+
     fn x_of(&self, position: Position, window: &mut Window) -> Pixels {
         self.shape(position.line, window)
             .x_for_index(position.column)
@@ -645,7 +726,7 @@ impl EditorPane {
             .fold(Pixels::ZERO, Pixels::max);
         let room = layout.bounds.right() - layout.text_left;
         let max_x = (widest - room + layout.line_height * 2.0).max(Pixels::ZERO);
-        self.scroll.x = self.scroll.x.min(max_x.max(self.scroll.x.min(max_x)));
+        self.scroll.x = self.scroll.x.min(max_x);
     }
 
     fn save(&mut self, cx: &mut Context<Self>) -> bool {
@@ -1302,21 +1383,8 @@ impl Element for EditorElement {
             };
             editor.refresh_find(cx);
             let text_left = bounds.left() + gutter_width + em;
-            // Bring the cursor into view after a move or an edit.
             if std::mem::take(&mut editor.reveal) {
-                let top = line_height * editor.head.line as f32;
-                if top < editor.scroll.y {
-                    editor.scroll.y = top;
-                } else if top + line_height > editor.scroll.y + bounds.size.height {
-                    editor.scroll.y = top + line_height - bounds.size.height;
-                }
-                let x = editor.x_of(editor.head, window);
-                let room = bounds.right() - text_left - em * 2.0;
-                if x < editor.scroll.x {
-                    editor.scroll.x = (x - em * 4.0).max(Pixels::ZERO);
-                } else if x > editor.scroll.x + room {
-                    editor.scroll.x = x - room;
-                }
+                editor.reveal_cursor(bounds, text_left, em, window);
             }
             let first = (editor.scroll.y / line_height).floor().max(0.0) as usize;
             let count = (bounds.size.height / line_height).ceil() as usize + 1;
@@ -1324,46 +1392,7 @@ impl Element for EditorElement {
             let lines = (first..last)
                 .map(|line| editor.shape(line, window))
                 .collect();
-            let number_runs = |len, color| {
-                vec![TextRun {
-                    len,
-                    font: editor.base_font(),
-                    color,
-                    background_color: None,
-                    underline: None,
-                    strikethrough: None,
-                }]
-            };
-            let numbers = if editor.line_numbers == LineNumbers::Off {
-                0..0
-            } else {
-                first..last
-            };
-            let gutter = numbers
-                .map(|line| {
-                    // Relative numbers count from the cursor's line, which shows its own.
-                    let label = match editor.line_numbers {
-                        LineNumbers::Relative if line != editor.head.line => {
-                            line.abs_diff(editor.head.line).to_string()
-                        }
-                        _ => (line + 1).to_string(),
-                    };
-                    let color = hsla(if line == editor.head.line {
-                        editor.theme.text
-                    } else {
-                        editor.theme.text_muted
-                    });
-                    let runs = number_runs(label.len(), color);
-                    let shaped = window.text_system().shape_line(
-                        label.into(),
-                        px(editor.font_size),
-                        &runs,
-                        None,
-                    );
-                    let x = bounds.left() + gutter_width - shaped.width;
-                    (shaped, x)
-                })
-                .collect();
+            let gutter = editor.shape_gutter(first..last, bounds.left() + gutter_width, window);
             Prepaint {
                 layout: Layout {
                     bounds,
@@ -1392,20 +1421,8 @@ impl Element for EditorElement {
         let focused = focus.is_focused(window);
         let theme = editor.theme;
         let (scroll, head, selection) = (editor.scroll, editor.head, editor.selection());
-        // Matches on the lines in view; `first_match` is the first one's index overall.
-        let (matches, first_match, current) = match &editor.find {
-            Some(find) => {
-                let (first, shown) = (prepaint.layout.first, prepaint.layout.lines.len());
-                let low = find
-                    .matches
-                    .partition_point(|range| range.start.line < first);
-                let high = find
-                    .matches
-                    .partition_point(|range| range.start.line < first + shown);
-                (find.matches[low..high].to_vec(), low, find.current)
-            }
-            None => (Vec::new(), 0, None),
-        };
+        let (first, shown) = (prepaint.layout.first, prepaint.layout.lines.len());
+        let (matches, first_match, current) = editor.matches_in(first..first + shown);
         let layout = &prepaint.layout;
         let (line_height, text_left) = (layout.line_height, layout.text_left);
         let top = |line: usize| bounds.top() + line_height * line as f32 - scroll.y;
@@ -1471,21 +1488,7 @@ impl Element for EditorElement {
             for (index, shaped) in layout.lines.iter().enumerate() {
                 let line = layout.first + index;
                 let y = top(line);
-                if selection.start.line <= line
-                    && line <= selection.end.line
-                    && !selection.is_empty()
-                {
-                    let start = if line == selection.start.line {
-                        shaped.x_for_index(selection.start.column)
-                    } else {
-                        Pixels::ZERO
-                    };
-                    let end = if line == selection.end.line {
-                        shaped.x_for_index(selection.end.column)
-                    } else {
-                        // The line break is selected too.
-                        shaped.width + px(6.0)
-                    };
+                if let Some((start, end)) = selected_span(&selection, line, shaped) {
                     window.paint_quad(fill(
                         Bounds::from_corners(
                             point(left + start, y),
@@ -1533,11 +1536,10 @@ impl Element for EditorElement {
     }
 }
 
-impl Render for EditorPane {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = self.theme;
-        let markdown = crate::markdown::is_markdown(&self.path);
-        let editing = div()
+impl EditorPane {
+    /// The text itself, with the editing keys, mouse and scrolling.
+    fn render_text(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
             .flex_1()
             .min_h_0()
             .key_context(KEY_CONTEXT)
@@ -1687,7 +1689,14 @@ impl Render for EditorPane {
             .on_scroll_wheel(cx.listener(Self::on_scroll))
             .child(EditorElement {
                 editor: cx.entity(),
-            });
+            })
+    }
+}
+
+impl Render for EditorPane {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = self.theme;
+        let markdown = crate::markdown::is_markdown(&self.path);
         div()
             .size_full()
             .flex()
@@ -1722,9 +1731,32 @@ impl Render for EditorPane {
             .on_action(cx.listener(|e, _: &GoToLine, window, cx| e.open_go_to(window, cx)))
             .children(self.render_notice(cx))
             .children(self.render_bars(cx))
-            .child(editing)
+            .child(self.render_text(cx))
             .child(self.render_status())
     }
+}
+
+/// Where the selection covers `line`, as x offsets into the shaped line.
+fn selected_span(
+    selection: &Range<Position>,
+    line: usize,
+    shaped: &ShapedLine,
+) -> Option<(Pixels, Pixels)> {
+    if selection.is_empty() || line < selection.start.line || selection.end.line < line {
+        return None;
+    }
+    let start = if line == selection.start.line {
+        shaped.x_for_index(selection.start.column)
+    } else {
+        Pixels::ZERO
+    };
+    let end = if line == selection.end.line {
+        shaped.x_for_index(selection.end.column)
+    } else {
+        // The line break is selected too.
+        shaped.width + px(6.0)
+    };
+    Some((start, end))
 }
 
 /// Cmd+Left: to the first non-blank character, or to column 0 if already there.
