@@ -1,19 +1,18 @@
 //! The diff button in the top bar and the Code review panel on the window's right: which
 //! repository the active pane is in, its change counts, and keeping both current.
-use super::{WorkspaceView, column_width};
+use super::{
+    WorkspaceView,
+    columns::{Column, edge_line},
+};
 use crate::{
     repo::{self, Summary},
     review::{self, ReviewEvent},
     theme::hsla,
     watch::{Watch, watch},
 };
-use gpui::{Context, MouseButton, MouseMoveEvent, Window, div, prelude::*, px};
+use gpui::{Context, Window, div, prelude::*, px};
 use notify::RecursiveMode;
 use std::{path::PathBuf, time::Duration};
-
-pub(super) const REVIEW_DEFAULT_WIDTH: f32 = 520.0;
-const REVIEW_MIN_WIDTH: f32 = 300.0;
-const REVIEW_MAX_SHARE: f32 = 0.6;
 
 impl WorkspaceView {
     /// Looks up the active pane's repository and its numbers again. Without `force`, only
@@ -151,15 +150,6 @@ impl WorkspaceView {
         )
     }
 
-    pub(super) fn review_shown_width(&self, window: &Window) -> f32 {
-        column_width(
-            self.review_width,
-            window,
-            REVIEW_MAX_SHARE,
-            REVIEW_MIN_WIDTH,
-        )
-    }
-
     pub(super) fn render_review(&self, width: f32, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = self.theme();
         div()
@@ -167,33 +157,9 @@ impl WorkspaceView {
             .flex()
             .flex_none()
             .h_full()
-            .child(super::edge_line(theme))
+            .child(edge_line(theme))
             .child(div().w(px(width)).h_full().child(self.review.clone()))
             // Last, so it lies over the panel's own left edge.
-            .child(super::edge_grip().left_0().on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|view, _, _, cx| {
-                    cx.stop_propagation();
-                    view.resizing_review = true;
-                }),
-            ))
-    }
-
-    pub(super) fn drag_review_edge(&mut self, event: &MouseMoveEvent, window: &Window) -> bool {
-        if !self.resizing_review {
-            return false;
-        }
-        if !event.dragging() {
-            self.resizing_review = false;
-            return true;
-        }
-        let right = f32::from(window.viewport_size().width);
-        self.review_width = column_width(
-            right - f32::from(event.position.x),
-            window,
-            REVIEW_MAX_SHARE,
-            REVIEW_MIN_WIDTH,
-        );
-        true
+            .child(self.resize_grip(Column::Review, cx).left_0())
     }
 }

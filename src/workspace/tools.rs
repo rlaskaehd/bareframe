@@ -1,18 +1,14 @@
 //! Warp's tools panel: a column between the tab sidebar and the panes, holding the project
 //! explorer (and global search, 3a-3).
-use super::{WorkspaceView, column_width, icon_button, menu::MenuAction};
+use super::{WorkspaceView, icon_button, menu::MenuAction};
 use crate::{
     explorer::ExplorerEvent,
     search::SearchEvent,
     theme::{Theme, hsla},
 };
 use bareframe_core::config::quote;
-use gpui::{Context, MouseButton, MouseMoveEvent, Pixels, Point, Window, div, prelude::*, px};
+use gpui::{Context, Pixels, Point, Window, div, prelude::*, px};
 use std::path::{Path, PathBuf};
-
-pub(super) const TOOLS_DEFAULT_WIDTH: f32 = 260.0;
-const TOOLS_MIN_WIDTH: f32 = 180.0;
-const TOOLS_MAX_SHARE: f32 = 0.4;
 
 #[derive(Clone, Copy, PartialEq)]
 pub(super) enum Tool {
@@ -211,27 +207,6 @@ impl WorkspaceView {
         self.sync(window, cx);
     }
 
-    pub(super) fn drag_tools_edge(&mut self, event: &MouseMoveEvent, window: &Window) -> bool {
-        if !self.resizing_tools {
-            return false;
-        }
-        if !event.dragging() {
-            self.resizing_tools = false;
-            return true;
-        }
-        self.tools_width = column_width(
-            f32::from(event.position.x) - self.tools_left,
-            window,
-            TOOLS_MAX_SHARE,
-            TOOLS_MIN_WIDTH,
-        );
-        true
-    }
-
-    pub(super) fn tools_shown_width(&self, window: &Window) -> f32 {
-        column_width(self.tools_width, window, TOOLS_MAX_SHARE, TOOLS_MIN_WIDTH)
-    }
-
     pub(super) fn render_tools(&self, width: f32, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = self.theme();
         let shown = self.shown_tool().unwrap_or(self.tool);
@@ -290,16 +265,6 @@ impl WorkspaceView {
                 Tool::Explorer => this.child(self.explorer.clone()),
                 Tool::Search => this.child(self.global_search.clone()),
             }))
-    }
-
-    pub(super) fn render_tools_edge(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        super::edge_line(self.theme()).child(super::edge_grip().right_0().on_mouse_down(
-            MouseButton::Left,
-            cx.listener(|view, _, _, cx| {
-                cx.stop_propagation();
-                view.resizing_tools = true;
-            }),
-        ))
     }
 }
 

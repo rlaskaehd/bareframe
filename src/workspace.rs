@@ -19,19 +19,19 @@ use bareframe_core::{
     state::{self, SavedPane, SavedState},
     workspace::{Axis, Closed, Direction, GroupId, Layout, PaneId, TabId, Workspace},
 };
+use columns::Column;
 use gpui::{
-    AnyView, App, Bounds, Context, CursorStyle, Entity, FocusHandle, MouseButton, MouseMoveEvent,
-    Pixels, Subscription, Window, WindowControlArea, anchored, deferred, div, point, prelude::*,
-    px,
+    AnyView, App, Bounds, Context, Entity, FocusHandle, MouseButton, MouseMoveEvent, Pixels,
+    Subscription, Window, WindowControlArea, anchored, deferred, div, point, prelude::*, px,
 };
 use gpui_libghostty::TerminalTheme;
 use menu::{ContextMenu, MenuAction};
-use sidebar::{SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_SHARE, SIDEBAR_MIN_WIDTH};
 use std::collections::HashMap;
 pub use viewer::Exit;
 
 mod changes;
 mod clipboard;
+mod columns;
 mod layout;
 mod menu;
 mod palette;
@@ -167,12 +167,10 @@ pub struct WorkspaceView {
     should_move_window: bool,
     sidebar_open: bool,
     sidebar_width: f32,
-    resizing_sidebar: bool,
     tools_open: bool,
     tools_width: f32,
     /// The tools panel's left edge, recorded on render for resizing.
     tools_left: f32,
-    resizing_tools: bool,
     tool: tools::Tool,
     explorer: Entity<Explorer>,
     _explorer_events: Subscription,
@@ -182,7 +180,8 @@ pub struct WorkspaceView {
     _review_events: Subscription,
     review_open: bool,
     review_width: f32,
-    resizing_review: bool,
+    /// The side column whose edge is being dragged.
+    resizing_column: Option<Column>,
     /// The active pane's repository and the diff button's numbers.
     repo: Option<(std::path::PathBuf, Summary)>,
     /// The directory last looked up, so moving focus doesn't run git again.
@@ -264,12 +263,10 @@ impl WorkspaceView {
             split_bounds: HashMap::new(),
             should_move_window: false,
             sidebar_open: true,
-            sidebar_width: SIDEBAR_DEFAULT_WIDTH,
-            resizing_sidebar: false,
+            sidebar_width: columns::SIDEBAR_DEFAULT_WIDTH,
             tools_open: false,
-            tools_width: tools::TOOLS_DEFAULT_WIDTH,
+            tools_width: columns::TOOLS_DEFAULT_WIDTH,
             tools_left: 0.0,
-            resizing_tools: false,
             tool: tools::Tool::Explorer,
             explorer,
             _explorer_events: explorer_events,
@@ -278,8 +275,8 @@ impl WorkspaceView {
             review,
             _review_events: review_events,
             review_open: false,
-            review_width: changes::REVIEW_DEFAULT_WIDTH,
-            resizing_review: false,
+            review_width: columns::REVIEW_DEFAULT_WIDTH,
+            resizing_column: None,
             repo: None,
             repo_dir: None,
             _repo_task: None,
@@ -718,21 +715,7 @@ impl WorkspaceView {
     }
 
     fn drag_divider(&mut self, event: &MouseMoveEvent, window: &Window, cx: &mut Context<Self>) {
-        if self.drag_tools_edge(event, window) || self.drag_review_edge(event, window) {
-            cx.notify();
-            return;
-        }
-        if self.resizing_sidebar {
-            if !event.dragging() {
-                self.resizing_sidebar = false;
-                return;
-            }
-            self.sidebar_width = column_width(
-                f32::from(event.position.x),
-                window,
-                SIDEBAR_MAX_SHARE,
-                SIDEBAR_MIN_WIDTH,
-            );
+        if self.drag_column_edge(event, window) {
             cx.notify();
             return;
         }
@@ -910,17 +893,6 @@ impl WorkspaceView {
         .with_priority(2)
     }
 
-    /// Re-clamped on every render, so shrinking the window can't squeeze the terminals
-    /// behind a sidebar sized for a wider one.
-    fn sidebar_shown_width(&self, window: &Window) -> f32 {
-        column_width(
-            self.sidebar_width,
-            window,
-            SIDEBAR_MAX_SHARE,
-            SIDEBAR_MIN_WIDTH,
-        )
-    }
-
     fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
         self.sidebar_open = !self.sidebar_open;
         cx.notify();
@@ -941,7 +913,7 @@ impl Render for WorkspaceView {
         }
         let bounds = window.bounds();
         self.tools_left = if self.sidebar_open {
-            self.sidebar_shown_width(window) + 1.0
+            self.column_width(Column::Sidebar, window) + 1.0
         } else {
             0.0
         };
@@ -973,9 +945,7 @@ impl Render for WorkspaceView {
                 // Also ends a tab drag that was dropped outside any drop target.
                 cx.listener(|view, _, _, cx| {
                     view.resize = None;
-                    view.resizing_sidebar = false;
-                    view.resizing_tools = false;
-                    view.resizing_review = false;
+                    view.resizing_column = None;
                     if !view.dragging.is_empty() {
                         view.dragging.clear();
                         cx.notify();
@@ -1170,56 +1140,22 @@ impl Render for WorkspaceView {
                     .flex()
                     .flex_row()
                     .when(self.sidebar_open, |this| {
-                        let width = self.sidebar_shown_width(window);
+                        let width = self.column_width(Column::Sidebar, window);
                         this.child(self.render_sidebar(width, cx))
-                            .child(edge_line(theme).child(edge_grip().right_0().on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(|view, _, _, cx| {
-                                    cx.stop_propagation();
-                                    view.resizing_sidebar = true;
-                                }),
-                            )))
+                            .child(self.column_edge(Column::Sidebar, cx))
                     })
                     .when(self.tools_open, |this| {
-                        let width = self.tools_shown_width(window);
+                        let width = self.column_width(Column::Tools, window);
                         this.child(self.render_tools(width, cx))
-                            .child(self.render_tools_edge(cx))
+                            .child(self.column_edge(Column::Tools, cx))
                     })
                     .child(div().flex_1().min_w_0().h_full().child(content))
                     .when(self.review_open, |this| {
-                        let width = self.review_shown_width(window);
+                        let width = self.column_width(Column::Review, window);
                         this.child(self.render_review(width, cx))
                     }),
             )
     }
-}
-
-/// A side column's border: one line that the pane header lines meet with no gap.
-pub(crate) fn edge_line(theme: &Theme) -> gpui::Div {
-    div()
-        .relative()
-        .flex_none()
-        .w(px(1.0))
-        .h_full()
-        .bg(hsla(theme.border))
-}
-
-/// The 5px grab area for resizing a column, laid over the column's own edge. Its parent
-/// places it with `left_0`/`right_0`; it must be painted after the column to catch the mouse.
-pub(crate) fn edge_grip() -> gpui::Div {
-    div()
-        .absolute()
-        .top_0()
-        .h_full()
-        .w(px(5.0))
-        .cursor(CursorStyle::ResizeLeftRight)
-}
-
-/// A side column's width: at most `share` of the window, never under `min`.
-fn column_width(width: f32, window: &Window, share: f32, min: f32) -> f32 {
-    width
-        .min(f32::from(window.viewport_size().width) * share)
-        .max(min)
 }
 
 pub(crate) fn icon_button(

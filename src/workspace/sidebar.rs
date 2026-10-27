@@ -7,11 +7,6 @@ use crate::{
 use bareframe_core::workspace::{GroupId, Tab, TabId};
 use gpui::{AnyElement, Context, Hsla, MouseButton, MouseDownEvent, Window, div, prelude::*, px};
 
-/// Sidebar width bounds follow Warp's vertical tabs panel.
-pub(super) const SIDEBAR_DEFAULT_WIDTH: f32 = 248.0;
-pub(super) const SIDEBAR_MIN_WIDTH: f32 = 200.0;
-pub(super) const SIDEBAR_MAX_SHARE: f32 = 0.5;
-
 /// Tabs being dragged in the sidebar (the selection, or one tab); renders as the whole
 /// card following the cursor, as in Warp.
 #[derive(Clone)]
