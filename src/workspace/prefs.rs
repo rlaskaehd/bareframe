@@ -61,6 +61,7 @@ impl WorkspaceView {
                     pane.set_theme(ui, cx);
                     pane.set_settings(self.settings.clone(), cx);
                 }),
+                PaneView::Browser(pane) => pane.update(cx, |pane, cx| pane.set_theme(ui, cx)),
                 PaneView::Markdown(pane) => {
                     let mono = self.mono_font();
                     pane.update(cx, |pane, cx| pane.set_theme(ui, mono, cx))

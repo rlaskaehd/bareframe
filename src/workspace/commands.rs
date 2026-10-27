@@ -77,6 +77,9 @@ impl WorkspaceView {
                 }
             }))
             .on_action(cx.listener(|view, _: &NewTab, window, cx| view.new_tab(window, cx)))
+            .on_action(
+                cx.listener(|view, _: &NewBrowserTab, window, cx| view.new_browser_tab(window, cx)),
+            )
             .on_action(cx.listener(|_, _: &Minimize, window, _| window.minimize_window()))
             .on_action(cx.listener(|_, _: &ZoomWindow, window, _| window.zoom_window()))
             .on_action(cx.listener(|view, _: &RenameTab, window, cx| {

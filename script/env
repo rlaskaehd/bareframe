@@ -8,6 +8,8 @@ fi
 BAREFRAME_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export CARGO_HOME="${CARGO_HOME:-$BAREFRAME_ROOT/.cache/cargo}"
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$BAREFRAME_ROOT/target}"
+# The CEF binary distribution for browser panes; script/bootstrap fetches it.
+export CEF_PATH="${CEF_PATH:-$BAREFRAME_ROOT/.cache/cef}"
 if [[ -z "${ZIG:-}" ]]; then
     if [[ -x "$BAREFRAME_ROOT/.tools/zig-aarch64-macos-0.16.0/zig" ]]; then
         export ZIG="$BAREFRAME_ROOT/.tools/zig-aarch64-macos-0.16.0/zig"

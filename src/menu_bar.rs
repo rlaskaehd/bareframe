@@ -19,6 +19,7 @@ pub fn menus() -> Vec<Menu> {
         ]),
         Menu::new("File").items([
             MenuItem::action("New Terminal Tab", NewTab),
+            MenuItem::action("New Browser Tab", NewBrowserTab),
             MenuItem::action("Restart Failed Session", RestartSession),
             MenuItem::separator(),
             MenuItem::action("Close Current Session", ClosePane),

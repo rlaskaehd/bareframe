@@ -30,6 +30,9 @@ impl WorkspaceView {
         for id in panes {
             match kinds.get(&id) {
                 Some(SavedPane::Settings) => self.insert_settings_pane(id, window, cx),
+                Some(SavedPane::Browser { url }) => {
+                    self.insert_browser_pane(id, url.clone(), window, cx)
+                }
                 Some(SavedPane::Markdown { path }) if path.is_file() => {
                     self.insert_markdown_pane(id, path.clone(), window, cx)
                 }
@@ -69,6 +72,9 @@ impl WorkspaceView {
                         cwd: pane.read(cx).cwd().to_path_buf(),
                     },
                     PaneView::Settings(_) => SavedPane::Settings,
+                    PaneView::Browser(pane) => SavedPane::Browser {
+                        url: pane.read(cx).url().to_owned(),
+                    },
                     PaneView::Markdown(pane) => SavedPane::Markdown {
                         path: pane.read(cx).path().to_path_buf(),
                     },

@@ -41,6 +41,7 @@ use Scope::{Terminal, Window};
 
 pub const ACTIONS: &[Action] = &[
     action("new_tab", "New tab", &["cmd+t"], Window),
+    action("new_browser_tab", "New browser tab", &[], Window),
     action("close_surface", "Close pane", &["cmd+w"], Window),
     action("close_tab", "Close tab", &["cmd+alt+w"], Window),
     action("close_window", "Close window", &["cmd+shift+w"], Window),

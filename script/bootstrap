@@ -27,6 +27,19 @@ if [[ "$("$ZIG" version)" != 0.16.0 ]]; then
     echo "Expected Zig 0.16.0; selected $ZIG reports a different version." >&2
     exit 1
 fi
+# Browser panes embed Chromium (CEF), whose glue library is built with CMake and Ninja.
+for tool in cmake ninja; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+        echo "Browser panes need $tool to build Chromium's glue. Install it with:" >&2
+        echo '    brew install cmake ninja' >&2
+        exit 1
+    fi
+done
+# The CEF binary distribution, about 135 MB to download, matching the cef crate.
+if [[ ! -d "$CEF_PATH/Chromium Embedded Framework.framework" ]]; then
+    cargo install --locked --root .tools/cef export-cef-dir --version '=156.2.0+156.0.14'
+    .tools/cef/bin/export-cef-dir --force "$CEF_PATH"
+fi
 if [[ "${1:-}" == --update-lockfile ]]; then
     cargo fetch
 elif [[ -f Cargo.lock ]]; then

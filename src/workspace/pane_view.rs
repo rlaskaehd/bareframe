@@ -1,6 +1,7 @@
 //! What each pane shows, and what the sidebar, the pane headers and the window title say
 //! about it.
 use crate::{
+    browser::BrowserPane,
     editor_tabs::EditorTabs,
     file_icons::{self, FileIcon},
     files,
@@ -10,21 +11,22 @@ use crate::{
 };
 use gpui::{AnyView, App, Entity, Window};
 
-/// What a pane shows. The layout model only knows `PaneId`s; native surfaces exist only
-/// for terminals, so hiding and freezing apply to them alone.
+/// What a pane shows. The layout model only knows `PaneId`s; native surfaces exist for
+/// terminals and browsers, so hiding and freezing apply to them.
 #[derive(Clone)]
 pub(super) enum PaneView {
     Terminal(Entity<TerminalPane>),
     Settings(Entity<SettingsPane>),
     Markdown(Entity<MarkdownPane>),
     Editor(Entity<EditorTabs>),
+    Browser(Entity<BrowserPane>),
 }
 
 impl PaneView {
     pub(super) fn terminal(&self) -> Option<&Entity<TerminalPane>> {
         match self {
             Self::Terminal(pane) => Some(pane),
-            Self::Settings(_) | Self::Markdown(_) | Self::Editor(_) => None,
+            _ => None,
         }
     }
 
@@ -35,6 +37,7 @@ impl PaneView {
             Self::Settings(_) => "Settings".into(),
             Self::Markdown(pane) => pane.read(cx).file_name(),
             Self::Editor(tabs) => editor_name(tabs, cx),
+            Self::Browser(pane) => pane.read(cx).title(),
         }
     }
 
@@ -45,6 +48,7 @@ impl PaneView {
             Self::Settings(_) => "Settings".into(),
             Self::Markdown(pane) => pane.read(cx).file_name(),
             Self::Editor(tabs) => editor_name(tabs, cx),
+            Self::Browser(pane) => pane.read(cx).title(),
         }
     }
 
@@ -65,6 +69,7 @@ impl PaneView {
         match self {
             Self::Terminal(pane) => Some(pane.read(cx).display_cwd()),
             Self::Settings(_) => None,
+            Self::Browser(pane) => Some(pane.read(cx).url().to_owned()),
             Self::Markdown(_) | Self::Editor(_) => {
                 let path = self.file(cx)?;
                 let dir = path.parent()?;
@@ -78,6 +83,7 @@ impl PaneView {
         match self {
             Self::Terminal(_) => None,
             Self::Settings(_) => Some(FileIcon::SETTINGS),
+            Self::Browser(_) => Some(FileIcon::BROWSER),
             Self::Markdown(_) | Self::Editor(_) => Some(
                 self.file(cx)
                     .map_or(FileIcon::FILE, |file| file_icons::for_path(&file)),
@@ -91,6 +97,7 @@ impl PaneView {
             Self::Settings(pane) => pane.update(cx, |pane, cx| pane.focus(window, cx)),
             Self::Markdown(pane) => pane.update(cx, |pane, cx| pane.focus(window, cx)),
             Self::Editor(tabs) => tabs.update(cx, |tabs, cx| tabs.focus(window, cx)),
+            Self::Browser(pane) => pane.update(cx, |pane, cx| pane.focus(window, cx)),
         }
     }
 
@@ -100,6 +107,7 @@ impl PaneView {
             Self::Settings(pane) => pane.clone().into(),
             Self::Markdown(pane) => pane.clone().into(),
             Self::Editor(pane) => pane.clone().into(),
+            Self::Browser(pane) => pane.clone().into(),
         }
     }
 }

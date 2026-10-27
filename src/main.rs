@@ -4,6 +4,7 @@ compile_error!("bareframe currently targets macOS");
 mod actions;
 mod app;
 mod assets;
+mod browser;
 mod diagram;
 mod editor;
 mod editor_tabs;

@@ -87,6 +87,45 @@ if [[ "$bundle_name" == bareframe-validation ]]; then
         -c 'Add :LSEnvironment dict' \
         -c 'Add :LSEnvironment:BAREFRAME_VALIDATION string 1' "$bundle_dir/Info.plist"
 fi
-# script/release names its own certificate; everything else is signed ad hoc.
-codesign --force --sign "${BAREFRAME_SIGN_IDENTITY:--}" "$bundles/$bundle_name.app"
+# Chromium for browser panes: CEF's framework, and the helper apps it starts its renderer,
+# GPU and other processes from, each a copy of bareframe-helper under the name CEF expects.
+frameworks="$bundle_dir/Frameworks"
+framework="Chromium Embedded Framework.framework"
+mkdir -p "$frameworks"
+# The framework is large and fixed for a CEF version, so it is copied again only when the
+# distribution in CEF_PATH changes.
+copied="$bundles/.$bundle_name-cef-archive.json"
+if [[ ! -d "$frameworks/$framework" ]] || ! cmp -s "$CEF_PATH/archive.json" "$copied"; then
+    rm -rf "$frameworks/$framework"
+    ditto "$CEF_PATH/$framework" "$frameworks/$framework"
+    cp "$CEF_PATH/archive.json" "$copied"
+fi
+if [[ "$profile" == release ]]; then
+    cp "$CEF_PATH/CREDITS.html" "$bundle_dir/Resources/CHROMIUM_CREDITS.html"
+fi
+bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$bundle_dir/Info.plist")
+for kind in "" " (GPU)" " (Renderer)" " (Plugin)" " (Alerts)"; do
+    name="bareframe Helper$kind"
+    helper="$frameworks/$name.app/Contents"
+    mkdir -p "$helper/MacOS"
+    cp "$CARGO_TARGET_DIR/$profile/bareframe-helper" "$helper/MacOS/$name"
+    suffix=$(printf '%s' "$kind" | tr -d '() ' | tr '[:upper:]' '[:lower:]')
+    cat > "$helper/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>$bundle_id.helper${suffix:+.$suffix}</string>
+<key>CFBundleName</key><string>$name</string>
+<key>CFBundleExecutable</key><string>$name</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleShortVersionString</key><string>$version</string>
+<key>LSMinimumSystemVersion</key><string>14.0</string>
+<key>LSUIElement</key><string>1</string>
+<key>NSHighResolutionCapable</key><true/>
+</dict></plist>
+PLIST
+done
+# script/release names its own certificate; everything else is signed ad hoc. The helpers
+# and the framework inside are signed with the app.
+codesign --force --deep --sign "${BAREFRAME_SIGN_IDENTITY:--}" "$bundles/$bundle_name.app"
 echo "$bundles/$bundle_name.app"

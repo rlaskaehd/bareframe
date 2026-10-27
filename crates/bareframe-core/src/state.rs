@@ -31,6 +31,10 @@ pub enum SavedPane {
         paths: Vec<PathBuf>,
         active: usize,
     },
+    /// A browser reopens its last page.
+    Browser {
+        url: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -118,6 +122,9 @@ pub fn encode(state: &SavedState) -> String {
                     .collect();
                 format!("pane {} editor {active} {}", id.0, paths.join(" "))
             }
+            SavedPane::Browser { url } => {
+                format!("pane {} browser {}", id.0, escape(url.as_bytes()))
+            }
         });
     }
     out.push(String::new());
@@ -198,6 +205,10 @@ pub fn decode(input: &str) -> Result<SavedState, String> {
                         )),
                     },
                     "settings" => SavedPane::Settings,
+                    "browser" => SavedPane::Browser {
+                        url: String::from_utf8(unescape(next()?).ok_or_else(|| fail("bad url"))?)
+                            .map_err(|_| fail("bad url"))?,
+                    },
                     "markdown" => SavedPane::Markdown {
                         path: PathBuf::from(OsString::from_vec(
                             unescape(next()?).ok_or_else(|| fail("bad path"))?,
@@ -403,6 +414,13 @@ mod tests {
                     PathBuf::from("/tmp/a b.rs"),
                 ],
                 active: 1,
+            },
+        ));
+        let fifth = ws.new_tab();
+        panes.push((
+            fifth,
+            SavedPane::Browser {
+                url: "https://example.com/a b?q=한".into(),
             },
         ));
         assert!(ws.tabs.iter().any(|tab| tab.layout.contains(first)));

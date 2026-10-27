@@ -67,8 +67,10 @@ impl WorkspaceView {
             self.save_state(cx);
         }
         for (_, (pane, _)) in self.panes.drain() {
-            if let PaneView::Terminal(pane) = pane {
-                pane.update(cx, |pane, cx| pane.shutdown(cx));
+            match pane {
+                PaneView::Terminal(pane) => pane.update(cx, |pane, cx| pane.shutdown(cx)),
+                PaneView::Browser(pane) => pane.update(cx, |pane, _| pane.close()),
+                _ => {}
             }
         }
     }

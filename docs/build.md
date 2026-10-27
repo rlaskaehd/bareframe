@@ -1,7 +1,7 @@
 # 개발 빌드
 
 대상은 macOS 14 이상의 Apple Silicon(arm64)이다. Rust 1.98.1(`rust-toolchain.toml`), Zig 0.16.0,
-Xcode의 clang과 Metal compiler를 사용한다.
+Xcode의 clang과 Metal compiler, 브라우저 Pane의 CEF를 빌드할 cmake와 ninja(`brew install cmake ninja`)를 사용한다.
 
 ## 준비와 빌드
 
@@ -13,6 +13,13 @@ Xcode의 clang과 Metal compiler를 사용한다.
 Zig macOS arm64 압축 파일의 SHA-256은 [공식 다운로드 인덱스](https://ziglang.org/download/index.json)의 값
 `b23d70deaa879b5c2d486ed3316f7eaa53e84acf6fc9cc747de152450d401489`와 대조한다.
 기존 Zig를 쓰려면 `ZIG`에 실행 파일을 지정할 수 있으며 버전이 다르면 스크립트가 중단된다.
+CEF 바이너리 배포본(약 135MB 다운로드, 풀면 약 340MB)은 `cef` crate와 같은 버전을 `.cache/cef`에 받는다
+(`CEF_PATH`로 바꿀 수 있다).
+
+브라우저 Pane은 앱 번들 안에서만 동작한다. `./script/bundle`이 `Contents/Frameworks`에 CEF 프레임워크와
+helper 앱 다섯 개(`bareframe Helper`, `(GPU)`, `(Renderer)`, `(Plugin)`, `(Alerts)`, 모두 `bareframe-helper`
+실행 파일)를 넣고 `codesign --deep`으로 다시 서명한다. 그래서 번들과 릴리스 zip이 100MB 넘게 커진다.
+릴리스 빌드는 Chromium의 라이선스 고지(`CREDITS.html`)를 `Resources/CHROMIUM_CREDITS.html`로 싣는다.
 
 Cargo 의존성을 해석해 최초 `Cargo.lock`을 생성한 뒤 `cargo build --locked`로 빌드한다.
 이후 실행에서는 잠금 파일을 유지한다. 아직 의존성 취득이 끝나지 않은 환경에서는 앱의 lock 파일이 없을 수 있다.
@@ -23,6 +30,7 @@ Cargo 의존성을 해석해 최초 `Cargo.lock`을 생성한 뒤 `cargo build -
 | GPUI / gpui_platform | Zed `cc053a4a6fa2fd0e8793201ed9099466af1be0b1` |
 | gpui-libghostty | `vendor/`의 upstream `2bbde4ae53a8e163cdbe05294bd09934b30c1af3` 기반 사본 |
 | Ghostty | 어댑터에 포함된 `9f0e1719dc918368367d368bfe300f59bb68b5a4` 기반 소스 |
+| CEF | `cef` crate `=156.2.0`, 배포본 `156.2.0+156.0.14`(Chromium 156) |
 
 어댑터 변경 내용은 [BAREFRAME.md](../vendor/gpui-libghostty/BAREFRAME.md)에 기록한다.
 

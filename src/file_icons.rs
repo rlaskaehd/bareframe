@@ -13,6 +13,7 @@ impl FileIcon {
     pub const FILE: Self = Self::plain("icons/file.svg");
     pub const FOLDER: Self = Self::plain("icons/folder.svg");
     pub const SETTINGS: Self = Self::plain("icons/gear.svg");
+    pub const BROWSER: Self = Self::plain("icons/globe.svg");
 
     const fn plain(path: &'static str) -> Self {
         Self { path, color: None }

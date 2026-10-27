@@ -25,7 +25,7 @@ Apple 공증을 받지 않은 자체 서명 앱이다. 설치 스크립트로 �
 ## 소스에서 빌드
 
 ```sh
-./script/bootstrap   # Zig 0.16.0과 Cargo 의존성을 준비하고 빌드
+./script/bootstrap   # Zig 0.16.0, CEF, Cargo 의존성을 준비하고 빌드
 ./script/run         # 바로 실행
 ./script/check       # fmt, Clippy, 테스트, 빌드
 ```
@@ -48,3 +48,4 @@ bareframe는 [GNU Affero General Public License v3.0 이상](LICENSE)(`AGPL-3.0-
 - `vendor/gpui-libghostty`: MIT([LICENSE](vendor/gpui-libghostty/LICENSE)). 그 안의 Ghostty: MIT.
 - Ghostty zsh 셸 통합(`Contents/Resources/shell-integration`): GPL-3.0([resources/shell-integration](resources/shell-integration)).
 - GPUI: Apache-2.0.
+- Chromium Embedded Framework(`Contents/Frameworks`): BSD-3-Clause, 그 안의 Chromium 구성 요소는 `Contents/Resources/CHROMIUM_CREDITS.html`.

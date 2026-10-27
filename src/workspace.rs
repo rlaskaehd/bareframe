@@ -26,6 +26,7 @@ use menu::ContextMenu;
 use pane_view::PaneView;
 use std::collections::HashMap;
 
+mod browsers;
 mod changes;
 mod clipboard;
 mod columns;
@@ -333,6 +334,9 @@ impl WorkspaceView {
             if let Some(pane) = self.terminal(*id) {
                 pane.update(cx, |pane, cx| pane.set_frozen(frozen, cx));
             }
+            if let Some(PaneView::Browser(pane)) = self.pane(*id) {
+                pane.update(cx, |pane, cx| pane.set_frozen(frozen, cx));
+            }
         }
         if frozen {
             self.frozen_panes = panes;
@@ -352,6 +356,7 @@ impl WorkspaceView {
                 let shown = visible.contains(id);
                 pane.update(cx, |pane, cx| pane.set_visible(shown, cx));
             }
+            self.show_browsers(&visible, cx);
         }
         // A clipboard prompt keeps the keyboard until it is answered.
         if let Some(prompt) = &self.clipboard_prompt {

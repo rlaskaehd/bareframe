@@ -12,6 +12,7 @@ actions!(
         Paste,
         RestartSession,
         NewTab,
+        NewBrowserTab,
         NextTab,
         PreviousTab,
         SelectTab1,
@@ -76,6 +77,7 @@ actions!(
 pub fn keymap_action(name: &str) -> Option<Box<dyn gpui::Action>> {
     Some(match name {
         "new_tab" => Box::new(NewTab),
+        "new_browser_tab" => Box::new(NewBrowserTab),
         "close_surface" => Box::new(ClosePane),
         "close_tab" => Box::new(CloseTab),
         "close_window" => Box::new(CloseWindow),
@@ -145,6 +147,7 @@ pub fn bind_keys(settings: &Settings, cx: &mut App) {
     cx.bind_keys(crate::explorer::key_bindings());
     cx.bind_keys(crate::editor::key_bindings());
     cx.bind_keys(crate::markdown::key_bindings());
+    cx.bind_keys(crate::browser::key_bindings());
     let (bindings, warnings) = keymap::resolve(&settings.keybinds);
     for warning in warnings {
         eprintln!("bareframe: settings: {warning}");

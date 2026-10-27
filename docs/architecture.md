@@ -8,6 +8,7 @@ bareframe (src/)                    GPUI 뷰와 macOS 통합
 ├── app.rs, actions.rs, menu_bar.rs 시작, 동작·키 바인딩, 메뉴바
 ├── workspace.rs, workspace/        창 하나: 사이드바, 분할, 도구 패널, 팔레트, 저장·복원
 ├── terminal.rs                     Ghostty surface와 GPUI 입력의 연결
+├── browser/, bin/bareframe-helper  Chromium(CEF) Pane: 메시지 펌프, 키보드 넘기기, 내부 DevTools
 ├── editor/, editor_tabs.rs         코드 편집기(찾기, 언어 서버, 상태 줄)
 ├── markdown/, diagram.rs           Markdown 뷰어와 Mermaid
 ├── explorer/, search.rs, review.rs 탐색기, 전역 검색, Code review
@@ -35,6 +36,9 @@ resources/shell-integration/        zsh 통합(Ghostty 것 + bareframe의 프롬
 - **터미널 세션은 Ghostty가 소유한다.** PTY와 셸 수명은 libghostty surface가 맡고, bareframe은
   native view의 배치·포커스·입력만 다룬다. 셸 이벤트(작업 디렉터리, 명령 시작·끝)는 zsh 통합과
   OSC 7/133으로 받는다.
+- **브라우저는 엔진이 소유한다.** `browser/engine.rs`가 모든 Chromium 브라우저를 갖고 Pane은 id만
+  가진다. 그래서 끝낼 때 브라우저를 모두 닫은 뒤에야 Chromium을 내리고, 그 뒤에 남는 참조가 없다.
+  Chromium 콜백은 채널로 보내거나 값을 바꾸기만 하고, 엔진의 borrow를 Chromium 호출 너머로 잡지 않는다.
 - **외부 프로그램은 사용자가 켜야 실행한다.** 언어 서버와 프로젝트 안의 Python은 사용자가 고르기
   전에는 실행하지 않는다.
 

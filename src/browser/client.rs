@@ -1,0 +1,183 @@
+//! Chromium's callbacks for one browser, turned into events its pane reads. They run on
+//! the main thread, inside the message pump, and only send, store or remove: a panic here
+//! would abort the app.
+use super::{engine, mac};
+use cef::*;
+use futures::channel::mpsc::UnboundedSender;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+
+pub enum BrowserEvent {
+    Address(String),
+    Title(String),
+    Loading {
+        loading: bool,
+        back: bool,
+        forward: bool,
+    },
+    /// The user asked the page for a new window (a link with `target=_blank`, say); it
+    /// opens as a new browser tab.
+    Popup(String),
+    /// The page took the keyboard, from a click on it.
+    Focused,
+    /// The page closed itself (`window.close()`); the browser is gone.
+    Closed,
+}
+
+/// Set while the pane has GPUI's focus on its page, so the page may take the keyboard.
+pub type Keyboard = Arc<AtomicBool>;
+
+pub fn client(events: UnboundedSender<BrowserEvent>, keyboard: Keyboard) -> Client {
+    PaneClient::new(events, keyboard)
+}
+
+wrap_client! {
+    struct PaneClient {
+        events: UnboundedSender<BrowserEvent>,
+        keyboard: Keyboard,
+    }
+
+    impl Client {
+        fn display_handler(&self) -> Option<DisplayHandler> {
+            Some(PaneDisplay::new(self.events.clone()))
+        }
+
+        fn focus_handler(&self) -> Option<FocusHandler> {
+            Some(PaneFocus::new(self.events.clone(), self.keyboard.clone()))
+        }
+
+        fn life_span_handler(&self) -> Option<LifeSpanHandler> {
+            Some(PaneLifeSpan::new(self.events.clone()))
+        }
+
+        fn load_handler(&self) -> Option<LoadHandler> {
+            Some(PaneLoad::new(self.events.clone()))
+        }
+    }
+}
+
+wrap_display_handler! {
+    struct PaneDisplay {
+        events: UnboundedSender<BrowserEvent>,
+    }
+
+    impl DisplayHandler {
+        fn on_address_change(
+            &self,
+            _browser: Option<&mut Browser>,
+            frame: Option<&mut Frame>,
+            url: Option<&CefString>,
+        ) {
+            // Only the page itself, not frames inside it, moves the address bar.
+            if frame.is_some_and(|frame| frame.is_main() != 0) {
+                let url = url.map(CefString::to_string).unwrap_or_default();
+                let _ = self.events.unbounded_send(BrowserEvent::Address(url));
+            }
+        }
+
+        fn on_title_change(&self, _browser: Option<&mut Browser>, title: Option<&CefString>) {
+            let title = title.map(CefString::to_string).unwrap_or_default();
+            let _ = self.events.unbounded_send(BrowserEvent::Title(title));
+        }
+    }
+}
+
+wrap_focus_handler! {
+    struct PaneFocus {
+        events: UnboundedSender<BrowserEvent>,
+        keyboard: Keyboard,
+    }
+
+    impl FocusHandler {
+        fn on_set_focus(
+            &self,
+            _browser: Option<&mut Browser>,
+            source: FocusSource,
+        ) -> ::std::os::raw::c_int {
+            // A page loading doesn't take the keyboard from the terminal or the address bar
+            // being typed in; a click on it does.
+            (source == FocusSource::NAVIGATION && !self.keyboard.load(Ordering::Relaxed)).into()
+        }
+
+        fn on_got_focus(&self, _browser: Option<&mut Browser>) {
+            let _ = self.events.unbounded_send(BrowserEvent::Focused);
+        }
+    }
+}
+
+wrap_life_span_handler! {
+    struct PaneLifeSpan {
+        events: UnboundedSender<BrowserEvent>,
+    }
+
+    impl LifeSpanHandler {
+        fn on_before_popup(
+            &self,
+            _browser: Option<&mut Browser>,
+            frame: Option<&mut Frame>,
+            _popup_id: ::std::os::raw::c_int,
+            target_url: Option<&CefString>,
+            _target_frame_name: Option<&CefString>,
+            _target_disposition: WindowOpenDisposition,
+            user_gesture: ::std::os::raw::c_int,
+            _popup_features: Option<&PopupFeatures>,
+            _window_info: Option<&mut WindowInfo>,
+            _client: Option<&mut Option<Client>>,
+            _settings: Option<&mut BrowserSettings>,
+            _extra_info: Option<&mut Option<DictionaryValue>>,
+            _no_javascript_access: Option<&mut ::std::os::raw::c_int>,
+        ) -> ::std::os::raw::c_int {
+            // Only a click on the page itself counts; scripts and frames inside it (ads)
+            // opening windows on their own are dropped.
+            let main = frame.is_some_and(|frame| frame.is_main() != 0);
+            if main && user_gesture != 0
+                && let Some(url) = target_url.map(CefString::to_string).filter(|url| !url.is_empty())
+            {
+                let _ = self.events.unbounded_send(BrowserEvent::Popup(url));
+            }
+            // Cancels Chromium's own window.
+            1
+        }
+
+        fn do_close(&self, browser: Option<&mut Browser>) -> ::std::os::raw::c_int {
+            // Left to itself, Chromium closes the window the page sits in: the whole GPUI
+            // window. Taking the page's view out instead ends the browser alone.
+            if let Some(browser) = browser {
+                engine::closing(browser.identifier());
+                if let Some(host) = browser.host() {
+                    mac::remove(host.window_handle());
+                }
+            }
+            let _ = self.events.unbounded_send(BrowserEvent::Closed);
+            1
+        }
+
+        fn on_before_close(&self, _browser: Option<&mut Browser>) {
+            engine::closed();
+        }
+    }
+}
+
+wrap_load_handler! {
+    struct PaneLoad {
+        events: UnboundedSender<BrowserEvent>,
+    }
+
+    impl LoadHandler {
+        fn on_loading_state_change(
+            &self,
+            _browser: Option<&mut Browser>,
+            is_loading: ::std::os::raw::c_int,
+            can_go_back: ::std::os::raw::c_int,
+            can_go_forward: ::std::os::raw::c_int,
+        ) {
+            let _ = self.events.unbounded_send(BrowserEvent::Loading {
+                loading: is_loading != 0,
+                back: can_go_back != 0,
+                forward: can_go_forward != 0,
+            });
+        }
+    }
+}

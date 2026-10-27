@@ -92,6 +92,10 @@ impl TextField {
         self.focus.focus(window, cx);
     }
 
+    pub fn is_focused(&self, window: &Window) -> bool {
+        self.focus.is_focused(window)
+    }
+
     pub fn text(&self) -> &str {
         &self.content
     }
