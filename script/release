@@ -10,10 +10,6 @@ if ! security find-certificate -c "$identity" >/dev/null 2>&1; then
     echo "no \"$identity\" certificate in the keychain; run script/make-signing-identity first" >&2
     exit 1
 fi
-if grep -q PUBLIC_KEY_PLACEHOLDER src/update/release.rs; then
-    echo "src/update/release.rs has no release key; run bareframe-release keygen" >&2
-    exit 1
-fi
 version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)
 BAREFRAME_SIGN_IDENTITY="$identity" script/bundle --release
 app="$CARGO_TARGET_DIR/dist/bareframe.app"

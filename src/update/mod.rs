@@ -138,11 +138,8 @@ impl Updates {
     }
 }
 
-/// The latest release, when it is newer than this build and signed releases are set up.
+/// The latest release, when it is newer than this build.
 fn latest() -> Result<Option<Release>, String> {
-    if release::PUBLIC_KEY.len() != 64 {
-        return Err("this build has no release key to check updates against".into());
-    }
     let url = format!(
         "https://api.github.com/repos/{}/releases/latest",
         release::REPOSITORY

@@ -91,7 +91,7 @@ pub fn relaunch_after_exit(bundle: &Path) -> Result<(), String> {
 }
 
 /// Fetches `url` (HTTPS only) to `to`.
-pub fn download(url: &str, to: &Path) -> Result<(), String> {
+fn download(url: &str, to: &Path) -> Result<(), String> {
     run(
         "/usr/bin/curl",
         &[
