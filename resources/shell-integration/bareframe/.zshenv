@@ -23,7 +23,15 @@ if [[ -o 'interactive' && $_bareframe_prompt != top ]]; then
             'builtin' 'print' -n -- $'\e[999B'
         fi
     }
-    _bareframe_preexec() { [[ $1 == (clear|reset)(| *) ]] && _bareframe_cleared=1 }
+    # `clear` or `reset` wipes the history the blank lines live in, typed as is, through an
+    # alias (zsh hands the expanded line as $3) or in a list such as `clear && ls`.
+    _bareframe_preexec() {
+        'builtin' 'local' word first=1
+        for word in ${(z)3}; do
+            (( first )) && [[ $word == (clear|reset) ]] && _bareframe_cleared=1
+            [[ $word == (';'|'&&'|'||'|'|'|'&') ]] && first=1 || first=0
+        done
+    }
     _bareframe_clear_screen() {
         'builtin' 'zle' -I
         'builtin' 'print' -n -- $'\e[H\e[2J'
