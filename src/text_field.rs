@@ -529,7 +529,10 @@ impl Element for TextElement {
         };
         // Long names would otherwise paint over the row's buttons.
         window.with_content_mask(Some(gpui::ContentMask { bounds }), |window| {
-            if let Some(selection) = prepaint.selection.take() {
+            // Like the cursor, the selection shows only while the field is being typed in.
+            if focus.is_focused(window)
+                && let Some(selection) = prepaint.selection.take()
+            {
                 window.paint_quad(selection);
             }
             if let Err(error) = line.paint(
