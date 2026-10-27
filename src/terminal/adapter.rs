@@ -53,8 +53,11 @@ impl GhosttyAdapter {
         cx: &mut Context<T>,
     ) -> Result<Entity<Self>, String> {
         let user_zdotdir = std::env::var_os("ZDOTDIR").map(std::path::PathBuf::from);
+        let integration = crate::app::zsh_integration();
         let command = config.command_with_zsh_integration(
-            crate::app::zsh_integration_dir().as_deref(),
+            integration
+                .as_ref()
+                .map(|(own, ghostty)| (own.as_path(), ghostty.as_path())),
             user_zdotdir.as_deref(),
         );
         let mut options = TerminalOptions::new(command, config.cwd.clone());

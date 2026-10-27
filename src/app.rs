@@ -230,19 +230,27 @@ impl gpui::AssetSource for Assets {
     }
 }
 
-/// The vendored Ghostty zsh integration: in the app bundle, else in the source tree.
-pub fn zsh_integration_dir() -> Option<PathBuf> {
-    let bundled = std::env::current_exe()
-        .ok()
-        .and_then(|exe| Some(exe.parent()?.join("../Resources/shell-integration/zsh")));
-    let source = PathBuf::from(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/vendor/gpui-libghostty/crates/gpui-ghostty/vendor/ghostty/src/shell-integration/zsh"
-    ));
+/// bareframe's zsh startup directory and the vendored Ghostty integration it sources: in
+/// the app bundle, else in the source tree.
+pub fn zsh_integration() -> Option<(PathBuf, PathBuf)> {
+    let bundled = std::env::current_exe().ok().and_then(|exe| {
+        let resources = exe.parent()?.join("../Resources/shell-integration");
+        Some((resources.join("bareframe"), resources.join("zsh")))
+    });
+    let source = (
+        PathBuf::from(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/resources/shell-integration/bareframe"
+        )),
+        PathBuf::from(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/vendor/gpui-libghostty/crates/gpui-ghostty/vendor/ghostty/src/shell-integration/zsh"
+        )),
+    );
     bundled
         .into_iter()
         .chain([source])
-        .find(|dir| dir.join(".zshenv").is_file())
+        .find(|(own, ghostty)| own.join(".zshenv").is_file() && ghostty.join(".zshenv").is_file())
 }
 
 pub fn home_dir() -> Option<PathBuf> {

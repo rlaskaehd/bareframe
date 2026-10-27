@@ -18,6 +18,8 @@ cp vendor/gpui-libghostty/crates/gpui-ghostty/vendor/ghostty/src/shell-integrati
     vendor/gpui-libghostty/crates/gpui-ghostty/vendor/ghostty/src/shell-integration/zsh/ghostty-integration \
     "$integration/zsh/"
 cp resources/shell-integration/README resources/shell-integration/COPYING "$integration/"
+mkdir -p "$integration/bareframe"
+cp resources/shell-integration/bareframe/.zshenv "$integration/bareframe/"
 cp "$CARGO_TARGET_DIR/debug/bareframe" "$bundle_dir/MacOS/bareframe"
 cat > "$bundle_dir/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>

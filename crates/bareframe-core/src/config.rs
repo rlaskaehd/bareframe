@@ -101,23 +101,28 @@ impl LaunchConfig {
         )
     }
 
-    /// Like Ghostty's own injection, zsh reads `.zshenv` from `integration` first; that file
-    /// restores the user's ZDOTDIR and rc files, then installs the title and OSC 7 hooks.
-    /// Ghostty's automatic injection is unusable here (no resources dir), so it goes in the
-    /// command. Clean shells (`-f`) and other shells run unchanged.
+    /// zsh reads `.zshenv` from bareframe's `own` directory first. It sources Ghostty's
+    /// (`ghostty`), which restores the user's ZDOTDIR and rc files and installs the title and
+    /// OSC 7 hooks, then starts the prompt at the bottom of the screen. Ghostty's automatic
+    /// injection is unusable here (no resources dir), so it goes in the command. Clean
+    /// shells (`-f`) and other shells run unchanged.
     pub fn command_with_zsh_integration(
         &self,
-        integration: Option<&Path>,
+        integration: Option<(&Path, &Path)>,
         user_zdotdir: Option<&Path>,
     ) -> String {
         let is_zsh = self.shell.file_name().and_then(|n| n.to_str()) == Some("zsh");
-        let Some(dir) = integration
+        let Some((own, ghostty)) = integration
             .filter(|_| is_zsh && !self.clean_shell)
-            .and_then(Path::to_str)
+            .and_then(|(own, ghostty)| Some((own.to_str()?, ghostty.to_str()?)))
         else {
             return self.command();
         };
-        let mut command = format!("/usr/bin/env ZDOTDIR={}", quote(dir));
+        let mut command = format!(
+            "/usr/bin/env ZDOTDIR={} BAREFRAME_GHOSTTY_ZSH={}",
+            quote(own),
+            quote(ghostty)
+        );
         if let Some(user) = user_zdotdir.and_then(Path::to_str) {
             command.push_str(&format!(" GHOSTTY_ZSH_ZDOTDIR={}", quote(user)));
         }
@@ -213,16 +218,16 @@ mod tests {
             shell: "/bin/zsh".into(),
             clean_shell: false,
         };
-        let dir = Path::new("/App Support/it's/zsh");
+        let dirs = (Path::new("/App Support/it's/own"), Path::new("/g"));
         assert_eq!(
-            config.command_with_zsh_integration(Some(dir), Some(Path::new("/z"))),
-            "/usr/bin/env ZDOTDIR='/App Support/it'\\''s/zsh' GHOSTTY_ZSH_ZDOTDIR='/z' \
-             GHOSTTY_SHELL_FEATURES=title '/bin/zsh' -l -i"
+            config.command_with_zsh_integration(Some(dirs), Some(Path::new("/z"))),
+            "/usr/bin/env ZDOTDIR='/App Support/it'\\''s/own' BAREFRAME_GHOSTTY_ZSH='/g' \
+             GHOSTTY_ZSH_ZDOTDIR='/z' GHOSTTY_SHELL_FEATURES=title '/bin/zsh' -l -i"
         );
         assert!(
             !config
-                .command_with_zsh_integration(Some(dir), None)
-                .contains("GHOSTTY_ZSH")
+                .command_with_zsh_integration(Some(dirs), None)
+                .contains("GHOSTTY_ZSH_ZDOTDIR")
         );
         assert_eq!(
             config.command_with_zsh_integration(None, None),
@@ -230,13 +235,13 @@ mod tests {
         );
         config.clean_shell = true;
         assert_eq!(
-            config.command_with_zsh_integration(Some(dir), None),
+            config.command_with_zsh_integration(Some(dirs), None),
             config.command()
         );
         config.clean_shell = false;
         config.shell = "/bin/bash".into();
         assert_eq!(
-            config.command_with_zsh_integration(Some(dir), None),
+            config.command_with_zsh_integration(Some(dirs), None),
             config.command()
         );
     }
