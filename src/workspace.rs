@@ -1,6 +1,6 @@
 use crate::{
     app::{self, *},
-    editor::EditorPane,
+    editor_tabs::EditorTabs,
     explorer::Explorer,
     markdown::MarkdownPane,
     pane::{PaneEvent, TerminalPane},
@@ -50,7 +50,7 @@ enum PaneView {
     Terminal(Entity<TerminalPane>),
     Settings(Entity<SettingsPane>),
     Markdown(Entity<MarkdownPane>),
-    Editor(Entity<EditorPane>),
+    Editor(Entity<EditorTabs>),
 }
 
 impl PaneView {
@@ -67,7 +67,7 @@ impl PaneView {
             Self::Terminal(pane) => pane.read(cx).title(),
             Self::Settings(_) => "Settings".into(),
             Self::Markdown(pane) => pane.read(cx).file_name(),
-            Self::Editor(pane) => pane.read(cx).file_name(),
+            Self::Editor(tabs) => editor_name(tabs, cx),
         }
     }
 
@@ -77,7 +77,19 @@ impl PaneView {
             Self::Terminal(pane) => pane.read(cx).name(),
             Self::Settings(_) => "Settings".into(),
             Self::Markdown(pane) => pane.read(cx).file_name(),
-            Self::Editor(pane) => pane.read(cx).file_name(),
+            Self::Editor(tabs) => editor_name(tabs, cx),
+        }
+    }
+
+    /// The file a file pane shows: the viewer's, or the editor's shown tab.
+    fn file(&self, cx: &App) -> Option<std::path::PathBuf> {
+        match self {
+            Self::Markdown(pane) => Some(pane.read(cx).path().to_path_buf()),
+            Self::Editor(tabs) => {
+                let editor = tabs.read(cx).active()?;
+                Some(editor.read(cx).path().to_path_buf())
+            }
+            _ => None,
         }
     }
 
@@ -87,11 +99,7 @@ impl PaneView {
             Self::Terminal(pane) => Some(pane.read(cx).display_cwd()),
             Self::Settings(_) => None,
             Self::Markdown(_) | Self::Editor(_) => {
-                let path = match self {
-                    Self::Markdown(pane) => pane.read(cx).path(),
-                    Self::Editor(pane) => pane.read(cx).path(),
-                    _ => return None,
-                };
+                let path = self.file(cx)?;
                 let dir = path.parent()?;
                 Some(app::home_dir().map_or_else(
                     || dir.display().to_string(),
@@ -115,7 +123,7 @@ impl PaneView {
             Self::Terminal(pane) => pane.update(cx, |pane, cx| pane.focus(window, cx)),
             Self::Settings(pane) => pane.update(cx, |pane, cx| pane.focus(window, cx)),
             Self::Markdown(pane) => pane.update(cx, |pane, cx| pane.focus(window, cx)),
-            Self::Editor(pane) => pane.update(cx, |pane, cx| pane.focus(window, cx)),
+            Self::Editor(tabs) => tabs.update(cx, |tabs, cx| tabs.focus(window, cx)),
         }
     }
 
@@ -127,6 +135,13 @@ impl PaneView {
             Self::Editor(pane) => pane.clone().into(),
         }
     }
+}
+
+/// The editor's shown file, with a dot if it has unsaved changes.
+fn editor_name(tabs: &Entity<EditorTabs>, cx: &App) -> String {
+    let tabs = tabs.read(cx);
+    tabs.active()
+        .map_or_else(String::new, |editor| editor.read(cx).file_name())
 }
 
 struct Resize {
@@ -327,8 +342,15 @@ impl WorkspaceView {
                 Some(SavedPane::Markdown { path }) if path.is_file() => {
                     self.insert_markdown_pane(id, path.clone(), window, cx)
                 }
-                Some(SavedPane::Editor { path }) if path.is_file() => {
-                    self.insert_editor_pane(id, path.clone(), window, cx)
+                Some(SavedPane::Editor { paths, active })
+                    if paths.iter().any(|path| path.is_file()) =>
+                {
+                    let files: Vec<_> = paths
+                        .iter()
+                        .filter(|path| path.is_file())
+                        .cloned()
+                        .collect();
+                    self.insert_editor_pane(id, files, *active, window, cx)
                 }
                 kind => {
                     let cwd = match kind {
@@ -354,9 +376,16 @@ impl WorkspaceView {
                     PaneView::Markdown(pane) => SavedPane::Markdown {
                         path: pane.read(cx).path().to_path_buf(),
                     },
-                    PaneView::Editor(pane) => SavedPane::Editor {
-                        path: pane.read(cx).path().to_path_buf(),
-                    },
+                    PaneView::Editor(tabs) => {
+                        let tabs = tabs.read(cx);
+                        SavedPane::Editor {
+                            paths: tabs
+                                .editors()
+                                .map(|editor| editor.read(cx).path().to_path_buf())
+                                .collect(),
+                            active: tabs.active_index(),
+                        }
+                    }
                 };
                 (*id, saved)
             })
@@ -460,8 +489,9 @@ impl WorkspaceView {
         let dir = match self.pane(self.model.active_pane()) {
             Some(PaneView::Terminal(pane)) => pane.read(cx).cwd().canonicalize().ok(),
             // A file's pane works in the file's folder.
-            Some(PaneView::Editor(pane)) => pane.read(cx).path().parent().map(Into::into),
-            Some(PaneView::Markdown(pane)) => pane.read(cx).path().parent().map(Into::into),
+            Some(pane @ (PaneView::Editor(_) | PaneView::Markdown(_))) => {
+                pane.file(cx).and_then(|path| path.parent().map(Into::into))
+            }
             _ => None,
         };
         dir.filter(|cwd| cwd.is_dir())
@@ -557,8 +587,8 @@ impl WorkspaceView {
 
     fn close_pane(&mut self, id: PaneId, window: &mut Window, cx: &mut Context<Self>) {
         // An editor with unsaved changes asks first, and closes itself once answered.
-        if let Some(PaneView::Editor(editor)) = self.pane(id).cloned()
-            && !editor.update(cx, |editor, cx| editor.request_close(cx))
+        if let Some(PaneView::Editor(tabs)) = self.pane(id).cloned()
+            && !tabs.update(cx, |tabs, cx| tabs.request_close(cx))
         {
             if self.model.focus(id) {
                 self.sync(window, cx);
@@ -632,10 +662,14 @@ impl WorkspaceView {
                     let mono = self.mono_font();
                     pane.update(cx, |pane, cx| pane.set_theme(ui, mono, cx))
                 }
-                PaneView::Editor(pane) => {
-                    let (mono, size) = (self.mono_font(), self.settings.font_size());
-                    pane.update(cx, |pane, cx| pane.set_style(ui, mono, size, cx));
-                    self.apply_editor_options(pane, cx);
+                PaneView::Editor(tabs) => {
+                    tabs.update(cx, |tabs, cx| tabs.set_theme(ui, cx));
+                    let editors: Vec<_> = tabs.read(cx).editors().cloned().collect();
+                    for editor in editors {
+                        let (mono, size) = (self.mono_font(), self.settings.font_size());
+                        editor.update(cx, |editor, cx| editor.set_style(ui, mono, size, cx));
+                        self.apply_editor_options(&editor, cx);
+                    }
                 }
             }
         }
@@ -989,6 +1023,12 @@ impl Render for WorkspaceView {
             }))
             .on_action(cx.listener(|view, _: &ClosePane, window, cx| {
                 let pane = view.model.active_pane();
+                // With several files open, Cmd+W closes the shown file, as editors do.
+                if let Some(PaneView::Editor(tabs)) = view.pane(pane).cloned()
+                    && tabs.read(cx).editors().count() > 1
+                {
+                    return tabs.update(cx, |tabs, cx| tabs.close_active(cx));
+                }
                 view.close_pane(pane, window, cx)
             }))
             .on_action(cx.listener(|view, _: &RestartSession, window, cx| {

@@ -458,6 +458,16 @@ pub const DEFS: &[Def] = &[
     def(
         Features,
         "Editor",
+        "group-editor-files",
+        "Group files into single editor pane",
+        "Open files in the active tab's editor pane as file tabs instead of new panes.",
+        Toggle,
+        "true",
+        App,
+    ),
+    def(
+        Features,
+        "Editor",
         "editor-autosave",
         "Save files automatically",
         "Save a file in the editor a second after the last change.",

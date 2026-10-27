@@ -1,7 +1,8 @@
 //! Files opened inside bareframe: Markdown in the viewer, other text in the code editor.
 use super::{PaneView, WorkspaceView, tools::open_externally};
 use crate::{
-    editor::{EditorEvent, EditorPane, LineNumbers, is_text_file},
+    editor::{EditorPane, LineNumbers, is_text_file},
+    editor_tabs::{EditorTabs, TabsEvent},
     markdown::{MarkdownEvent, MarkdownPane, Target, is_markdown},
 };
 use bareframe_core::workspace::{Axis, PaneId};
@@ -32,7 +33,8 @@ impl WorkspaceView {
         }
     }
 
-    /// A file already open is shown again rather than opened twice.
+    /// A file already open is shown again rather than opened twice. Otherwise it joins
+    /// the active tab's editor as a file tab (Settings can turn that off), or gets a pane.
     fn open_editor(
         &mut self,
         path: PathBuf,
@@ -42,24 +44,54 @@ impl WorkspaceView {
     ) {
         let path = path.canonicalize().unwrap_or(path);
         let open = self.panes.iter().find_map(|(id, (pane, _))| match pane {
-            PaneView::Editor(pane) if pane.read(cx).path() == path => Some(*id),
+            PaneView::Editor(tabs) => tabs
+                .update(cx, |tabs, cx| tabs.show_path(&path, cx))
+                .then_some(*id),
             _ => None,
         });
-        let id = match open {
+        let id = match open.or_else(|| self.group_for(&path, cx)) {
             Some(id) => {
+                if open.is_none()
+                    && let Some(PaneView::Editor(tabs)) = self.pane(id).cloned()
+                {
+                    let editor = self.new_editor(path, cx);
+                    tabs.update(cx, |tabs, cx| tabs.add(editor, cx));
+                }
                 self.model.focus(id);
                 id
             }
             None => {
                 let id = self.new_file_pane();
-                self.insert_editor_pane(id, path, window, cx);
+                self.insert_editor_pane(id, vec![path], 0, window, cx);
                 id
             }
         };
-        if let (Some(line), Some(PaneView::Editor(editor))) = (line, self.pane(id)) {
+        if let (Some(line), Some(PaneView::Editor(tabs))) = (line, self.pane(id))
+            && let Some(editor) = tabs.read(cx).active().cloned()
+        {
             editor.update(cx, |editor, cx| editor.go_to_line(line, cx));
         }
         self.sync(window, cx);
+    }
+
+    /// The active tab's editor pane a new file joins, when grouping is on. Markdown keeps a
+    /// pane of its own, since its rendered view replaces the whole pane.
+    fn group_for(&self, path: &Path, cx: &Context<Self>) -> Option<PaneId> {
+        if !self.settings.flag("group-editor-files") || is_markdown(path) {
+            return None;
+        }
+        self.model.active().layout.panes().into_iter().find(|id| {
+            matches!(self.pane(*id), Some(PaneView::Editor(tabs))
+                if tabs.read(cx).editors().all(|editor| !is_markdown(editor.read(cx).path())))
+        })
+    }
+
+    fn new_editor(&self, path: PathBuf, cx: &mut Context<Self>) -> gpui::Entity<EditorPane> {
+        let theme = self.theme();
+        let (mono, size) = (self.mono_font(), self.settings.font_size());
+        let editor = cx.new(|cx| EditorPane::new(path, theme, mono, size, cx));
+        self.apply_editor_options(&editor, cx);
+        editor
     }
 
     /// Beside the active pane or in a new tab, per Settings.
@@ -70,40 +102,56 @@ impl WorkspaceView {
         }
     }
 
+    /// An editor pane with `paths` as its file tabs, `active` shown.
     pub(super) fn insert_editor_pane(
         &mut self,
         id: PaneId,
-        path: PathBuf,
+        paths: Vec<PathBuf>,
+        active: usize,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let editors: Vec<_> = paths
+            .into_iter()
+            .map(|path| self.new_editor(path, cx))
+            .collect();
         let theme = self.theme();
-        let (mono, size) = (self.mono_font(), self.settings.font_size());
-        let pane = cx.new(|cx| EditorPane::new(path, theme, mono, size, cx));
-        self.apply_editor_options(&pane, cx);
+        let tabs = cx.new(|cx| {
+            let mut tabs = EditorTabs::new(theme);
+            for editor in editors {
+                tabs.add(editor, cx);
+            }
+            tabs.show_index(active);
+            tabs
+        });
         let events = cx.subscribe_in(
-            &pane,
+            &tabs,
             window,
             move |view, _, event, window, cx| match event {
-                EditorEvent::Changed => cx.notify(),
-                EditorEvent::Close => view.close_pane(id, window, cx),
-                EditorEvent::ShowRendered => view.swap_view(id, false, window, cx),
+                TabsEvent::Changed => cx.notify(),
+                TabsEvent::Close => view.close_pane(id, window, cx),
+                TabsEvent::ShowRendered => view.swap_view(id, false, window, cx),
             },
         );
         self.panes
-            .insert(id, (PaneView::Editor(pane), Some(events)));
+            .insert(id, (PaneView::Editor(tabs), Some(events)));
     }
 
     /// A Markdown file's two views trade places in the same pane.
     fn swap_view(&mut self, id: PaneId, raw: bool, window: &mut Window, cx: &mut Context<Self>) {
         let path = match self.pane(id) {
             Some(PaneView::Markdown(pane)) if raw => pane.read(cx).path().to_path_buf(),
-            Some(PaneView::Editor(pane)) if !raw => pane.read(cx).path().to_path_buf(),
+            Some(PaneView::Editor(tabs)) if !raw => {
+                let editor = tabs.read(cx).active().cloned();
+                editor
+                    .map(|editor| editor.read(cx).path().to_path_buf())
+                    .unwrap_or_default()
+            }
             _ => return,
         };
         self.panes.remove(&id);
         if raw {
-            self.insert_editor_pane(id, path, window, cx);
+            self.insert_editor_pane(id, vec![path], 0, window, cx);
         } else {
             self.insert_markdown_pane(id, path, window, cx);
         }
@@ -124,16 +172,16 @@ impl WorkspaceView {
     /// Before quitting or closing the window: the first editor with unsaved changes asks,
     /// and the quit waits for the answer. Returns whether nothing is left unsaved.
     pub fn confirm_unsaved(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        let editors: Vec<(PaneId, gpui::Entity<EditorPane>)> = self
+        let groups: Vec<(PaneId, gpui::Entity<EditorTabs>)> = self
             .panes
             .iter()
             .filter_map(|(id, (pane, _))| match pane {
-                PaneView::Editor(editor) => Some((*id, editor.clone())),
+                PaneView::Editor(tabs) => Some((*id, tabs.clone())),
                 _ => None,
             })
             .collect();
-        for (id, editor) in editors {
-            if !editor.update(cx, |editor, cx| editor.request_close(cx)) {
+        for (id, tabs) in groups {
+            if !tabs.update(cx, |tabs, cx| tabs.request_close(cx)) {
                 self.model.focus(id);
                 self.sync(window, cx);
                 return false;

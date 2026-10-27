@@ -22,9 +22,11 @@ pub enum SavedPane {
     Markdown {
         path: PathBuf,
     },
-    /// A file in the code editor. Unsaved changes are not kept.
+    /// Files in the code editor, as tabs; `active` is the one shown. Unsaved changes
+    /// are not kept.
     Editor {
-        path: PathBuf,
+        paths: Vec<PathBuf>,
+        active: usize,
     },
 }
 
@@ -106,12 +108,12 @@ pub fn encode(state: &SavedState) -> String {
                     escape(path.as_os_str().as_bytes())
                 )
             }
-            SavedPane::Editor { path } => {
-                format!(
-                    "pane {} editor {}",
-                    id.0,
-                    escape(path.as_os_str().as_bytes())
-                )
+            SavedPane::Editor { paths, active } => {
+                let paths: Vec<String> = paths
+                    .iter()
+                    .map(|path| escape(path.as_os_str().as_bytes()))
+                    .collect();
+                format!("pane {} editor {active} {}", id.0, paths.join(" "))
             }
         });
     }
@@ -198,11 +200,18 @@ pub fn decode(input: &str) -> Result<SavedState, String> {
                             unescape(next()?).ok_or_else(|| fail("bad path"))?,
                         )),
                     },
-                    "editor" => SavedPane::Editor {
-                        path: PathBuf::from(OsString::from_vec(
-                            unescape(next()?).ok_or_else(|| fail("bad path"))?,
-                        )),
-                    },
+                    "editor" => {
+                        let active = number_of(next()?).ok_or_else(|| fail("bad tab"))?;
+                        let mut paths = Vec::new();
+                        while let Ok(word) = next() {
+                            let path = unescape(word).ok_or_else(|| fail("bad path"))?;
+                            paths.push(PathBuf::from(OsString::from_vec(path)));
+                        }
+                        if paths.is_empty() {
+                            return Err(fail("no files"));
+                        }
+                        SavedPane::Editor { paths, active }
+                    }
                     other => return Err(fail(&format!("unknown pane kind `{other}`"))),
                 };
                 panes.push((id, pane));
@@ -388,7 +397,11 @@ mod tests {
         panes.push((
             fourth,
             SavedPane::Editor {
-                path: PathBuf::from("/tmp/src/main.rs"),
+                paths: vec![
+                    PathBuf::from("/tmp/src/main.rs"),
+                    PathBuf::from("/tmp/a b.rs"),
+                ],
+                active: 1,
             },
         ));
         assert!(ws.tabs.iter().any(|tab| tab.layout.contains(first)));
