@@ -3,8 +3,10 @@
 //!
 //! A refresh runs on its own, without the user asking, so a repository's config must not
 //! be able to start programs through it: every read switches off fsmonitor hooks,
-//! external diff tools and textconv filters. Commits run the repository's hooks as usual,
-//! since the user asked for them.
+//! external diff tools, textconv, submodules and clean/smudge filters other than
+//! git-lfs's. Commits run the repository's hooks and filters as usual, since the user
+//! asked for them. Paths are always literal, so a file named like pathspec magic
+//! (`:(glob)*`) can't widen what a revert or commit touches.
 use bareframe_core::git::{self, Change, Entry, FileDiff, Status};
 use std::{
     io::Write,
@@ -27,6 +29,7 @@ fn git(root: &Path) -> Command {
         .current_dir(root)
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_OPTIONAL_LOCKS", "0")
+        .env("GIT_LITERAL_PATHSPECS", "1")
         .args(["-c", "core.fsmonitor=false", "-c", "core.quotepath=off"])
         .arg("--no-pager")
         .stdin(Stdio::null());
@@ -56,6 +59,53 @@ fn run(root: &Path, args: &[&str]) -> Result<String, String> {
     run_with(root, args, &[0])
 }
 
+/// Filter commands git-lfs installs; they run git-lfs from PATH, which a repository can't
+/// change, and without them every LFS file would look modified.
+const LFS_FILTERS: [&str; 3] = [
+    "git-lfs clean -- %f",
+    "git-lfs smudge -- %f",
+    "git-lfs filter-process",
+];
+
+/// `-c` settings that empty every clean, smudge and process filter the repository's
+/// config names, except git-lfs's. Reading config runs nothing.
+fn without_filters(root: &Path) -> Vec<String> {
+    let listed = run_with(
+        root,
+        &["config", "-z", "--get-regexp", r"^filter\."],
+        &[0, 1],
+    )
+    .unwrap_or_default();
+    let mut args = Vec::new();
+    for entry in listed.split('\0') {
+        let Some((key, value)) = entry.split_once('\n') else {
+            continue;
+        };
+        let command = [".clean", ".smudge", ".process"]
+            .iter()
+            .any(|suffix| key.ends_with(suffix));
+        if command && !LFS_FILTERS.contains(&value.trim()) {
+            args.push("-c".to_owned());
+            args.push(format!("{key}="));
+        }
+    }
+    args
+}
+
+/// A read: filters other than git-lfs's are off and submodules are left alone.
+fn read(root: &Path, args: &[&str], ok: &[i32]) -> Result<String, String> {
+    let mut full: Vec<String> = without_filters(root);
+    if let Some((command, rest)) = args.split_first() {
+        full.push((*command).to_owned());
+        if matches!(*command, "status" | "diff") {
+            full.push("--ignore-submodules=all".to_owned());
+        }
+        full.extend(rest.iter().map(|arg| (*arg).to_owned()));
+    }
+    let full: Vec<&str> = full.iter().map(String::as_str).collect();
+    run_with(root, &full, ok)
+}
+
 /// The repository holding `dir`, if any.
 pub fn root_of(dir: &Path) -> Option<PathBuf> {
     let out = run(dir, &["rev-parse", "--show-toplevel"]).ok()?;
@@ -63,7 +113,7 @@ pub fn root_of(dir: &Path) -> Option<PathBuf> {
 }
 
 fn status(root: &Path) -> Result<Status, String> {
-    let out = run(
+    let out = read(
         root,
         &[
             "status",
@@ -72,6 +122,7 @@ fn status(root: &Path) -> Result<Status, String> {
             "--branch",
             "--untracked-files=all",
         ],
+        &[0],
     )?;
     Ok(git::parse_status(&out))
 }
@@ -87,7 +138,7 @@ pub struct Summary {
 pub fn summary(root: &Path) -> Result<Summary, String> {
     let status = status(root)?;
     let head = status.head.as_deref().unwrap_or(EMPTY_TREE);
-    let stats = run(
+    let stats = read(
         root,
         &[
             "diff",
@@ -98,6 +149,7 @@ pub fn summary(root: &Path) -> Result<Summary, String> {
             "--no-textconv",
             head,
         ],
+        &[0],
     )?;
     let (mut added, mut removed) = (0, 0);
     for stat in git::parse_numstat(&stats) {
@@ -119,12 +171,17 @@ pub fn summary(root: &Path) -> Result<Summary, String> {
 }
 
 /// Lines in a new text file; large or binary files count as none, as git's numstat does.
+/// Only a regular file is read (not a link to a device), and never past the cap.
 fn count_lines(path: &Path) -> u64 {
-    if std::fs::metadata(path).map_or(true, |metadata| metadata.len() > MAX_COUNTED) {
+    use std::io::Read;
+    if !std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_file()) {
         return 0;
     }
-    match std::fs::read(path) {
-        Ok(bytes) if !bytes.contains(&0) => {
+    let mut bytes = Vec::new();
+    let read = std::fs::File::open(path)
+        .and_then(|file| file.take(MAX_COUNTED + 1).read_to_end(&mut bytes));
+    match read {
+        Ok(_) if bytes.len() as u64 <= MAX_COUNTED && !bytes.contains(&0) => {
             let lines = bytes.iter().filter(|byte| **byte == b'\n').count();
             (lines + usize::from(bytes.last().is_some_and(|byte| *byte != b'\n'))) as u64
         }
@@ -168,11 +225,11 @@ pub fn review(root: &Path, base: &Base) -> Result<Review, String> {
     let mut numstat = vec!["diff", "--numstat", "-z"];
     numstat.extend(flags);
     numstat.push(&rev);
-    let stats = git::parse_numstat(&run(root, &numstat)?);
+    let stats = git::parse_numstat(&read(root, &numstat, &[0])?);
     let mut patch = vec!["diff"];
     patch.extend(flags);
     patch.push(&rev);
-    let diffs = git::parse_diff(&run(root, &patch)?);
+    let diffs = git::parse_diff(&read(root, &patch, &[0])?);
     let mut files = Vec::new();
     // Both listings come in git's path order, so the n-th patch is the n-th path.
     for (index, stat) in stats.iter().enumerate() {
@@ -194,7 +251,7 @@ pub fn review(root: &Path, base: &Base) -> Result<Review, String> {
         .filter(|entry| entry.change == Change::Untracked)
     {
         let diff = if files.len() < stats.len() + MAX_UNTRACKED {
-            run_with(
+            read(
                 root,
                 &[
                     "diff",
@@ -495,14 +552,36 @@ mod tests {
     }
 
     #[test]
+    fn paths_are_literal_and_lfs_filters_stay() {
+        let repo = Repo::new("literal");
+        repo.write("a.txt", "a\n");
+        repo.git(&["add", "a.txt"]);
+        repo.git(&["commit", "--quiet", "-m", "first"]);
+        repo.write("a.txt", "changed\n");
+        // A path spelled as pathspec magic matches only a file of that name.
+        assert!(commit(&repo.0, "nothing", &[":(glob)*".into()]).is_err());
+        assert_eq!(
+            std::fs::read_to_string(repo.0.join("a.txt")).unwrap(),
+            "changed\n"
+        );
+        repo.git(&["config", "filter.lfs.process", "git-lfs filter-process"]);
+        repo.git(&["config", "filter.other.clean", "cat"]);
+        assert_eq!(without_filters(&repo.0), ["-c", "filter.other.clean="]);
+    }
+
+    #[test]
     fn a_repository_cannot_run_programs_on_a_refresh() {
         let repo = Repo::new("hooks");
         let marker = repo.0.join("ran");
         let script = format!("touch '{}'", marker.display());
         repo.git(&["config", "core.fsmonitor", &script]);
         repo.git(&["config", "diff.external", &script]);
+        repo.write(".gitattributes", "* filter=evil\n");
         repo.write("a.txt", "a\n");
-        repo.git(&["add", "a.txt"]);
+        repo.git(&["add", "a.txt", ".gitattributes"]);
+        repo.git(&["commit", "--quiet", "-m", "first"]);
+        repo.git(&["config", "filter.evil.clean", &script]);
+        repo.git(&["config", "filter.evil.process", &script]);
         repo.write("a.txt", "b\n");
         summary(&repo.0).unwrap();
         review(&repo.0, &Base::Uncommitted).unwrap();
