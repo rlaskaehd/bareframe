@@ -224,6 +224,14 @@ pub const ACTIONS: &[Action] = &[
         Window,
     ),
     action("find_in_files", "Find in files", &["cmd+shift+f"], Window),
+    // Warp's ⇧⌘+ is Ghostty's font size key, so the review panel mirrors the tools
+    // panel's Cmd+\ on the other side instead.
+    action(
+        "toggle_code_review",
+        "Toggle code review",
+        &["cmd+shift+backslash"],
+        Window,
+    ),
     action("group_tab", "Add tab to new group", &["cmd+g"], Window),
     action(
         "ungroup_tab",

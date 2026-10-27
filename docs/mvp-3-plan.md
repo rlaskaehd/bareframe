@@ -181,6 +181,7 @@ Warp 화면: 상단 바 오른쪽에 `± +N −M` 버튼(초록·빨강). 누르
 | Commit | 패널 머리의 `Commit` 버튼: 메시지 입력 창, 변경 전체 또는 고른 파일을 `git add`·`git commit`. 저장소 상태(충돌·병합 중)면 막고 이유를 표시 |
 | 헝크 되돌리기 | diff의 헝크마다 되돌리기 버튼. 확인 후 해당 헝크만 작업 트리에서 되돌린다(`git apply -R`에 그 헝크 패치를 넘김). 편집기에 열린 파일이면 버퍼도 다시 읽는다 |
 | 제외 | Push·PR, 리뷰 코멘트·AI 컨텍스트, 헝크 단위 스테이징, 나란히 보기 |
+| 구현(3b-2) | `src/repo.rs`(git 실행, 테스트는 임시 저장소), `src/review.rs`(패널, 가변 높이 `list`), core `git.rs`(출력 파서). 단축키는 Warp의 `⇧⌘+`가 Ghostty 글자 크기와 겹쳐 `Cmd+Shift+\`. 새 파일 되돌리기는 `trash` 크레이트(NSFileManager)로 휴지통. 읽기 전용 갱신에서는 `core.fsmonitor`·외부 diff·textconv를 꺼 저장소 설정이 프로그램을 실행하지 못하게 했다. 브랜치 비교 중에는 되돌리기를 숨긴다 |
 
 ### B3. Code editor
 

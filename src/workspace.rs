@@ -4,6 +4,8 @@ use crate::{
     markdown::MarkdownPane,
     pane::{PaneEvent, TerminalPane},
     rename::RenameInput,
+    repo::Summary,
+    review::CodeReview,
     search::SearchPanel,
     settings_pane::SettingsPane,
     theme::{self, Theme, hsla},
@@ -24,6 +26,7 @@ use menu::ContextMenu;
 use sidebar::{SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_SHARE, SIDEBAR_MIN_WIDTH};
 use std::collections::HashMap;
 
+mod changes;
 mod clipboard;
 mod layout;
 mod menu;
@@ -146,6 +149,17 @@ pub struct WorkspaceView {
     _explorer_events: Subscription,
     global_search: Entity<SearchPanel>,
     _search_events: Subscription,
+    review: Entity<CodeReview>,
+    _review_events: Subscription,
+    review_open: bool,
+    review_width: f32,
+    resizing_review: bool,
+    /// The active pane's repository and the diff button's numbers.
+    repo: Option<(std::path::PathBuf, Summary)>,
+    /// The directory last looked up, so moving focus doesn't run git again.
+    repo_dir: Option<std::path::PathBuf>,
+    _repo_task: Option<gpui::Task<()>>,
+    _repo_watch: Option<(notify::RecommendedWatcher, gpui::Task<()>)>,
     /// Tabs being dragged in the sidebar; their rows show an empty slot meanwhile.
     dragging: Vec<TabId>,
     menu: Option<ContextMenu>,
@@ -200,6 +214,11 @@ impl WorkspaceView {
             cx.subscribe_in(&global_search, window, |view, _, event, window, cx| {
                 view.on_search_event(event, window, cx)
             });
+        let mono = settings.font_family().unwrap_or("Menlo").to_owned();
+        let review = cx.new(|_| CodeReview::new(theme, mono));
+        let review_events = cx.subscribe_in(&review, window, |view, _, event, window, cx| {
+            view.on_review_event(event, window, cx)
+        });
         let mut view = Self {
             model,
             panes: HashMap::new(),
@@ -221,6 +240,15 @@ impl WorkspaceView {
             _explorer_events: explorer_events,
             global_search,
             _search_events: search_events,
+            review,
+            _review_events: review_events,
+            review_open: false,
+            review_width: changes::REVIEW_DEFAULT_WIDTH,
+            resizing_review: false,
+            repo: None,
+            repo_dir: None,
+            _repo_task: None,
+            _repo_watch: None,
             dragging: Vec::new(),
             menu: None,
             clipboard_prompt: None,
@@ -278,6 +306,8 @@ impl WorkspaceView {
         self.tools_width = saved.tools_width;
         self.tools_open = saved.tools_open;
         self.update_tools(cx);
+        self.review_open = saved.review_open;
+        self.review_width = saved.review_width;
         let kinds: HashMap<PaneId, SavedPane> = saved.panes.into_iter().collect();
         let panes: Vec<PaneId> = self.model.panes().collect();
         for id in panes {
@@ -321,6 +351,8 @@ impl WorkspaceView {
             sidebar_width: self.sidebar_width,
             tools_open: self.tools_open,
             tools_width: self.tools_width,
+            review_open: self.review_open,
+            review_width: self.review_width,
             window: self.window_bounds,
         }
     }
@@ -375,8 +407,11 @@ impl WorkspaceView {
                     }
                     PaneEvent::TitleChanged => {
                         view.refresh_explorer_roots(cx);
+                        view.refresh_repo(false, cx);
                         cx.notify()
                     }
+                    // A command may have committed, checked out or edited files.
+                    PaneEvent::CommandFinished => view.refresh_repo(true, cx),
                 },
             );
         self.panes
@@ -461,6 +496,7 @@ impl WorkspaceView {
         }
         self.split_bounds.clear();
         self.refresh_explorer_roots(cx);
+        self.refresh_repo(false, cx);
         cx.notify();
     }
 
@@ -574,6 +610,9 @@ impl WorkspaceView {
         });
         self.global_search
             .update(cx, |search, cx| search.set_theme(ui, cx));
+        let mono = self.mono_font();
+        self.review
+            .update(cx, |review, cx| review.set_theme(ui, mono, cx));
         app::bind_keys(&self.settings, cx);
         cx.notify();
     }
@@ -592,7 +631,7 @@ impl WorkspaceView {
     }
 
     fn drag_divider(&mut self, event: &MouseMoveEvent, window: &Window, cx: &mut Context<Self>) {
-        if self.drag_tools_edge(event, window) {
+        if self.drag_tools_edge(event, window) || self.drag_review_edge(event, window) {
             cx.notify();
             return;
         }
@@ -728,6 +767,7 @@ impl WorkspaceView {
                     ),
             )
             .child(div().flex_1())
+            .children(self.render_diff_button(cx))
             .child(
                 div()
                     .id("open-settings")
@@ -848,6 +888,7 @@ impl Render for WorkspaceView {
                     view.resize = None;
                     view.resizing_sidebar = false;
                     view.resizing_tools = false;
+                    view.resizing_review = false;
                     if !view.dragging.is_empty() {
                         view.dragging.clear();
                         cx.notify();
@@ -855,6 +896,11 @@ impl Render for WorkspaceView {
                 }),
             )
             .on_action(cx.listener(|view, _: &ToggleSidebar, _, cx| view.toggle_sidebar(cx)))
+            .on_action(
+                cx.listener(|view, _: &ToggleCodeReview, window, cx| {
+                    view.toggle_review(window, cx)
+                }),
+            )
             .on_action(cx.listener(|view, _: &ToggleCommandPalette, window, cx| {
                 view.toggle_palette(window, cx)
             }))
@@ -1031,7 +1077,11 @@ impl Render for WorkspaceView {
                         this.child(self.render_tools(width, cx))
                             .child(self.render_tools_edge(cx))
                     })
-                    .child(div().flex_1().min_w_0().h_full().child(content)),
+                    .child(div().flex_1().min_w_0().h_full().child(content))
+                    .when(self.review_open, |this| {
+                        let width = self.review_shown_width(window);
+                        this.child(self.render_review(width, cx))
+                    }),
             )
     }
 }
@@ -1043,7 +1093,7 @@ fn column_width(width: f32, window: &Window, share: f32, min: f32) -> f32 {
         .max(min)
 }
 
-fn icon_button(
+pub(crate) fn icon_button(
     id: impl Into<gpui::ElementId>,
     label: &'static str,
     theme: &Theme,

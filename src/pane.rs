@@ -18,6 +18,8 @@ pub enum PaneEvent {
     /// The shell ended; the pane should close.
     Exited,
     TitleChanged,
+    /// The shell integration reported a command ending.
+    CommandFinished,
     /// The terminal waits for the user to allow or refuse a clipboard operation.
     Clipboard(ClipboardOperation, String),
 }
@@ -84,6 +86,9 @@ impl TerminalPane {
                             TerminalEventKind::TitleChanged(_)
                             | TerminalEventKind::WorkingDirectoryChanged(_) => {
                                 cx.emit(PaneEvent::TitleChanged)
+                            }
+                            TerminalEventKind::CommandFinished { .. } => {
+                                cx.emit(PaneEvent::CommandFinished)
                             }
                             _ => {}
                         }

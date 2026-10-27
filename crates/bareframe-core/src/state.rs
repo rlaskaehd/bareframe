@@ -32,6 +32,9 @@ pub struct SavedState {
     pub sidebar_width: f32,
     pub tools_open: bool,
     pub tools_width: f32,
+    /// The Code review panel on the window's right.
+    pub review_open: bool,
+    pub review_width: f32,
     /// Origin and size in points.
     pub window: Option<[f32; 4]>,
 }
@@ -50,6 +53,11 @@ pub fn encode(state: &SavedState) -> String {
         "tools {} {}",
         flag(state.tools_open),
         state.tools_width
+    ));
+    out.push(format!(
+        "review {} {}",
+        flag(state.review_open),
+        state.review_width
     ));
     out.push(format!("active {}", state.workspace.active_tab));
     for group in &state.workspace.groups {
@@ -108,6 +116,7 @@ pub fn decode(input: &str) -> Result<SavedState, String> {
     let mut window = None;
     let (mut sidebar_open, mut sidebar_width) = (true, 248.0);
     let (mut tools_open, mut tools_width) = (false, 260.0);
+    let (mut review_open, mut review_width) = (false, 520.0);
     let mut active = 0;
     let (mut groups, mut tabs, mut panes) = (Vec::new(), Vec::new(), Vec::new());
     for (number, line) in lines {
@@ -130,6 +139,10 @@ pub fn decode(input: &str) -> Result<SavedState, String> {
             "tools" => {
                 tools_open = flag_of(next()?).ok_or_else(|| fail("bad tools"))?;
                 tools_width = size_of(next()?).ok_or_else(|| fail("bad width"))?;
+            }
+            "review" => {
+                review_open = flag_of(next()?).ok_or_else(|| fail("bad review"))?;
+                review_width = size_of(next()?).ok_or_else(|| fail("bad width"))?;
             }
             "active" => active = number_of(next()?).ok_or_else(|| fail("bad active tab"))?,
             "group" => groups.push(Group {
@@ -190,6 +203,8 @@ pub fn decode(input: &str) -> Result<SavedState, String> {
         sidebar_width,
         tools_open,
         tools_width,
+        review_open,
+        review_width,
         window,
     })
 }
@@ -361,6 +376,8 @@ mod tests {
             sidebar_width: 300.5,
             tools_open: true,
             tools_width: 280.0,
+            review_open: true,
+            review_width: 600.0,
             window: Some([10.0, 20.0, 1040.0, 720.0]),
         }
     }

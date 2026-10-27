@@ -413,6 +413,16 @@ pub const DEFS: &[Def] = &[
     ),
     def(
         Features,
+        "Code review",
+        "code-review-button",
+        "Show the code review button",
+        "Show the +N −M button in the top bar when the active pane's repository has changes.",
+        Toggle,
+        "true",
+        App,
+    ),
+    def(
+        Features,
         "Files",
         "open-markdown-in-viewer",
         "Open Markdown files in the Markdown viewer",

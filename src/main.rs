@@ -6,6 +6,8 @@ mod explorer;
 mod markdown;
 mod pane;
 mod rename;
+mod repo;
+mod review;
 mod search;
 mod settings_pane;
 mod terminal;

@@ -66,6 +66,7 @@ actions!(
         JumpToPreviousPrompt,
         JumpToNextPrompt,
         ToggleCommandPalette,
+        ToggleCodeReview,
     ]
 );
 
@@ -112,6 +113,7 @@ pub fn keymap_action(name: &str) -> Option<Box<dyn gpui::Action>> {
         "decrease_font_size:1" => Box::new(DecreaseFontSize),
         "reset_font_size" => Box::new(ResetFontSize),
         "toggle_command_palette" => Box::new(ToggleCommandPalette),
+        "toggle_code_review" => Box::new(ToggleCodeReview),
         "open_config" => Box::new(OpenSettings),
         "reload_config" => Box::new(ReloadSettings),
         "toggle_fullscreen" => Box::new(ToggleFullscreen),
@@ -369,6 +371,7 @@ pub fn run(config: LaunchConfig, restore: bool) {
                     MenuItem::separator(),
                     MenuItem::action("Toggle Tabs Sidebar", ToggleSidebar),
                     MenuItem::action("Toggle Tools Panel", ToggleToolsPanel),
+                    MenuItem::action("Toggle Code Review", ToggleCodeReview),
                     MenuItem::action("Project Explorer", ShowProjectExplorer),
                     MenuItem::action("Global Search", ShowGlobalSearch),
                     MenuItem::separator(),
@@ -437,6 +440,10 @@ pub fn run(config: LaunchConfig, restore: bool) {
                 eprintln!("bareframe: could not open window: {error}");
                 cx.quit();
             }
-            cx.activate(true);
+            // A validation run started with BAREFRAME_BACKGROUND stays behind the user's
+            // windows, so checking a build doesn't take their keyboard.
+            if !(is_validation_instance() && std::env::var_os("BAREFRAME_BACKGROUND").is_some()) {
+                cx.activate(true);
+            }
         });
 }
