@@ -2,7 +2,6 @@
 //! changes on disk, and the notices asking about unsaved or outside changes.
 use super::{EditorEvent, EditorPane};
 use crate::{
-    theme::{self, hsla},
     watch::{Watch, watch_file},
     widgets,
 };
@@ -206,18 +205,9 @@ impl EditorPane {
             ),
         };
         Some(
-            div()
-                .flex()
-                .flex_none()
+            super::bar(theme)
                 .items_center()
                 .gap_2()
-                .px_3()
-                .py_1()
-                .border_b_1()
-                .border_color(hsla(theme.border))
-                .bg(hsla(theme.tab_active))
-                .font_family(theme::UI_FONT)
-                .text_size(px(12.0))
                 .child(div().flex_1().min_w_0().truncate().child(message))
                 .children(buttons),
         )

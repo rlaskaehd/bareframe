@@ -123,20 +123,10 @@ impl WorkspaceView {
             (Some(_), false) => theme.text_muted,
         };
         Some(
-            div()
-                .id("diff-button")
-                .flex()
-                .items_center()
+            super::top_bar::bar_chip(theme, "diff-button")
                 .gap_1()
-                .mr_2()
-                .px_2()
-                .h(px(24.0))
-                .rounded_md()
-                .text_size(px(12.0))
-                .font_weight(gpui::FontWeight::SEMIBOLD)
                 .when(self.repo.is_none(), |this| this.opacity(0.5))
                 .when(self.review_open, |this| this.bg(hsla(theme.tab_active)))
-                .hover(|style| style.bg(hsla(theme.tab_hover)))
                 .on_click(cx.listener(|view, _, window, cx| {
                     cx.stop_propagation();
                     view.toggle_review(window, cx)

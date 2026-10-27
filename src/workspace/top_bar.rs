@@ -1,7 +1,12 @@
 //! The bar along the window's top, in place of the system title bar.
 use super::WorkspaceView;
-use crate::{app, theme::hsla};
-use gpui::{Context, MouseButton, WindowControlArea, div, prelude::*, px};
+use crate::{
+    app,
+    theme::{Theme, hsla},
+};
+use gpui::{
+    Context, Div, ElementId, MouseButton, Stateful, WindowControlArea, div, prelude::*, px,
+};
 
 impl WorkspaceView {
     /// Full-width bar under the traffic lights. The middle is reserved for a search box.
@@ -42,15 +47,7 @@ impl WorkspaceView {
             .border_b_1()
             .border_color(hsla(theme.border))
             .child(
-                div()
-                    .id("toggle-sidebar")
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .size(px(26.0))
-                    .rounded_md()
-                    .when(open, |this| this.bg(hsla(theme.tab_active)))
-                    .hover(|style| style.bg(hsla(theme.tab_hover)))
+                bar_button(theme, "toggle-sidebar", open)
                     .on_click(cx.listener(|view, _, _, cx| {
                         cx.stop_propagation();
                         view.toggle_sidebar(cx)
@@ -62,18 +59,10 @@ impl WorkspaceView {
                     })),
             )
             .child(
-                div()
-                    .id("toggle-tools")
+                bar_button(theme, "toggle-tools", self.tools_open)
                     // Hidden when Settings has switched every tool off.
                     .when(self.shown_tool().is_none(), |this| this.invisible())
                     .ml_1()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .size(px(26.0))
-                    .rounded_md()
-                    .when(self.tools_open, |this| this.bg(hsla(theme.tab_active)))
-                    .hover(|style| style.bg(hsla(theme.tab_hover)))
                     .on_click(cx.listener(|view, _, window, cx| {
                         cx.stop_propagation();
                         view.toggle_tools(window, cx)
@@ -93,14 +82,7 @@ impl WorkspaceView {
             .children(self.render_update_chip(cx))
             .children(self.render_diff_button(cx))
             .child(
-                div()
-                    .id("open-settings")
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .size(px(26.0))
-                    .rounded_md()
-                    .hover(|style| style.bg(hsla(theme.tab_hover)))
+                bar_button(theme, "open-settings", false)
                     .on_click(cx.listener(|view, _, window, cx| {
                         cx.stop_propagation();
                         view.open_settings(window, cx)
@@ -127,20 +109,10 @@ impl WorkspaceView {
             State::Failed(error) => (format!("Update failed: {error}"), theme.text_muted),
         };
         Some(
-            div()
-                .id("update-chip")
-                .flex()
-                .items_center()
-                .mr_2()
-                .px_2()
-                .h(px(24.0))
+            bar_chip(theme, "update-chip")
                 .max_w(px(360.0))
                 .overflow_hidden()
-                .rounded_md()
-                .text_size(px(12.0))
-                .font_weight(gpui::FontWeight::SEMIBOLD)
                 .text_color(hsla(color))
-                .hover(|style| style.bg(hsla(theme.tab_hover)))
                 .on_click(move |_, _, cx| {
                     cx.stop_propagation();
                     updates.update(cx, |updates, cx| match updates.state {
@@ -151,6 +123,34 @@ impl WorkspaceView {
                 .child(div().truncate().child(label)),
         )
     }
+}
+
+/// A square icon button on the bar, shaded while what it toggles is open.
+fn bar_button(theme: &Theme, id: impl Into<ElementId>, on: bool) -> Stateful<Div> {
+    div()
+        .id(id)
+        .flex()
+        .items_center()
+        .justify_center()
+        .size(px(26.0))
+        .rounded_md()
+        .when(on, |this| this.bg(hsla(theme.tab_active)))
+        .hover(|style| style.bg(hsla(theme.tab_hover)))
+}
+
+/// A labelled button on the bar's right, as the update note and the diff button.
+pub(super) fn bar_chip(theme: &Theme, id: impl Into<ElementId>) -> Stateful<Div> {
+    div()
+        .id(id)
+        .flex()
+        .items_center()
+        .mr_2()
+        .px_2()
+        .h(px(24.0))
+        .rounded_md()
+        .text_size(px(12.0))
+        .font_weight(gpui::FontWeight::SEMIBOLD)
+        .hover(|style| style.bg(hsla(theme.tab_hover)))
 }
 
 /// Outline of a window with its left panel filled, drawn so no icon font is needed.

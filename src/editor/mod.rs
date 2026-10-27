@@ -714,6 +714,20 @@ impl Render for EditorPane {
 }
 
 /// Cmd+Left: to the first non-blank character, or to column 0 if already there.
+/// A strip across the top of the editor, as the find bar and file notices use.
+fn bar(theme: &Theme) -> gpui::Div {
+    div()
+        .flex()
+        .flex_none()
+        .px_3()
+        .py_1()
+        .border_b_1()
+        .border_color(hsla(theme.border))
+        .bg(hsla(theme.tab_active))
+        .font_family(crate::theme::UI_FONT)
+        .text_size(gpui::px(12.0))
+}
+
 fn line_start(buffer: &Buffer, position: Position) -> Position {
     let indent = buffer.indent(position.line).len();
     let column = if position.column == indent { 0 } else { indent };

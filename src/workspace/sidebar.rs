@@ -270,13 +270,7 @@ impl WorkspaceView {
                     .h(px(40.0))
                     .pl_3()
                     .pr_2()
-                    .child(
-                        gpui::svg()
-                            .path("icons/search.svg")
-                            .flex_shrink_0()
-                            .size(px(14.0))
-                            .text_color(hsla(theme.text_muted)),
-                    )
+                    .child(widgets::icon(theme, "icons/search.svg"))
                     .child(
                         div()
                             .id("tab-search")

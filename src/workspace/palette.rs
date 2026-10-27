@@ -267,13 +267,7 @@ impl WorkspaceView {
                             .h(px(40.0))
                             .border_b_1()
                             .border_color(hsla(theme.border))
-                            .child(
-                                gpui::svg()
-                                    .path("icons/search.svg")
-                                    .flex_shrink_0()
-                                    .size(px(14.0))
-                                    .text_color(hsla(theme.text_muted)),
-                            )
+                            .child(widgets::icon(theme, "icons/search.svg"))
                             .child(
                                 div()
                                     .relative()
