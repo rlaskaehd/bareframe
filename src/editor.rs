@@ -1,7 +1,10 @@
 //! Warp's code editor, first step: a text file in a pane with a cursor and selection, the
 //! usual movement and editing keys, undo, clipboard, Korean input through the system
 //! input method, saving, and guarding unsaved changes. Syntax colors and find come next.
-use crate::theme::{self, Theme, hsla};
+use crate::{
+    syntax::{self, LineSyntax, Syntax},
+    theme::{self, Theme, hsla},
+};
 use bareframe_core::text::{Buffer, LineEnding, Position};
 use futures::StreamExt;
 use gpui::{
@@ -111,6 +114,11 @@ pub struct EditorPane {
     /// "Don't Save" was chosen: closing no longer asks.
     discarded: bool,
     layout: Option<Layout>,
+    /// The grammar for this file's colors, if one is bundled.
+    language: Option<&'static str>,
+    /// Colors per line from the last parse; lines edited since have none until the next.
+    syntax: Vec<LineSyntax>,
+    _highlight: Option<Task<()>>,
     _watch: Option<(RecommendedWatcher, Task<()>)>,
 }
 
@@ -169,9 +177,14 @@ impl EditorPane {
             notice: error.map(Notice::Error),
             discarded: false,
             layout: None,
+            language: None,
+            syntax: Vec::new(),
+            _highlight: None,
             _watch: None,
         };
+        editor.language = syntax::language_for(&editor.path);
         editor._watch = editor.watch(cx);
+        editor.highlight(cx);
         editor
     }
 
@@ -255,7 +268,18 @@ impl EditorPane {
             return range.start;
         }
         let was_dirty = self.buffer.is_dirty();
+        let (first, last) = (
+            range.start.min(range.end).line,
+            range.start.max(range.end).line,
+        );
         let end = self.buffer.replace(range, text, Instant::now());
+        // The edited lines lose their colors until the next parse; the others keep theirs.
+        if last < self.syntax.len() {
+            let fresh = end.line - first + 1;
+            self.syntax
+                .splice(first..=last, std::iter::repeat_n(Vec::new(), fresh));
+        }
+        self.highlight(cx);
         self.anchor = end;
         self.head = end;
         self.marked = None;
@@ -294,16 +318,32 @@ impl EditorPane {
 
     fn shape(&self, line: usize, window: &mut Window) -> ShapedLine {
         let text = self.buffer.line(line).to_owned();
-        let run = TextRun {
-            len: text.len(),
+        let base = TextRun {
+            len: 0,
             font: self.base_font(),
             color: hsla(self.theme.terminal_foreground),
             background_color: None,
             underline: None,
             strikethrough: None,
         };
-        let runs = match &self.marked {
-            Some(marked) if marked.start.line <= line && line <= marked.end.line => {
+        // Colors from a parse of older text may no longer fit; those are dropped.
+        let colors: Vec<(Range<usize>, gpui::Hsla)> = self
+            .syntax
+            .get(line)
+            .into_iter()
+            .flatten()
+            .filter(|(range, _)| {
+                range.end <= text.len()
+                    && text.is_char_boundary(range.start)
+                    && text.is_char_boundary(range.end)
+            })
+            .map(|(range, syntax)| (range.clone(), hsla(syntax_color(self.theme, *syntax))))
+            .collect();
+        let marked = self
+            .marked
+            .as_ref()
+            .filter(|marked| marked.start.line <= line && line <= marked.end.line)
+            .map(|marked| {
                 let start = if marked.start.line == line {
                     marked.start.column
                 } else {
@@ -314,34 +354,77 @@ impl EditorPane {
                 } else {
                     text.len()
                 };
-                [
-                    TextRun {
-                        len: start,
-                        ..run.clone()
-                    },
-                    TextRun {
-                        len: end - start,
-                        underline: Some(UnderlineStyle {
-                            color: Some(run.color),
-                            thickness: px(1.0),
-                            wavy: false,
-                        }),
-                        ..run.clone()
-                    },
-                    TextRun {
-                        len: text.len() - end,
-                        ..run
-                    },
-                ]
-                .into_iter()
-                .filter(|run| run.len > 0)
-                .collect()
-            }
-            _ => vec![run],
-        };
+                start..end
+            });
+        let mut cuts = vec![0, text.len()];
+        cuts.extend(
+            colors
+                .iter()
+                .flat_map(|(range, _)| [range.start, range.end]),
+        );
+        cuts.extend(marked.iter().flat_map(|range| [range.start, range.end]));
+        cuts.sort_unstable();
+        cuts.dedup();
+        let mut runs: Vec<TextRun> = cuts
+            .windows(2)
+            .map(|pair| {
+                let (at, len) = (pair[0], pair[1] - pair[0]);
+                let color = colors
+                    .iter()
+                    .find(|(range, _)| range.contains(&at))
+                    .map_or(base.color, |(_, color)| *color);
+                let underline = marked
+                    .as_ref()
+                    .filter(|range| range.contains(&at))
+                    .map(|_| UnderlineStyle {
+                        color: Some(color),
+                        thickness: px(1.0),
+                        wavy: false,
+                    });
+                TextRun {
+                    len,
+                    color,
+                    underline,
+                    ..base.clone()
+                }
+            })
+            .collect();
+        if runs.is_empty() {
+            runs.push(base);
+        }
         window
             .text_system()
             .shape_line(text.into(), px(self.font_size), &runs, None)
+    }
+
+    /// Parses the file again in the background a moment after the last change.
+    fn highlight(&mut self, cx: &mut Context<Self>) {
+        let Some(language) = self.language else {
+            return;
+        };
+        // Joined with plain line breaks, as the line vector counts them.
+        let text = self.buffer.lines().collect::<Vec<_>>().join("\n");
+        if text.len() > syntax::MAX_HIGHLIGHT {
+            self.syntax.clear();
+            return;
+        }
+        self._highlight = Some(cx.spawn(async move |editor, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(60))
+                .await;
+            let lines = cx
+                .background_executor()
+                .spawn(async move { syntax::highlight(language, &text) })
+                .await;
+            editor
+                .update(cx, |editor, cx| {
+                    if let Some(lines) = lines {
+                        editor.syntax = lines;
+                        cx.notify();
+                    }
+                })
+                .ok();
+        }));
     }
 
     fn x_of(&self, position: Position, window: &mut Window) -> Pixels {
@@ -499,6 +582,7 @@ impl EditorPane {
         self.head = self.buffer.clamp(self.head);
         self.marked = None;
         self.notice = None;
+        self.highlight(cx);
         cx.emit(EditorEvent::Changed);
         cx.notify();
     }
@@ -1161,6 +1245,7 @@ impl Render for EditorPane {
                 if !e.read_only
                     && let Some(range) = e.buffer.undo()
                 {
+                    e.highlight(cx);
                     e.anchor = range.start;
                     e.select(range.end, true, cx);
                     cx.emit(EditorEvent::Changed);
@@ -1170,6 +1255,7 @@ impl Render for EditorPane {
                 if !e.read_only
                     && let Some(range) = e.buffer.redo()
                 {
+                    e.highlight(cx);
                     e.select(range.end, false, cx);
                     cx.emit(EditorEvent::Changed);
                 }
@@ -1261,6 +1347,19 @@ pub fn key_bindings() -> Vec<gpui::KeyBinding> {
         KeyBinding::new("cmd-shift-z", Redo, context),
         KeyBinding::new("cmd-s", Save, context),
     ]
+}
+
+/// The terminal palette's colors, so code looks like the rest of the theme.
+fn syntax_color(theme: &Theme, syntax: Syntax) -> u32 {
+    match syntax {
+        Syntax::Keyword => theme.palette[5],
+        Syntax::String => theme.palette[2],
+        Syntax::Comment => theme.text_muted,
+        Syntax::Number => theme.palette[3],
+        Syntax::Function => theme.palette[4],
+        Syntax::Type => theme.palette[6],
+        Syntax::Tag | Syntax::Builtin => theme.palette[1],
+    }
 }
 
 #[cfg(test)]

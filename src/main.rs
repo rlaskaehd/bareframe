@@ -11,6 +11,7 @@ mod repo;
 mod review;
 mod search;
 mod settings_pane;
+mod syntax;
 mod terminal;
 mod theme;
 mod workspace;

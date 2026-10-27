@@ -22,6 +22,30 @@ futures = "0.3"
 grep = "0.4"
 pulldown-cmark = { version = "0.13", default-features = false }
 trash = "5"
+# Tree-sitter grammars for the editor's colors; only MIT-licensed ones are enabled.
+arborium = { version = "2.18", default-features = false, features = [
+    "lang-bash",
+    "lang-c",
+    "lang-cpp",
+    "lang-css",
+    "lang-dockerfile",
+    "lang-go",
+    "lang-html",
+    "lang-java",
+    "lang-javascript",
+    "lang-json",
+    "lang-lua",
+    "lang-markdown",
+    "lang-python",
+    "lang-ruby",
+    "lang-rust",
+    "lang-sql",
+    "lang-swift",
+    "lang-toml",
+    "lang-tsx",
+    "lang-typescript",
+    "lang-yaml",
+] }
 # Already built for GPUI; used here only to read a picture's size from its header.
 image = { version = "0.25", default-features = false }
 
