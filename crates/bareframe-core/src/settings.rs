@@ -392,10 +392,10 @@ pub const DEFS: &[Def] = &[
         "Terminal",
         "prompt-position",
         "Prompt position",
-        "Where the prompt starts: at the bottom of the screen as in Warp, or at the top as in \
-         other terminals. Applies to terminals opened afterwards; zsh only.",
-        Choice(&[("bottom", "Bottom"), ("top", "Top")]),
-        "bottom",
+        "Where the prompt starts: at the top of the screen as in most terminals, or at the \
+         bottom as in Warp. Applies to terminals opened afterwards; zsh only.",
+        Choice(&[("top", "Top"), ("bottom", "Bottom")]),
+        "top",
         App,
     ),
     def(

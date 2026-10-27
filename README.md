@@ -2,7 +2,7 @@
 
 Rust + GPUI + libghostty로 만든 macOS용 개발 워크스페이스 터미널.
 
-- Ghostty 터미널 엔진, 세로 탭 사이드바와 탭 그룹, 자유로운 분할, 맨 아래에서 시작하는 프롬프트
+- Ghostty 터미널 엔진, 세로 탭 사이드바와 탭 그룹, 자유로운 분할, 맨 아래에서 시작하는 프롬프트(Settings에서 고름)
 - 프로젝트 탐색기, 전역 검색, 커맨드 팔레트
 - 코드 편집기(tree-sitter 문법 색, 언어 서버), Markdown 뷰어(Mermaid), Code review(헝크 되돌리기, 커밋)
 - Settings 화면과 Ghostty 형식 설정 파일, 바꿀 수 있는 단축키, GitHub Releases 자동 업데이트

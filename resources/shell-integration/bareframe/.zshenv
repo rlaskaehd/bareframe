@@ -6,14 +6,15 @@
 _bareframe_prompt=$BAREFRAME_PROMPT
 'builtin' 'unset' 'BAREFRAME_PROMPT'
 
-# As in Warp, the prompt starts at the bottom of the screen and output scrolls up from
-# there. Blank lines, not a cursor jump, take it down at startup and after a clear: a
-# terminal starts before its pane has its final size, and when it grows Ghostty keeps the
-# prompt at the bottom only by pulling rows down from history, so history must hold
-# enough of them for the tallest window. Before each other prompt the cursor just drops
-# to the last row. Ctrl+L (which Cmd+K also sends) clears the same way. Settings can put
-# the prompt at the top instead (BAREFRAME_PROMPT=top), as other terminals have it.
-if [[ -o 'interactive' && $_bareframe_prompt != top ]]; then
+# With Settings' prompt position at Bottom (BAREFRAME_PROMPT=bottom), as in Warp, the
+# prompt starts at the bottom of the screen and output scrolls up from there. Blank lines,
+# not a cursor jump, take it down at startup and after a clear: a terminal starts before
+# its pane has its final size, and when it grows Ghostty keeps the prompt at the bottom
+# only by pulling rows down from history, so history must hold enough of them for the
+# tallest window. Before each other prompt the cursor just drops
+# to the last row. Ctrl+L (which Cmd+K also sends) clears the same way. Otherwise the
+# prompt starts at the top, as in other terminals.
+if [[ -o 'interactive' && $_bareframe_prompt == bottom ]]; then
     _bareframe_pad() { 'builtin' 'print' -n -- ${(pl:200::\n:)} }
     _bareframe_bottom() {
         if [[ -n $_bareframe_cleared ]]; then
