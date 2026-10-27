@@ -6,7 +6,7 @@ use super::{Explorer, ExplorerEvent, file_name};
 use crate::{
     file_icons::{self, FileIcon},
     text_field::{TextField, TextFieldEvent},
-    theme::{self, Theme, hsla},
+    theme::{Theme, hsla},
     widgets,
 };
 use gpui::{Context, Entity, Subscription, Window, div, prelude::*, px};
@@ -42,21 +42,13 @@ impl Render for DraggedEntry {
         } else {
             file_icons::for_path(&self.path)
         };
-        div()
+        widgets::lifted(theme)
             .flex()
             .items_center()
             .gap(px(6.0))
             .px_2()
             .py_1()
-            .rounded_md()
-            .bg(hsla(theme.tab_active))
-            .border_1()
-            .border_color(hsla(theme.accent).opacity(0.6))
-            .shadow_lg()
-            .opacity(0.92)
-            .font_family(theme::UI_FONT)
             .text_size(px(13.0))
-            .text_color(hsla(theme.text))
             .child(widgets::file_icon(theme, icon))
             .child(file_name(&self.path))
     }
@@ -181,17 +173,7 @@ impl Explorer {
                 .pl(px(8.0 + super::INDENT * depth as f32 + 12.0))
                 .pr_2()
                 .child(widgets::file_icon(theme, icon))
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .px_1()
-                        .rounded_sm()
-                        .border_1()
-                        .border_color(hsla(theme.accent))
-                        .bg(hsla(theme.terminal_background))
-                        .child(editing.input.clone()),
-                )
+                .child(name_field(theme, editing.input.clone()))
                 .into_any_element(),
         )
     }
@@ -202,6 +184,19 @@ impl Explorer {
             theme: self.theme,
         }
     }
+}
+
+/// The box around the field a name is typed in.
+pub(super) fn name_field(theme: &Theme, input: Entity<TextField>) -> gpui::Div {
+    div()
+        .flex_1()
+        .min_w_0()
+        .px_1()
+        .rounded_sm()
+        .border_1()
+        .border_color(hsla(theme.accent))
+        .bg(hsla(theme.terminal_background))
+        .child(input)
 }
 
 /// A name for something inside a folder: one path component, nothing that would reach out

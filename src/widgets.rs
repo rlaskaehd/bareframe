@@ -1,6 +1,6 @@
 //! Small pieces of UI shared across panels: buttons, tree marks, icons, diff counts and
 //! key caps.
-use crate::theme::{Theme, hsla};
+use crate::theme::{self, Theme, hsla};
 use bareframe_core::keymap::Trigger;
 use gpui::{AnyElement, Div, ElementId, Stateful, div, prelude::*, px};
 
@@ -35,6 +35,19 @@ pub fn ghost_button(
         .text_color(hsla(theme.text_muted))
         .hover(|style| style.bg(hsla(theme.tab_hover)).text_color(hsla(theme.text)))
         .child(label.into())
+}
+
+/// The card that follows the cursor while something is dragged.
+pub fn lifted(theme: &Theme) -> gpui::Div {
+    div()
+        .rounded_md()
+        .bg(hsla(theme.tab_active))
+        .border_1()
+        .border_color(hsla(theme.accent).opacity(0.6))
+        .shadow_lg()
+        .opacity(0.92)
+        .font_family(theme::UI_FONT)
+        .text_color(hsla(theme.text))
 }
 
 /// A small square button holding a glyph, as the × and ⋮ on tabs and pane headers.

@@ -5,7 +5,10 @@ use super::{
     WorkspaceView,
     sidebar::{tab_label, terminal_icon},
 };
-use crate::theme::{self, Theme, hsla};
+use crate::{
+    theme::{Theme, hsla},
+    widgets,
+};
 use bareframe_core::{
     layout::{Direction, PaneId},
     workspace::{GroupId, TabId},
@@ -25,7 +28,7 @@ pub(super) struct DraggedPane {
 
 impl Render for DraggedPane {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        lifted(self.theme)
+        widgets::lifted(self.theme)
             .px(px(12.0))
             .py(px(6.0))
             .text_size(px(12.0))
@@ -51,7 +54,7 @@ impl Render for DraggedTab {
         let theme = self.theme;
         // Same padding as a row, so the card stays where it was grabbed.
         div().w(px(self.width)).px(px(6.0)).py(px(3.0)).child(
-            lifted(theme)
+            widgets::lifted(theme)
                 .flex()
                 .items_center()
                 .gap(px(10.0))
@@ -61,19 +64,6 @@ impl Render for DraggedTab {
                 .child(tab_label(theme, self.title.clone(), self.subtitle.clone())),
         )
     }
-}
-
-/// The card that follows the cursor.
-fn lifted(theme: &Theme) -> gpui::Div {
-    div()
-        .rounded_md()
-        .bg(hsla(theme.tab_active))
-        .border_1()
-        .border_color(hsla(theme.accent).opacity(0.6))
-        .shadow_lg()
-        .opacity(0.92)
-        .font_family(theme::UI_FONT)
-        .text_color(hsla(theme.text))
 }
 
 /// The side of `bounds` whose edge is nearest `position`.

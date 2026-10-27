@@ -449,17 +449,7 @@ impl Explorer {
             }))
             .child(widgets::file_icon(theme, icon))
             .map(|this| match renaming {
-                Some(input) => this.child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .px_1()
-                        .rounded_sm()
-                        .border_1()
-                        .border_color(hsla(theme.accent))
-                        .bg(hsla(theme.terminal_background))
-                        .child(input),
-                ),
+                Some(input) => this.child(edit::name_field(theme, input)),
                 None => this.child(div().truncate().child(row.name)),
             })
             // A root stays where it is; everything below it can be dragged.
