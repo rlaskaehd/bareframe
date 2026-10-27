@@ -25,13 +25,14 @@ fn fonts() -> Option<&'static NativeFontContext> {
         .as_ref()
 }
 
-/// The diagram in `source` as SVG, in Mermaid's dark or default theme.
+/// The diagram in `source` as SVG, in Mermaid's dark or neutral theme.
 ///
 /// Labels keep Mermaid's HTML layout, then merman's resvg-safe pass turns them into plain
 /// SVG text: GPUI draws SVG with resvg, which shows no HTML. (merman's own SVG-text labels
 /// wrap when measured but not when written, so long labels spilled out of their boxes.)
 pub fn render(source: &str, dark: bool) -> Result<String, String> {
-    let theme = if dark { "dark" } else { "default" };
+    // Mermaid's gray "neutral" sits with the ivory light theme better than its purple default.
+    let theme = if dark { "dark" } else { "neutral" };
     let mut environment = SvgEnvironment::deterministic();
     let mut family = String::new();
     if let Some(fonts) = fonts()

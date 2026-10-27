@@ -29,13 +29,13 @@ impl Render for DraggedTab {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         let theme = self.theme;
         // Same padding as a row, so the card stays where it was grabbed.
-        div().w(px(self.width)).p(px(6.0)).child(
+        div().w(px(self.width)).px(px(6.0)).py(px(3.0)).child(
             div()
                 .flex()
                 .items_center()
                 .gap(px(10.0))
                 .px(px(10.0))
-                .py(px(8.0))
+                .h(px(46.0))
                 .rounded_md()
                 .bg(hsla(theme.tab_active))
                 .border_1()
@@ -301,15 +301,6 @@ impl WorkspaceView {
         } else {
             let mut previous = None;
             for (index, tab) in self.model.tabs.iter().enumerate() {
-                if index > 0 && self.model.tab_pinned(index - 1) && !self.model.tab_pinned(index) {
-                    rows.push(
-                        div()
-                            .flex_shrink_0()
-                            .h(px(1.0))
-                            .bg(hsla(theme.text_muted).opacity(0.5))
-                            .into_any_element(),
-                    );
-                }
                 if tab.group != previous {
                     if let Some(group) = tab.group {
                         rows.push(self.render_group_header(group, cx));
@@ -348,8 +339,6 @@ impl WorkspaceView {
                     .h(px(40.0))
                     .pl_3()
                     .pr_2()
-                    .border_b_1()
-                    .border_color(hsla(theme.border))
                     .child(
                         gpui::svg()
                             .path("icons/search.svg")
@@ -566,12 +555,14 @@ impl WorkspaceView {
         };
         let lifted = self.dragging.contains(&tab.id);
         let weak = cx.entity().downgrade();
+        // Every card is as tall as a one-line one (Settings): the icon, 8px above and below
+        // and the border. A location line fits beside the icon.
         let card = div()
             .flex()
             .items_center()
             .gap(px(10.0))
             .px(px(10.0))
-            .py(px(8.0))
+            .h(px(46.0))
             .rounded_md()
             .border_1()
             .border_color(gpui::transparent_black())
@@ -625,10 +616,10 @@ impl WorkspaceView {
             .group(hover.clone())
             .relative()
             .flex_shrink_0()
-            .p(px(6.0))
+            // No dividers between cards, as in Warp: a small gap sets them apart.
+            .px(px(6.0))
+            .py(px(3.0))
             .when(group.is_some(), |this| this.pl(px(14.0)))
-            .border_b_1()
-            .border_color(hsla(theme.border))
             .on_click(
                 cx.listener(move |view, event: &gpui::ClickEvent, window, cx| {
                     view.click_tab(index, event.modifiers(), event.click_count(), window, cx)

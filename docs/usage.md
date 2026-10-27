@@ -46,7 +46,7 @@ MVP 1의 셸 실행 모드는 zsh를 기준으로 한다. 다른 셸을 지정�
 | `Cmd+Shift+P` | 커맨드 팔레트 열기·닫기(View 메뉴 `Command Palette`와 같음) |
 | `Cmd+Shift+\` | Code review 패널 열기·닫기(상단 바 `± +N −M` 버튼과 같음). Warp의 `⇧⌘+`는 Ghostty에서 글자 크기 키라서 Tools panel(`Cmd+\`)의 반대쪽 짝으로 정했다 |
 
-- 탭은 왼쪽 사이드바에 Warp처럼 원형 `>_` 아이콘(탭 색상을 고르면 같은 색), 이름, 위치 순의 카드로 표시되고 탭 사이는 선으로 나뉜다. 분할된 탭은 활성 Pane 하나만 보여 준다.
+- 탭은 왼쪽 사이드바에 Warp처럼 원형 `>_` 아이콘(탭 색상을 고르면 같은 색), 이름, 위치 순의 카드로 표시된다. Warp처럼 탭 사이에 구분선은 없고, 모든 카드는 한 줄짜리 Settings 카드와 같은 높이다. 분할된 탭은 활성 Pane 하나만 보여 준다.
 - 사이드바 위 `+`로 새 탭을 연다. 탭에 마우스를 올리면 오른쪽 위에 `⋮`(우클릭 메뉴와 같음)와 `×`(그 탭의 모든 Pane 닫기)가 나타난다.
 - 사이드바 위 `Search tabs...`에 입력하면 제목이나 위치에 그 글자가 있는 탭만 보인다(한글 입력 가능). `Enter`는 첫 결과로 이동하며 검색을 끝내고, `Esc`는 검색을 지운다.
 - 사이드바 오른쪽 가장자리를 끌어 너비를 바꾼다(기본 248, 최소 200, 최대 창 너비의 절반). 창을 줄이면 사이드바도 창 너비의 절반까지 줄어든다.
@@ -141,7 +141,7 @@ MVP 1의 셸 실행 모드는 zsh를 기준으로 한다. 다른 셸을 지정�
 
 | 섹션 | 항목 |
 | --- | --- |
-| Appearance — Themes | 테마: Dark / Light / Sync with OS(시스템 밝기 모드를 따름) |
+| Appearance — Themes | 테마: Dark / Light / Sync with OS(시스템 밝기 모드를 따름). 두 테마 모두 Claude 앱의 색(따뜻한 회색·아이보리, 클레이 주황 강조색)을 쓴다 |
 | Appearance — Text | 터미널 폰트, 크기, 굵기(폰트에 그 이름의 스타일이 있을 때), 줄 높이 조정(%), 획 굵게, 최소 대비, 합자 |
 | Appearance — Cursor | 커서 모양(Block / Bar / Underline), 깜박임 |
 | Appearance — Panes | 터미널 안쪽 여백(px) |
@@ -170,6 +170,7 @@ cursor-style = bar    # block | bar | underline
 
 | 키 / 메뉴 | 동작 |
 | --- | --- |
+| 메뉴바 | Warp의 구성(bareframe·File·Edit·View·Tab·Window)을 따르고, bareframe에 없는 Blocks·AI·Drive·Help는 뺐다. `Cmd+H`(숨기기), `Cmd+Alt+H`(다른 앱 숨기기), `Cmd+M`(최소화)도 macOS처럼 동작한다 |
 | View > Dark Theme / Light Theme | 테마를 바꾸고 설정 파일에 저장 |
 | `Cmd+=` / `Cmd+-` / `Cmd+0` | 모든 Pane의 폰트 크기 1pt 키우기 / 줄이기 / 설정 값으로 되돌리기(실행 중에만 유지) |
 

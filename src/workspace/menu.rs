@@ -218,7 +218,12 @@ impl WorkspaceView {
         self.open_menu(position, items, cx);
     }
 
-    fn run_menu_action(&mut self, action: MenuAction, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn run_menu_action(
+        &mut self,
+        action: MenuAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if let MenuAction::ShowMoveTargets(tabs) = &action {
             let items = self
                 .model

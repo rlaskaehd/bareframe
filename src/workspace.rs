@@ -23,7 +23,7 @@ use gpui::{
     px,
 };
 use gpui_libghostty::TerminalTheme;
-use menu::ContextMenu;
+use menu::{ContextMenu, MenuAction};
 use sidebar::{SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_SHARE, SIDEBAR_MIN_WIDTH};
 use std::collections::HashMap;
 pub use viewer::Exit;
@@ -1049,6 +1049,29 @@ impl Render for WorkspaceView {
                 }
             }))
             .on_action(cx.listener(|view, _: &NewTab, window, cx| view.new_tab(window, cx)))
+            .on_action(cx.listener(|_, _: &Minimize, window, _| window.minimize_window()))
+            .on_action(cx.listener(|_, _: &ZoomWindow, window, _| window.zoom_window()))
+            .on_action(cx.listener(|view, _: &RenameTab, window, cx| {
+                // The name is edited in place on the tab's card.
+                view.sidebar_open = true;
+                let id = view.model.active().id;
+                view.start_rename(RenameTarget::Tab(id), window, cx)
+            }))
+            .on_action(cx.listener(|view, _: &MoveTabUp, window, cx| {
+                let index = view.model.active_tab;
+                view.run_menu_action(MenuAction::MoveTab(index, true), window, cx)
+            }))
+            .on_action(cx.listener(|view, _: &MoveTabDown, window, cx| {
+                let index = view.model.active_tab;
+                view.run_menu_action(MenuAction::MoveTab(index, false), window, cx)
+            }))
+            .on_action(cx.listener(|view, _: &CloseOtherTabs, window, cx| {
+                let active = view.model.active_tab;
+                let others = (0..view.model.tabs.len())
+                    .filter(|&i| i != active)
+                    .collect();
+                view.run_menu_action(MenuAction::CloseTabs(others), window, cx)
+            }))
             .on_action(cx.listener(|view, _: &NextTab, window, cx| {
                 view.model.cycle_tab(true);
                 view.sync(window, cx)

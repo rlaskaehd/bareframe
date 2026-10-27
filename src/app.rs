@@ -67,6 +67,15 @@ actions!(
         JumpToNextPrompt,
         ToggleCommandPalette,
         ToggleCodeReview,
+        Hide,
+        HideOthers,
+        ShowAll,
+        Minimize,
+        ZoomWindow,
+        RenameTab,
+        MoveTabUp,
+        MoveTabDown,
+        CloseOtherTabs,
     ]
 );
 
@@ -133,6 +142,12 @@ pub fn keymap_action(name: &str) -> Option<Box<dyn gpui::Action>> {
 pub fn bind_keys(settings: &Settings, cx: &mut App) {
     use bareframe_core::keymap::{self, Scope};
     cx.clear_key_bindings();
+    // macOS's own app and window keys, which the keymap can still rebind.
+    cx.bind_keys([
+        KeyBinding::new("cmd-h", Hide, None),
+        KeyBinding::new("alt-cmd-h", HideOthers, None),
+        KeyBinding::new("cmd-m", Minimize, None),
+    ]);
     cx.bind_keys(crate::rename::key_bindings());
     cx.bind_keys(crate::explorer::key_bindings());
     cx.bind_keys(crate::editor::key_bindings());
@@ -353,49 +368,81 @@ pub fn run(config: LaunchConfig, restore: bool) {
         .run(move |cx: &mut App| {
             cx.on_action(|_: &Quit, cx| cx.quit());
             bind_keys(&settings, cx);
+            cx.on_action(|_: &Hide, cx| cx.hide());
+            cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
+            cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
+            // Warp's menus, without what bareframe doesn't have (blocks, AI, Drive, help).
             cx.set_menus(vec![
                 Menu::new("bareframe").items([
                     MenuItem::action("Settings…", OpenSettings),
                     MenuItem::separator(),
+                    MenuItem::os_submenu("Services", gpui::SystemMenuType::Services),
+                    MenuItem::separator(),
+                    MenuItem::action("Hide bareframe", Hide),
+                    MenuItem::action("Hide Others", HideOthers),
+                    MenuItem::action("Show All", ShowAll),
+                    MenuItem::separator(),
                     MenuItem::action("Quit bareframe", Quit),
                 ]),
-                Menu::new("Shell").items([
-                    MenuItem::action("New Tab", NewTab),
-                    MenuItem::action("Split Right", SplitRight),
-                    MenuItem::action("Split Down", SplitDown),
-                    MenuItem::action("Maximize Pane", ToggleMaximizePane),
-                    MenuItem::separator(),
-                    MenuItem::action("Add Tab to New Group", GroupTab),
-                    MenuItem::action("Remove Tab from Group", UngroupTab),
-                    MenuItem::separator(),
+                Menu::new("File").items([
+                    MenuItem::action("New Terminal Tab", NewTab),
                     MenuItem::action("Restart Failed Session", RestartSession),
                     MenuItem::separator(),
-                    MenuItem::action("Close Pane", ClosePane),
+                    MenuItem::action("Close Current Session", ClosePane),
                     MenuItem::action("Close Window", CloseWindow),
                 ]),
                 Menu::new("Edit").items([
                     MenuItem::action("Copy", Copy),
                     MenuItem::action("Paste", Paste),
+                    MenuItem::action("Select All", TerminalSelectAll),
+                    MenuItem::action("Clear Screen", ClearScreen),
+                    MenuItem::separator(),
+                    MenuItem::action("Find in Files", FindInFiles),
                 ]),
                 Menu::new("View").items([
-                    MenuItem::action("Command Palette", ToggleCommandPalette),
-                    MenuItem::separator(),
                     MenuItem::action("Toggle Tabs Sidebar", ToggleSidebar),
                     MenuItem::action("Toggle Tools Panel", ToggleToolsPanel),
-                    MenuItem::action("Toggle Code Review", ToggleCodeReview),
-                    MenuItem::action("Project Explorer", ShowProjectExplorer),
-                    MenuItem::action("Global Search", ShowGlobalSearch),
+                    MenuItem::separator(),
+                    MenuItem::action("Command Palette", ToggleCommandPalette),
+                    MenuItem::action("Tools Panel: Project Explorer", ShowProjectExplorer),
+                    MenuItem::action("Tools Panel: Global Search", ShowGlobalSearch),
+                    MenuItem::action("Code Review", ToggleCodeReview),
                     MenuItem::separator(),
                     MenuItem::action("Dark Theme", UseDarkTheme),
                     MenuItem::action("Light Theme", UseLightTheme),
                     MenuItem::separator(),
-                    MenuItem::action("Increase Font Size", IncreaseFontSize),
-                    MenuItem::action("Decrease Font Size", DecreaseFontSize),
-                    MenuItem::action("Reset Font Size", ResetFontSize),
+                    MenuItem::action("Zoom In", IncreaseFontSize),
+                    MenuItem::action("Zoom Out", DecreaseFontSize),
+                    MenuItem::action("Reset Zoom", ResetFontSize),
                 ]),
+                Menu::new("Tab").items([
+                    MenuItem::action("Rename the Current Tab", RenameTab),
+                    MenuItem::separator(),
+                    MenuItem::action("Split Pane Right", SplitRight),
+                    MenuItem::action("Split Pane Down", SplitDown),
+                    MenuItem::separator(),
+                    MenuItem::action("Move Tab Up", MoveTabUp),
+                    MenuItem::action("Move Tab Down", MoveTabDown),
+                    MenuItem::action("Add Tab to New Group", GroupTab),
+                    MenuItem::action("Remove Tab from Group", UngroupTab),
+                    MenuItem::separator(),
+                    MenuItem::action("Switch to Next Tab", NextTab),
+                    MenuItem::action("Switch to Previous Tab", PreviousTab),
+                    MenuItem::separator(),
+                    MenuItem::action("Activate Next Pane", FocusNextPane),
+                    MenuItem::action("Activate Previous Pane", FocusPreviousPane),
+                    MenuItem::action("Equalize Panes", EqualizePanes),
+                    MenuItem::separator(),
+                    MenuItem::action("Toggle Maximize Active Pane", ToggleMaximizePane),
+                    MenuItem::separator(),
+                    MenuItem::action("Close the Current Tab", CloseTab),
+                    MenuItem::action("Close Other Tabs", CloseOtherTabs),
+                ]),
+                // Named "Window", macOS lists the open windows at its end; it also adds
+                // Enter Full Screen to View.
                 Menu::new("Window").items([
-                    MenuItem::action("Next Tab", NextTab),
-                    MenuItem::action("Previous Tab", PreviousTab),
+                    MenuItem::action("Minimize", Minimize),
+                    MenuItem::action("Zoom", ZoomWindow),
                 ]),
             ]);
             cx.on_window_closed(|cx, _| {
