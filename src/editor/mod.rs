@@ -4,14 +4,14 @@
 use crate::{
     syntax::{self, LineSyntax},
     text_field::TextField,
-    theme::{self, Theme, hsla},
+    theme::{Theme, hsla},
     watch::Watch,
 };
-use bareframe_core::text::{Buffer, LineEnding, Position};
+use bareframe_core::text::{Buffer, Position};
 use gpui::{
     ClipboardItem, Context, CursorStyle, Entity, EventEmitter, FocusHandle, MouseButton,
     MouseDownEvent, MouseMoveEvent, Pixels, Point, ScrollWheelEvent, Subscription, Task, Window,
-    actions, div, prelude::*, px,
+    actions, div, prelude::*,
 };
 use std::{
     ops::Range,
@@ -24,6 +24,7 @@ mod file;
 mod find;
 mod input;
 mod lsp;
+mod status;
 
 use element::{EditorElement, Layout};
 use file::Notice;
@@ -490,37 +491,6 @@ impl EditorPane {
             .take(500)
             .any(|line| line.starts_with('\t'));
         if tabs { "\t" } else { "    " }
-    }
-
-    fn render_status(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = self.theme;
-        let line = self.buffer.line(self.head.line);
-        let column = line[..self.head.column.min(line.len())].chars().count() + 1;
-        let selected = self.buffer.char_count(self.selection());
-        div()
-            .flex()
-            .flex_none()
-            .gap_4()
-            .px_3()
-            .h(px(22.0))
-            .items_center()
-            .border_t_1()
-            .border_color(hsla(theme.border))
-            .font_family(theme::UI_FONT)
-            .text_size(px(11.0))
-            .text_color(hsla(theme.text_muted))
-            .child(format!("Ln {}, Col {column}", self.head.line + 1))
-            .when(selected > 0, |this| {
-                this.child(format!("{selected} selected"))
-            })
-            .child(div().flex_1())
-            .children(self.render_language(cx))
-            .when(self.read_only, |this| this.child("Read-only"))
-            .child(match self.buffer.line_ending {
-                LineEnding::Lf => "LF",
-                LineEnding::CrLf => "CRLF",
-            })
-            .child("UTF-8")
     }
 }
 
