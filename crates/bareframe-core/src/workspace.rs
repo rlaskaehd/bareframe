@@ -44,6 +44,19 @@ pub struct Tab {
 }
 
 impl Tab {
+    /// Takes `pane` out of this tab's splits, un-maximizing and focusing its neighbour if it
+    /// had focus; `false` when it is the tab's only pane.
+    fn remove_pane(&mut self, pane: PaneId) -> bool {
+        let Some(nearest) = self.layout.remove(pane) else {
+            return false;
+        };
+        self.maximized = false;
+        if self.active_pane == pane {
+            self.active_pane = nearest;
+        }
+        true
+    }
+
     /// A saved tab with default flags; the caller fills in the rest.
     pub(crate) fn restored(id: TabId, layout: Layout, active_pane: PaneId) -> Self {
         Self {
@@ -325,12 +338,7 @@ impl Workspace {
 
     pub fn close(&mut self, pane: PaneId) -> Option<Closed> {
         let index = self.tab_of(pane)?;
-        let tab = &mut self.tabs[index];
-        if let Some(nearest) = tab.layout.remove(pane) {
-            tab.maximized = false;
-            if tab.active_pane == pane {
-                tab.active_pane = nearest;
-            }
+        if self.tabs[index].remove_pane(pane) {
             return Some(Closed::Pane);
         }
         if self.tabs.len() == 1 {
@@ -651,13 +659,7 @@ impl Workspace {
         if pane == target {
             return false;
         }
-        let tab = &mut self.tabs[from];
-        if let Some(nearest) = tab.layout.remove(pane) {
-            tab.maximized = false;
-            if tab.active_pane == pane {
-                tab.active_pane = nearest;
-            }
-        } else {
+        if !self.tabs[from].remove_pane(pane) {
             self.take(&[from]);
         }
         self.place(target, side, Layout::Pane(pane), pane)
@@ -699,14 +701,9 @@ impl Workspace {
         if to > self.tabs.len() {
             return false;
         }
-        let tab = &mut self.tabs[from];
-        let Some(nearest) = tab.layout.remove(pane) else {
+        if !self.tabs[from].remove_pane(pane) {
             self.move_tabs(&[from], to, group);
             return self.focus(pane);
-        };
-        tab.maximized = false;
-        if tab.active_pane == pane {
-            tab.active_pane = nearest;
         }
         let mut tab = self.fresh_tab(pane);
         tab.group = group.filter(|id| self.group(*id).is_some());
