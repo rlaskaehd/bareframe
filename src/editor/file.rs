@@ -89,6 +89,7 @@ impl EditorPane {
             Ok(()) => {
                 self.disk = text;
                 self.buffer.mark_saved();
+                self.language_saved(cx);
                 self.notice = None;
                 cx.emit(EditorEvent::Changed);
                 cx.notify();
@@ -112,7 +113,7 @@ impl EditorPane {
         self.head = self.buffer.clamp(self.head);
         self.marked = None;
         self.notice = None;
-        self.highlight(cx);
+        self.text_changed(cx);
         cx.emit(EditorEvent::Changed);
         cx.notify();
     }

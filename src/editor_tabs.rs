@@ -17,6 +17,10 @@ pub enum TabsEvent {
     ShowRendered,
     /// A file's unsaved changes were kept: a close or quit waiting on them stops.
     Kept,
+    /// Passed on from a file: see `EditorEvent::OpenAt`.
+    OpenAt(std::path::PathBuf, u64),
+    /// Passed on from a file: see `EditorEvent::RunInTerminal`.
+    RunInTerminal(String, std::path::PathBuf),
 }
 
 struct File {
@@ -164,6 +168,10 @@ impl EditorTabs {
                 cx.notify();
             }
             EditorEvent::ShowRendered => cx.emit(TabsEvent::ShowRendered),
+            EditorEvent::OpenAt(path, line) => cx.emit(TabsEvent::OpenAt(path.clone(), *line)),
+            EditorEvent::RunInTerminal(command, dir) => {
+                cx.emit(TabsEvent::RunInTerminal(command.clone(), dir.clone()))
+            }
             EditorEvent::Kept => {
                 self.closing = false;
                 cx.emit(TabsEvent::Kept);

@@ -25,12 +25,16 @@ pub fn button(
 
 /// A plain-text button in the muted color that lights up under the pointer. Callers set
 /// the padding and corners.
-pub fn ghost_button(theme: &Theme, id: impl Into<ElementId>, label: &'static str) -> Stateful<Div> {
+pub fn ghost_button(
+    theme: &Theme,
+    id: impl Into<ElementId>,
+    label: impl Into<gpui::SharedString>,
+) -> Stateful<Div> {
     div()
         .id(id)
         .text_color(hsla(theme.text_muted))
         .hover(|style| style.bg(hsla(theme.tab_hover)).text_color(hsla(theme.text)))
-        .child(label)
+        .child(label.into())
 }
 
 /// A small square button holding a glyph, as the × and ⋮ on tabs and pane headers.

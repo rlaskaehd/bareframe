@@ -135,6 +135,10 @@ impl WorkspaceView {
                 }
                 TabsEvent::Kept => view.pending_exit = None,
                 TabsEvent::ShowRendered => view.swap_view(id, false, window, cx),
+                TabsEvent::OpenAt(path, line) => view.open_file_at(path, Some(*line), window, cx),
+                TabsEvent::RunInTerminal(command, dir) => {
+                    view.run_in_new_tab(command, dir.clone(), window, cx)
+                }
             },
         );
         self.panes

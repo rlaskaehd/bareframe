@@ -385,6 +385,22 @@ impl WorkspaceView {
         self.sync(window, cx);
     }
 
+    /// A new tab at `dir` running `command`, typed in so its output shows there.
+    fn run_in_new_tab(
+        &mut self,
+        command: &str,
+        dir: std::path::PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.new_tab_at(dir, window, cx);
+        if let Some(terminal) = self.terminal(self.model.active_pane()) {
+            terminal.update(cx, |terminal, cx| {
+                terminal.type_text(&format!("{command}\r"), cx)
+            });
+        }
+    }
+
     fn split(&mut self, axis: Axis, window: &mut Window, cx: &mut Context<Self>) {
         let cwd = self.active_cwd(cx);
         let pane = self.model.split(axis);

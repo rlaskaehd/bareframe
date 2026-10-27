@@ -880,6 +880,7 @@ dependencies = [
  "merman",
  "notify",
  "pulldown-cmark",
+ "serde_json",
  "trash",
 ]
 

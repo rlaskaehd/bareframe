@@ -320,6 +320,11 @@ impl Element for EditorElement {
         let (scroll, head, selection) = (editor.scroll, editor.head, editor.selection());
         let (first, shown) = (prepaint.layout.first, prepaint.layout.lines.len());
         let (matches, first_match, current) = editor.matches_in(first..first + shown);
+        let marks: Vec<(Range<Position>, bool)> = editor
+            .language_marks()
+            .iter()
+            .map(|mark| (mark.range.clone(), mark.error))
+            .collect();
         let layout = &prepaint.layout;
         let (line_height, text_left) = (layout.line_height, layout.text_left);
         let top = |line: usize| bounds.top() + line_height * line as f32 - scroll.y;
@@ -403,6 +408,38 @@ impl Element for EditorElement {
                     cx,
                 ) {
                     eprintln!("bareframe: painting editor text: {error}");
+                }
+            }
+            // Language server errors and warnings: a wavy line under each stretch.
+            for (range, error) in &marks {
+                for line in range.start.line..=range.end.line {
+                    let Some(shaped) = line
+                        .checked_sub(layout.first)
+                        .and_then(|index| layout.lines.get(index))
+                    else {
+                        continue;
+                    };
+                    let from = if line == range.start.line {
+                        range.start.column
+                    } else {
+                        0
+                    };
+                    let to = if line == range.end.line {
+                        range.end.column
+                    } else {
+                        shaped.len
+                    };
+                    let (x0, x1) = (shaped.x_for_index(from), shaped.x_for_index(to));
+                    let color = theme.palette[if *error { 1 } else { 3 }];
+                    window.paint_underline(
+                        point(left + x0, top(line) + line_height - px(3.0)),
+                        (x1 - x0).max(px(4.0)),
+                        &UnderlineStyle {
+                            thickness: px(1.0),
+                            color: Some(hsla(color)),
+                            wavy: true,
+                        },
+                    );
                 }
             }
             if focused

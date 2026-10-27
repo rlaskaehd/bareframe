@@ -9,6 +9,7 @@ mod editor;
 mod editor_tabs;
 mod explorer;
 mod files;
+mod lsp;
 mod markdown;
 mod menu_bar;
 mod pane;

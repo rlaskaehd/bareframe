@@ -23,6 +23,7 @@ mod element;
 mod file;
 mod find;
 mod input;
+mod lsp;
 
 use element::{EditorElement, Layout};
 use file::Notice;
@@ -97,6 +98,10 @@ pub enum EditorEvent {
     ShowRendered,
     /// Cancel was chosen when asked about unsaved changes: whatever asked stops.
     Kept,
+    /// Go to a line (1-based) of another file: a definition the language server found.
+    OpenAt(PathBuf, u64),
+    /// Run a command in a terminal at a directory: installing a language server.
+    RunInTerminal(String, PathBuf),
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -151,6 +156,7 @@ pub struct EditorPane {
     /// Colors per line from the last parse; lines edited since have none until the next.
     syntax: Vec<LineSyntax>,
     _highlight: Option<Task<()>>,
+    language_server: Option<lsp::Language>,
     _watch: Option<Watch>,
 }
 
@@ -197,6 +203,7 @@ impl EditorPane {
             _autosave: None,
             syntax: Vec::new(),
             _highlight: None,
+            language_server: None,
             _watch: None,
         };
         if editor.buffer.longest_line() > MAX_LINE {
@@ -205,6 +212,7 @@ impl EditorPane {
         editor.language = syntax::language_for(&editor.path);
         editor._watch = editor.watch(cx);
         editor.highlight(cx);
+        editor.attach_language(cx);
         editor
     }
 
@@ -261,6 +269,12 @@ impl EditorPane {
         }
     }
 
+    /// After any edit, undo or reload: colors and the language server catch up.
+    fn text_changed(&mut self, cx: &mut Context<Self>) {
+        self.highlight(cx);
+        self.sync_language(cx);
+    }
+
     fn selection(&self) -> Range<Position> {
         self.anchor.min(self.head)..self.anchor.max(self.head)
     }
@@ -297,7 +311,7 @@ impl EditorPane {
             self.syntax
                 .splice(first..=last, std::iter::repeat_n(Vec::new(), fresh));
         }
-        self.highlight(cx);
+        self.text_changed(cx);
         if self.autosave {
             self._autosave = Some(cx.spawn(async move |editor, cx| {
                 cx.background_executor().timer(Duration::from_secs(1)).await;
@@ -403,6 +417,9 @@ impl EditorPane {
         let Some(position) = self.position_for(event.position) else {
             return;
         };
+        if event.modifiers.platform && event.click_count == 1 {
+            return self.go_to_definition(position, cx);
+        }
         match event.click_count {
             2 => {
                 let word = self.buffer.word_at(position);
@@ -425,6 +442,9 @@ impl EditorPane {
 
     fn on_mouse_move(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
         if !self.selecting {
+            if event.pressed_button.is_none() {
+                self.hover_at(event.position, cx);
+            }
             return;
         }
         if event.pressed_button != Some(MouseButton::Left) {
@@ -437,6 +457,7 @@ impl EditorPane {
     }
 
     fn on_scroll(&mut self, event: &ScrollWheelEvent, _: &mut Window, cx: &mut Context<Self>) {
+        self.hide_hover(cx);
         let delta = event.delta.pixel_delta(self.line_height());
         self.scroll.x = (self.scroll.x - delta.x).max(Pixels::ZERO);
         self.scroll.y = (self.scroll.y - delta.y).max(Pixels::ZERO);
@@ -506,8 +527,14 @@ impl EditorPane {
     /// The text itself, with the editing keys, mouse and scrolling.
     fn render_text(&self, cx: &mut Context<Self>) -> impl IntoElement {
         div()
+            .id("editor-text")
             .flex_1()
             .min_h_0()
+            .on_hover(cx.listener(|e, hovered: &bool, _, cx| {
+                if !hovered {
+                    e.hide_hover(cx)
+                }
+            }))
             .key_context(KEY_CONTEXT)
             .track_focus(&self.focus)
             .cursor(CursorStyle::IBeam)
@@ -631,7 +658,7 @@ impl EditorPane {
                 if !e.read_only
                     && let Some(range) = e.buffer.undo()
                 {
-                    e.highlight(cx);
+                    e.text_changed(cx);
                     e.anchor = range.start;
                     e.select(range.end, true, cx);
                     cx.emit(EditorEvent::Changed);
@@ -641,7 +668,7 @@ impl EditorPane {
                 if !e.read_only
                     && let Some(range) = e.buffer.redo()
                 {
-                    e.highlight(cx);
+                    e.text_changed(cx);
                     e.select(range.end, false, cx);
                     cx.emit(EditorEvent::Changed);
                 }
@@ -698,7 +725,9 @@ impl Render for EditorPane {
             .children(self.render_notice(cx))
             .children(self.render_bars(cx))
             .child(self.render_text(cx))
+            .children(self.render_language(cx))
             .child(self.render_status())
+            .children(self.render_hover())
     }
 }
 

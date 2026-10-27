@@ -38,6 +38,7 @@ pub fn run(config: LaunchConfig, restore: bool) {
             cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
             cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
             cx.set_menus(crate::menu_bar::menus());
+            crate::lsp::init(cx);
             cx.on_window_closed(|cx, _| {
                 if cx.windows().is_empty() {
                     cx.quit();
