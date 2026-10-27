@@ -405,34 +405,16 @@ impl SettingsPane {
                 .text_color(hsla(theme.text_muted))
                 .child("Add your own custom keybindings to existing actions. Defaults follow Ghostty; changes are saved as keybind lines in the settings file.")
                 .into_any_element(),
-            div()
-                .id("shortcut-search")
-                .relative()
-                .my_3()
-                .px_2()
-                .h(px(30.0))
-                .flex()
-                .items_center()
-                .rounded_md()
-                .border_1()
-                .border_color(hsla(theme.border))
-                .overflow_hidden()
-                .cursor_text()
-                .on_click(cx.listener(|pane, _, window, cx| {
-                    pane.shortcut_search
-                        .update(cx, |input, cx| input.focus(window, cx))
-                }))
-                .when(empty, |this| {
-                    this.child(
-                        div()
-                            .absolute()
-                            .left(px(9.0))
-                            .text_color(hsla(theme.text_muted))
-                            .child("Search by name or by keys (ex. \"cmd d\")"),
-                    )
-                })
-                .child(self.shortcut_search.clone())
-                .into_any_element(),
+            widgets::text_box(
+                theme,
+                "shortcut-search",
+                &self.shortcut_search,
+                "Search by name or by keys (ex. \"cmd d\")",
+                empty,
+            )
+            .my_3()
+            .h(px(30.0))
+            .into_any_element(),
         ];
         for action in actions {
             let triggers = by_action.get(action.name).cloned().unwrap_or_default();
@@ -665,32 +647,15 @@ impl Render for SettingsPane {
                     .border_r_1()
                     .border_color(hsla(theme.border))
                     .child(
-                        div()
-                            .id("settings-search")
-                            .relative()
-                            .mb_2()
-                            .px_2()
-                            .h(px(28.0))
-                            .flex()
-                            .items_center()
-                            .rounded_md()
-                            .border_1()
-                            .border_color(hsla(theme.border))
-                            .overflow_hidden()
-                            .cursor_text()
-                            .on_click(cx.listener(|pane, _, window, cx| {
-                                pane.search.update(cx, |input, cx| input.focus(window, cx))
-                            }))
-                            .when(!searching, |this| {
-                                this.child(
-                                    div()
-                                        .absolute()
-                                        .left(px(9.0))
-                                        .text_color(hsla(theme.text_muted))
-                                        .child("Search"),
-                                )
-                            })
-                            .child(self.search.clone()),
+                        widgets::text_box(
+                            theme,
+                            "settings-search",
+                            &self.search,
+                            "Search",
+                            !searching,
+                        )
+                        .mb_2()
+                        .h(px(28.0)),
                     )
                     .children(nav)
                     .child(div().flex_1())

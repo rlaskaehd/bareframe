@@ -2,7 +2,7 @@
 use super::EditorPane;
 use crate::{
     text_field::{TextField, TextFieldEvent},
-    theme::{self, hsla},
+    theme::hsla,
     widgets,
 };
 use bareframe_core::text::Position;
@@ -225,35 +225,11 @@ impl EditorPane {
         let theme = self.theme;
         let field = |id: &'static str, input: &Entity<TextField>, hint: &'static str, cx: &App| {
             let empty = input.read(cx).text().is_empty();
-            let focus_input = input.clone();
-            div()
-                .id(id)
-                .relative()
+            widgets::text_box(theme, id, input, hint, empty)
                 .flex_1()
                 .min_w_0()
                 .h(px(24.0))
-                .px_2()
-                .flex()
-                .items_center()
-                .rounded_md()
-                .border_1()
-                .border_color(hsla(theme.border))
                 .bg(hsla(theme.terminal_background))
-                .overflow_hidden()
-                .cursor_text()
-                .on_click(move |_, window, cx| {
-                    focus_input.update(cx, |input, cx| input.focus(window, cx))
-                })
-                .when(empty, |this| {
-                    this.child(
-                        div()
-                            .absolute()
-                            .left(px(9.0))
-                            .text_color(hsla(theme.text_muted))
-                            .child(hint),
-                    )
-                })
-                .child(input.clone())
         };
         let button = |id: &'static str, label: &'static str| {
             widgets::ghost_button(theme, id, label)
@@ -262,18 +238,7 @@ impl EditorPane {
                 .py(px(2.0))
                 .rounded_md()
         };
-        let bar = div()
-            .flex()
-            .flex_none()
-            .flex_col()
-            .gap_1()
-            .px_3()
-            .py_1()
-            .border_b_1()
-            .border_color(hsla(theme.border))
-            .bg(hsla(theme.tab_active))
-            .font_family(theme::UI_FONT)
-            .text_size(px(12.0));
+        let bar = super::bar(theme).flex_col().gap_1();
         if let Some((input, _)) = &self.go_to {
             return Some(
                 bar.child(

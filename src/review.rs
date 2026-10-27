@@ -517,34 +517,15 @@ impl CodeReview {
                 .bg(hsla(theme.tab_active))
                 .text_size(px(12.0))
                 .child(
-                    div()
-                        .id("review-message")
-                        .relative()
-                        .h(px(28.0))
-                        .px_2()
-                        .flex()
-                        .items_center()
-                        .rounded_md()
-                        .border_1()
-                        .border_color(hsla(theme.border))
-                        .bg(hsla(theme.terminal_background))
-                        .overflow_hidden()
-                        .cursor_text()
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            if let Some(form) = &this.commit {
-                                form.input.update(cx, |input, cx| input.focus(window, cx));
-                            }
-                        }))
-                        .when(empty, |this| {
-                            this.child(
-                                div()
-                                    .absolute()
-                                    .left(px(9.0))
-                                    .text_color(hsla(theme.text_muted))
-                                    .child("Commit message"),
-                            )
-                        })
-                        .child(form.input.clone()),
+                    widgets::text_box(
+                        theme,
+                        "review-message",
+                        &form.input,
+                        "Commit message",
+                        empty,
+                    )
+                    .h(px(28.0))
+                    .bg(hsla(theme.terminal_background)),
                 )
                 .child(
                     div()

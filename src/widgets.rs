@@ -1,8 +1,11 @@
 //! Small pieces of UI shared across panels: buttons, tree marks, icons, diff counts and
 //! key caps.
-use crate::theme::{self, Theme, hsla};
+use crate::{
+    text_field::TextField,
+    theme::{self, Theme, hsla},
+};
 use bareframe_core::keymap::Trigger;
-use gpui::{AnyElement, Div, ElementId, Stateful, div, prelude::*, px};
+use gpui::{AnyElement, Div, ElementId, Entity, Stateful, div, prelude::*, px};
 
 /// A bordered button; `primary` fills it with the accent. Callers set the padding.
 pub fn button(
@@ -35,6 +38,40 @@ pub fn ghost_button(
         .text_color(hsla(theme.text_muted))
         .hover(|style| style.bg(hsla(theme.tab_hover)).text_color(hsla(theme.text)))
         .child(label.into())
+}
+
+/// A bordered one-line input showing `hint` while `show_hint`; a click anywhere on it
+/// focuses the input. Callers set the height, margins and background.
+pub fn text_box(
+    theme: &Theme,
+    id: impl Into<ElementId>,
+    input: &Entity<TextField>,
+    hint: &'static str,
+    show_hint: bool,
+) -> Stateful<Div> {
+    let focus = input.clone();
+    div()
+        .id(id)
+        .relative()
+        .px_2()
+        .flex()
+        .items_center()
+        .rounded_md()
+        .border_1()
+        .border_color(hsla(theme.border))
+        .overflow_hidden()
+        .cursor_text()
+        .on_click(move |_, window, cx| focus.update(cx, |input, cx| input.focus(window, cx)))
+        .when(show_hint, |this| {
+            this.child(
+                div()
+                    .absolute()
+                    .left(px(9.0))
+                    .text_color(hsla(theme.text_muted))
+                    .child(hint),
+            )
+        })
+        .child(input.clone())
 }
 
 /// The card that follows the cursor while something is dragged.
