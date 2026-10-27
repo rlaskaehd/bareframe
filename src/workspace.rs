@@ -185,7 +185,7 @@ pub struct WorkspaceView {
     /// The directory last looked up, so moving focus doesn't run git again.
     repo_dir: Option<std::path::PathBuf>,
     _repo_task: Option<gpui::Task<()>>,
-    _repo_watch: Option<(notify::RecommendedWatcher, gpui::Task<()>)>,
+    _repo_watch: Option<crate::watch::Watch>,
     /// Tabs being dragged in the sidebar; their rows show an empty slot meanwhile.
     dragging: Vec<TabId>,
     menu: Option<ContextMenu>,
@@ -210,7 +210,7 @@ pub struct WorkspaceView {
     config_text: String,
     dark_appearance: bool,
     _appearance: Subscription,
-    _config_watch: Option<(notify::RecommendedWatcher, gpui::Task<()>)>,
+    _config_watch: Option<crate::watch::Watch>,
 }
 
 impl WorkspaceView {

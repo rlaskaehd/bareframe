@@ -5,15 +5,15 @@ use crate::{
     app,
     settings_pane::{SettingsEvent, SettingsPane},
     theme::Theme,
+    watch::watch,
 };
 use bareframe_core::{
     keymap,
     settings::{self, Settings, ThemeName},
     workspace::PaneId,
 };
-use futures::StreamExt;
 use gpui::{AppContext, Context, Window, WindowAppearance};
-use notify::{RecursiveMode, Watcher};
+use notify::RecursiveMode;
 use std::time::Duration;
 
 pub(super) fn is_dark(appearance: WindowAppearance) -> bool {
@@ -141,51 +141,30 @@ impl WorkspaceView {
         if std::fs::create_dir_all(&dir).is_err() {
             return;
         }
-        let (sender, mut receiver) = futures::channel::mpsc::unbounded::<()>();
         // The folder also holds the layout state, rewritten every few seconds; only the
         // settings file (or its temporary copy, renamed over it) matters here.
         let name = path.file_name().map(std::ffi::OsStr::to_owned);
-        let watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
-            let ours = event.is_ok_and(|event| {
-                event.paths.iter().any(|changed| {
-                    changed.file_name() == name.as_deref() || changed.file_stem() == name.as_deref()
-                })
-            });
-            if ours {
-                let _ = sender.unbounded_send(());
-            }
-        });
-        let mut watcher = match watcher {
-            Ok(watcher) => watcher,
-            Err(error) => return eprintln!("bareframe: watching settings: {error}"),
+        let relevant = move |event: &notify::Event| {
+            event.paths.iter().any(|changed| {
+                changed.file_name() == name.as_deref() || changed.file_stem() == name.as_deref()
+            })
         };
-        if let Err(error) = watcher.watch(&dir, RecursiveMode::NonRecursive) {
-            return eprintln!("bareframe: watching {}: {error}", dir.display());
-        }
-        let task = cx.spawn(async move |view, cx| {
-            while receiver.next().await.is_some() {
-                cx.background_executor()
-                    .timer(Duration::from_millis(200))
-                    .await;
-                while receiver.try_recv().is_ok() {}
-                // A file caught mid-save or unreadable for a moment keeps the settings as
-                // they are; a deleted one means the defaults.
-                let text = match app::read_optional(&path) {
-                    Ok(text) => text.unwrap_or_default(),
-                    Err(error) => {
-                        eprintln!("bareframe: {}: {error}", path.display());
-                        continue;
-                    }
-                };
-                if view
-                    .update(cx, |view, cx| view.reload_settings(text, cx))
-                    .is_err()
-                {
-                    break;
-                }
+        let reload = move |view: &mut Self, cx: &mut Context<Self>| {
+            // A file caught mid-save or unreadable for a moment keeps the settings as
+            // they are; a deleted one means the defaults.
+            match app::read_optional(&path) {
+                Ok(text) => view.reload_settings(text.unwrap_or_default(), cx),
+                Err(error) => eprintln!("bareframe: {}: {error}", path.display()),
             }
-        });
-        self._config_watch = Some((watcher, task));
+        };
+        self._config_watch = watch(
+            &dir,
+            RecursiveMode::NonRecursive,
+            Duration::from_millis(200),
+            relevant,
+            reload,
+            cx,
+        );
     }
 
     /// Settings › Reload settings file (Ghostty's `reload_config`).

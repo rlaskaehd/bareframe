@@ -5,10 +5,10 @@ use crate::{
     repo::{self, Summary},
     review::ReviewEvent,
     theme::hsla,
+    watch::{Watch, watch},
 };
-use futures::StreamExt;
 use gpui::{Context, CursorStyle, MouseButton, MouseMoveEvent, Window, div, prelude::*, px};
-use notify::{RecursiveMode, Watcher};
+use notify::RecursiveMode;
 use std::{path::PathBuf, time::Duration};
 
 pub(super) const REVIEW_DEFAULT_WIDTH: f32 = 520.0;
@@ -55,50 +55,25 @@ impl WorkspaceView {
 
     /// Edits saved from anywhere change the numbers, so the working tree is watched; git's
     /// own files only matter where they record a commit, a checkout or staging.
-    fn watch_repo(
-        &mut self,
-        root: PathBuf,
-        cx: &mut Context<Self>,
-    ) -> Option<(notify::RecommendedWatcher, gpui::Task<()>)> {
-        let (sender, mut receiver) = futures::channel::mpsc::unbounded::<()>();
-        let mut watcher =
-            notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
-                let relevant = event.is_ok_and(|event| {
-                    event.paths.iter().any(|path| {
-                        let inside_git = path.components().any(|part| part.as_os_str() == ".git");
-                        !inside_git
-                            || path
-                                .file_name()
-                                .is_some_and(|name| name == "index" || name == "HEAD")
-                    })
-                });
-                if relevant {
-                    let _ = sender.unbounded_send(());
-                }
-            })
-            .inspect_err(|error| eprintln!("bareframe: watching {}: {error}", root.display()))
-            .ok()?;
-        watcher
-            .watch(&root, RecursiveMode::Recursive)
-            .inspect_err(|error| eprintln!("bareframe: watching {}: {error}", root.display()))
-            .ok()?;
-        // ponytail: a build writing thousands of ignored files still wakes this once a
-        // second; filter through the repository's ignore rules if that shows up.
-        let task = cx.spawn(async move |view, cx| {
-            while receiver.next().await.is_some() {
-                cx.background_executor()
-                    .timer(Duration::from_millis(800))
-                    .await;
-                while receiver.try_recv().is_ok() {}
-                if view
-                    .update(cx, |view, cx| view.refresh_repo(true, cx))
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        });
-        Some((watcher, task))
+    // ponytail: a build writing thousands of ignored files still wakes this once a
+    // second; filter through the repository's ignore rules if that shows up.
+    fn watch_repo(&mut self, root: PathBuf, cx: &mut Context<Self>) -> Option<Watch> {
+        watch(
+            &root,
+            RecursiveMode::Recursive,
+            Duration::from_millis(800),
+            |event| {
+                event.paths.iter().any(|path| {
+                    let inside_git = path.components().any(|part| part.as_os_str() == ".git");
+                    !inside_git
+                        || path
+                            .file_name()
+                            .is_some_and(|name| name == "index" || name == "HEAD")
+                })
+            },
+            |view, cx| view.refresh_repo(true, cx),
+            cx,
+        )
     }
 
     pub(super) fn on_review_event(

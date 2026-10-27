@@ -5,9 +5,9 @@ use crate::{
     rename::{RenameEvent, RenameInput},
     syntax::{self, LineSyntax, Syntax},
     theme::{self, Theme, hsla},
+    watch::{Watch, watch_file},
 };
 use bareframe_core::text::{Buffer, LineEnding, Position};
-use futures::StreamExt;
 use gpui::{
     App, Bounds, ClipboardItem, Context, CursorStyle, ElementId, ElementInputHandler, Entity,
     EntityInputHandler, EventEmitter, FocusHandle, GlobalElementId, LayoutId, MouseButton,
@@ -15,7 +15,6 @@ use gpui::{
     Subscription, Task, TextRun, UTF16Selection, UnderlineStyle, Window, actions, div, fill, point,
     prelude::*, px, relative, size,
 };
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use std::{
     ops::Range,
     path::{Path, PathBuf},
@@ -166,7 +165,7 @@ pub struct EditorPane {
     /// Colors per line from the last parse; lines edited since have none until the next.
     syntax: Vec<LineSyntax>,
     _highlight: Option<Task<()>>,
-    _watch: Option<(RecommendedWatcher, Task<()>)>,
+    _watch: Option<Watch>,
 }
 
 impl EventEmitter<EditorEvent> for EditorPane {}
@@ -702,39 +701,8 @@ impl EditorPane {
         }
     }
 
-    /// Like the Markdown viewer: the folder is watched, since saving often replaces the file.
-    fn watch(&self, cx: &mut Context<Self>) -> Option<(RecommendedWatcher, Task<()>)> {
-        let dir = self.path.parent()?.to_path_buf();
-        let name = self.path.file_name()?.to_owned();
-        let (sender, mut receiver) = futures::channel::mpsc::unbounded::<()>();
-        let mut watcher =
-            notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
-                if event.is_ok_and(|event| {
-                    event
-                        .paths
-                        .iter()
-                        .any(|path| path.file_name() == Some(name.as_os_str()))
-                }) {
-                    let _ = sender.unbounded_send(());
-                }
-            })
-            .ok()?;
-        watcher.watch(&dir, RecursiveMode::NonRecursive).ok()?;
-        let task = cx.spawn(async move |editor, cx| {
-            while receiver.next().await.is_some() {
-                cx.background_executor()
-                    .timer(Duration::from_millis(150))
-                    .await;
-                while receiver.try_recv().is_ok() {}
-                if editor
-                    .update(cx, |editor, cx| editor.on_disk_change(cx))
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        });
-        Some((watcher, task))
+    fn watch(&self, cx: &mut Context<Self>) -> Option<Watch> {
+        watch_file(&self.path, Self::on_disk_change, cx)
     }
 
     fn indent_unit(&self) -> &'static str {

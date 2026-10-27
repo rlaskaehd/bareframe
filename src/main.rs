@@ -15,6 +15,7 @@ mod settings_pane;
 mod syntax;
 mod terminal;
 mod theme;
+mod watch;
 mod workspace;
 
 use bareframe_core::config::{HELP, LaunchConfig, LaunchRequest};

@@ -1,13 +1,14 @@
 //! Warp's Markdown viewer: a `.md` file rendered read-only in a pane and read again when it
 //! changes on disk. Inline HTML and Mermaid are shown as plain text or left out, as planned.
-use crate::theme::{self, Theme, hsla};
-use futures::StreamExt;
+use crate::{
+    theme::{self, Theme, hsla},
+    watch::{Watch, watch_file},
+};
 use gpui::{
     AnyElement, App, Context, EventEmitter, FocusHandle, Font, FontStyle, FontWeight,
-    InteractiveText, ScrollHandle, StrikethroughStyle, StyledText, Task, TextRun, UnderlineStyle,
-    Window, div, img, prelude::*, px,
+    InteractiveText, ScrollHandle, StrikethroughStyle, StyledText, TextRun, UnderlineStyle, Window,
+    div, img, prelude::*, px,
 };
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
 gpui::actions!(markdown, [ToggleRaw]);
@@ -68,7 +69,6 @@ pub fn view_switch(
 use std::{
     ops::Range,
     path::{Path, PathBuf},
-    time::Duration,
 };
 
 const TEXT_SIZE: f32 = 14.0;
@@ -483,7 +483,7 @@ pub struct MarkdownPane {
     mono: String,
     focus: FocusHandle,
     scroll: ScrollHandle,
-    _watch: Option<(RecommendedWatcher, Task<()>)>,
+    _watch: Option<Watch>,
 }
 
 impl EventEmitter<MarkdownEvent> for MarkdownPane {}
@@ -547,47 +547,15 @@ impl MarkdownPane {
         }
     }
 
-    /// Editors often save by writing a new file and renaming it over the old one, so the
-    /// folder is watched and events are matched by name.
-    fn watch(&self, cx: &mut Context<Self>) -> Option<(RecommendedWatcher, Task<()>)> {
-        let dir = self.path.parent()?.to_path_buf();
-        let name = self.path.file_name()?.to_owned();
-        let (sender, mut receiver) = futures::channel::mpsc::unbounded::<()>();
-        let mut watcher =
-            notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
-                if event.is_ok_and(|event| {
-                    event
-                        .paths
-                        .iter()
-                        .any(|path| path.file_name() == Some(name.as_os_str()))
-                }) {
-                    let _ = sender.unbounded_send(());
-                }
-            })
-            .inspect_err(|error| eprintln!("bareframe: watching {}: {error}", dir.display()))
-            .ok()?;
-        watcher
-            .watch(&dir, RecursiveMode::NonRecursive)
-            .inspect_err(|error| eprintln!("bareframe: watching {}: {error}", dir.display()))
-            .ok()?;
-        let task = cx.spawn(async move |pane, cx| {
-            while receiver.next().await.is_some() {
-                cx.background_executor()
-                    .timer(Duration::from_millis(150))
-                    .await;
-                while receiver.try_recv().is_ok() {}
-                if pane
-                    .update(cx, |pane, cx| {
-                        pane.load();
-                        cx.notify();
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        });
-        Some((watcher, task))
+    fn watch(&self, cx: &mut Context<Self>) -> Option<Watch> {
+        watch_file(
+            &self.path,
+            |pane, cx| {
+                pane.load();
+                cx.notify();
+            },
+            cx,
+        )
     }
 
     fn render_block(&self, block: &Block, ids: &mut usize, cx: &mut Context<Self>) -> AnyElement {
