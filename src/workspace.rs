@@ -247,6 +247,7 @@ impl WorkspaceView {
         if shell.is_absolute() && shell.is_file() {
             config.shell = shell.to_path_buf();
         }
+        config.prompt_top = self.settings.get("prompt-position") == "top";
         let theme = self.terminal_theme();
         let pane = cx.new(|cx| TerminalPane::new(id, config, &theme, window, cx));
         let subscription =

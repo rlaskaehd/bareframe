@@ -3,14 +3,17 @@
 # user's .zprofile and .zshrc then load from their own ZDOTDIR as usual.
 'builtin' 'source' '--' "$BAREFRAME_GHOSTTY_ZSH/.zshenv"
 'builtin' 'unset' 'BAREFRAME_GHOSTTY_ZSH'
+_bareframe_prompt=$BAREFRAME_PROMPT
+'builtin' 'unset' 'BAREFRAME_PROMPT'
 
 # As in Warp, the prompt starts at the bottom of the screen and output scrolls up from
 # there. Blank lines, not a cursor jump, take it down at startup and after a clear: a
 # terminal starts before its pane has its final size, and when it grows Ghostty keeps the
 # prompt at the bottom only by pulling rows down from history, so history must hold
 # enough of them for the tallest window. Before each other prompt the cursor just drops
-# to the last row. Ctrl+L (which Cmd+K also sends) clears the same way.
-if [[ -o 'interactive' ]]; then
+# to the last row. Ctrl+L (which Cmd+K also sends) clears the same way. Settings can put
+# the prompt at the top instead (BAREFRAME_PROMPT=top), as other terminals have it.
+if [[ -o 'interactive' && $_bareframe_prompt != top ]]; then
     _bareframe_pad() { 'builtin' 'print' -n -- ${(pl:200::\n:)} }
     _bareframe_bottom() {
         if [[ -n $_bareframe_cleared ]]; then

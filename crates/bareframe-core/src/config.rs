@@ -15,6 +15,9 @@ pub struct LaunchConfig {
     pub cwd: PathBuf,
     pub shell: PathBuf,
     pub clean_shell: bool,
+    /// The prompt starts at the top of the screen, as in other terminals, rather than at
+    /// the bottom as in Warp. Only bareframe's zsh startup acts on it.
+    pub prompt_top: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -88,6 +91,7 @@ impl LaunchConfig {
             cwd,
             shell,
             clean_shell,
+            prompt_top: false,
         }))
     }
 
@@ -125,6 +129,9 @@ impl LaunchConfig {
         );
         if let Some(user) = user_zdotdir.and_then(Path::to_str) {
             command.push_str(&format!(" GHOSTTY_ZSH_ZDOTDIR={}", quote(user)));
+        }
+        if self.prompt_top {
+            command.push_str(" BAREFRAME_PROMPT=top");
         }
         command.push_str(" GHOSTTY_SHELL_FEATURES=title ");
         command.push_str(&self.command());
@@ -184,6 +191,7 @@ mod tests {
             cwd: PathBuf::from("/tmp/한글 project; touch unsafe"),
             shell: "/bin/zsh".into(),
             clean_shell: false,
+            prompt_top: false,
         };
         assert_eq!(config.command(), "'/bin/zsh' -l -i");
         assert!(!config.command().contains("unsafe"));
@@ -194,6 +202,7 @@ mod tests {
             cwd: "/tmp".into(),
             shell: "/a b/it's/zsh".into(),
             clean_shell: true,
+            prompt_top: false,
         };
         assert_eq!(config.command(), "'/a b/it'\\''s/zsh' -f -i");
     }
@@ -217,6 +226,7 @@ mod tests {
             cwd: "/tmp".into(),
             shell: "/bin/zsh".into(),
             clean_shell: false,
+            prompt_top: false,
         };
         let dirs = (Path::new("/App Support/it's/own"), Path::new("/g"));
         assert_eq!(
@@ -229,6 +239,13 @@ mod tests {
                 .command_with_zsh_integration(Some(dirs), None)
                 .contains("GHOSTTY_ZSH_ZDOTDIR")
         );
+        config.prompt_top = true;
+        assert!(
+            config
+                .command_with_zsh_integration(Some(dirs), None)
+                .contains(" BAREFRAME_PROMPT=top GHOSTTY_SHELL_FEATURES=title ")
+        );
+        config.prompt_top = false;
         assert_eq!(
             config.command_with_zsh_integration(None, None),
             config.command()

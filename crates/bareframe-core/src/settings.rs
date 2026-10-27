@@ -381,6 +381,17 @@ pub const DEFS: &[Def] = &[
     def(
         Features,
         "Terminal",
+        "prompt-position",
+        "Prompt position",
+        "Where the prompt starts: at the bottom of the screen as in Warp, or at the top as in \
+         other terminals. Applies to terminals opened afterwards; zsh only.",
+        Choice(&[("bottom", "Bottom"), ("top", "Top")]),
+        "bottom",
+        App,
+    ),
+    def(
+        Features,
+        "Terminal",
         "scrollback-limit-lines",
         "Scrollback limit (lines)",
         "Lines each terminal keeps above the screen; -1 for no line limit. Ghostty also caps \
