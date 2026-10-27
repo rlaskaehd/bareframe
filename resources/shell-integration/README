@@ -9,5 +9,4 @@ restores the user's ZDOTDIR, sources the user's own startup files and installs
 hooks that report the working directory (OSC 7) and set the terminal title.
 
 bareframe/.zshenv is bareframe's own file (MIT), not part of Ghostty's integration.
-ZDOTDIR points at it first; it sources Ghostty's .zshenv above, then starts the prompt
-at the bottom of the screen.
+ZDOTDIR points at it first and sources Ghostty's .zshenv above.

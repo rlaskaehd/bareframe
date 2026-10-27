@@ -15,9 +15,6 @@ pub struct LaunchConfig {
     pub cwd: PathBuf,
     pub shell: PathBuf,
     pub clean_shell: bool,
-    /// The prompt starts at the bottom of the screen, as in Warp, rather than at the top
-    /// as in other terminals. Only bareframe's zsh startup acts on it.
-    pub prompt_bottom: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -91,7 +88,6 @@ impl LaunchConfig {
             cwd,
             shell,
             clean_shell,
-            prompt_bottom: false,
         }))
     }
 
@@ -107,9 +103,8 @@ impl LaunchConfig {
 
     /// zsh reads `.zshenv` from bareframe's `own` directory first. It sources Ghostty's
     /// (`ghostty`), which restores the user's ZDOTDIR and rc files and installs the title and
-    /// OSC 7 hooks, then starts the prompt at the bottom of the screen. Ghostty's automatic
-    /// injection is unusable here (no resources dir), so it goes in the command. Clean
-    /// shells (`-f`) and other shells run unchanged.
+    /// OSC 7 hooks. Ghostty's automatic injection is unusable here (no resources dir), so
+    /// it goes in the command. Clean shells (`-f`) and other shells run unchanged.
     pub fn command_with_zsh_integration(
         &self,
         integration: Option<(&Path, &Path)>,
@@ -129,9 +124,6 @@ impl LaunchConfig {
         );
         if let Some(user) = user_zdotdir.and_then(Path::to_str) {
             command.push_str(&format!(" GHOSTTY_ZSH_ZDOTDIR={}", quote(user)));
-        }
-        if self.prompt_bottom {
-            command.push_str(" BAREFRAME_PROMPT=bottom");
         }
         command.push_str(" GHOSTTY_SHELL_FEATURES=title ");
         command.push_str(&self.command());
@@ -191,7 +183,6 @@ mod tests {
             cwd: PathBuf::from("/tmp/한글 project; touch unsafe"),
             shell: "/bin/zsh".into(),
             clean_shell: false,
-            prompt_bottom: false,
         };
         assert_eq!(config.command(), "'/bin/zsh' -l -i");
         assert!(!config.command().contains("unsafe"));
@@ -202,7 +193,6 @@ mod tests {
             cwd: "/tmp".into(),
             shell: "/a b/it's/zsh".into(),
             clean_shell: true,
-            prompt_bottom: false,
         };
         assert_eq!(config.command(), "'/a b/it'\\''s/zsh' -f -i");
     }
@@ -226,7 +216,6 @@ mod tests {
             cwd: "/tmp".into(),
             shell: "/bin/zsh".into(),
             clean_shell: false,
-            prompt_bottom: false,
         };
         let dirs = (Path::new("/App Support/it's/own"), Path::new("/g"));
         assert_eq!(
@@ -239,13 +228,6 @@ mod tests {
                 .command_with_zsh_integration(Some(dirs), None)
                 .contains("GHOSTTY_ZSH_ZDOTDIR")
         );
-        config.prompt_bottom = true;
-        assert!(
-            config
-                .command_with_zsh_integration(Some(dirs), None)
-                .contains(" BAREFRAME_PROMPT=bottom GHOSTTY_SHELL_FEATURES=title ")
-        );
-        config.prompt_bottom = false;
         assert_eq!(
             config.command_with_zsh_integration(None, None),
             config.command()

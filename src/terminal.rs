@@ -63,7 +63,6 @@ impl GhosttyAdapter {
             user_zdotdir.as_deref(),
         );
         let mut options = TerminalOptions::new(command, config.cwd.clone());
-        options.quiet_login = true;
         options.configuration = TerminalConfiguration::Custom(theme.clone());
         // Ghostty asks only for unsafe pastes (a newline outside bracketed paste, or text
         // that would end bracketed paste early) and, when set to ask, OSC 52 reads and
