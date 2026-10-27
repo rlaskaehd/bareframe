@@ -4,6 +4,7 @@ use super::{EditorEvent, EditorPane};
 use crate::{
     theme::{self, hsla},
     watch::{Watch, watch_file},
+    widgets,
 };
 use bareframe_core::text::Buffer;
 use gpui::{Context, div, prelude::*, px};
@@ -143,7 +144,9 @@ impl EditorPane {
             .file_name()
             .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
         let button = |id: &'static str, label: &'static str, primary: bool| {
-            theme::button(theme, id, label, primary).px_2().py(px(2.0))
+            widgets::button(theme, id, label, primary)
+                .px_2()
+                .py(px(2.0))
         };
         let (message, buttons): (String, Vec<gpui::Stateful<gpui::Div>>) = match notice {
             Notice::ConfirmClose => (

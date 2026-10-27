@@ -4,6 +4,7 @@ use crate::{
     explorer::file_name,
     text_field::{TextField, TextFieldEvent},
     theme::{self, Theme, hsla},
+    widgets,
 };
 use futures::StreamExt;
 use gpui::{
@@ -353,8 +354,8 @@ impl SearchPanel {
                 let toggled = path.clone();
                 base.pl(px(4.0))
                     .on_click(cx.listener(move |this, _, _, cx| this.toggle(&toggled, cx)))
-                    .child(theme::chevron(theme, !collapsed))
-                    .child(theme::icon(theme, "icons/folder.svg"))
+                    .child(widgets::chevron(theme, !collapsed))
+                    .child(widgets::icon(theme, "icons/folder.svg"))
                     .child(div().flex_1().min_w_0().truncate().child(name))
                     .child(badge(theme, count))
                     .into_any_element()
@@ -369,8 +370,8 @@ impl SearchPanel {
                 let toggled = path.clone();
                 base.pl(px(16.0))
                     .on_click(cx.listener(move |this, _, _, cx| this.toggle(&toggled, cx)))
-                    .child(theme::chevron(theme, !collapsed))
-                    .child(theme::icon(theme, "icons/file.svg"))
+                    .child(widgets::chevron(theme, !collapsed))
+                    .child(widgets::icon(theme, "icons/file.svg"))
                     .child(
                         div()
                             .flex_1()

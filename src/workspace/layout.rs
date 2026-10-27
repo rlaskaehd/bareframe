@@ -1,6 +1,9 @@
 //! The active tab's split layout and the pane headers, as in Warp.
 use super::{PaneView, Resize, WorkspaceView, drag::DraggedPane};
-use crate::theme::{self, hsla};
+use crate::{
+    theme::{self, hsla},
+    widgets,
+};
 use bareframe_core::layout::{Axis, Layout, PaneId};
 use gpui::{AnyElement, Context, CursorStyle, MouseButton, canvas, div, prelude::*, px, relative};
 
@@ -59,19 +62,21 @@ impl WorkspaceView {
                     .flex()
                     .items_center()
                     .gap_1()
-                    .child(theme::icon_button(theme, ("pane-menu", key), "⋮").on_click(
-                        cx.listener(move |view, event: &gpui::ClickEvent, window, cx| {
-                            cx.stop_propagation();
-                            view.open_pane_menu(id, event.position(), window, cx)
-                        }),
-                    ))
                     .child(
-                        theme::icon_button(theme, ("pane-close", key), "×").on_click(cx.listener(
-                            move |view, _, window, cx| {
+                        widgets::icon_button(theme, ("pane-menu", key), "⋮").on_click(cx.listener(
+                            move |view, event: &gpui::ClickEvent, window, cx| {
                                 cx.stop_propagation();
-                                view.close_pane(id, window, cx)
+                                view.open_pane_menu(id, event.position(), window, cx)
                             },
                         )),
+                    )
+                    .child(
+                        widgets::icon_button(theme, ("pane-close", key), "×").on_click(
+                            cx.listener(move |view, _, window, cx| {
+                                cx.stop_propagation();
+                                view.close_pane(id, window, cx)
+                            }),
+                        ),
                     ),
             )
             .into_any_element()

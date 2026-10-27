@@ -6,9 +6,10 @@ use super::{
 };
 use crate::{
     repo::{self, Summary},
-    review::{self, ReviewEvent},
+    review::ReviewEvent,
     theme::hsla,
     watch::{Watch, watch},
+    widgets,
 };
 use gpui::{Context, Window, div, prelude::*, px};
 use notify::RecursiveMode;
@@ -146,7 +147,7 @@ impl WorkspaceView {
                         .size(px(15.0))
                         .text_color(hsla(color)),
                 )
-                .children(counts.map(|(added, removed)| review::counts(theme, added, removed))),
+                .children(counts.map(|(added, removed)| widgets::counts(theme, added, removed))),
         )
     }
 

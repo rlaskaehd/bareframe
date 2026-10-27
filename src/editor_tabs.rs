@@ -3,6 +3,7 @@
 use crate::{
     editor::{EditorEvent, EditorPane},
     theme::{self, Theme, hsla},
+    widgets,
 };
 use gpui::{Context, Entity, EventEmitter, Subscription, Window, div, prelude::*, px};
 use std::path::Path;
@@ -226,7 +227,7 @@ impl EditorTabs {
                             .child(file.editor.read(cx).file_name()),
                     )
                     .child(
-                        theme::icon_button(theme, ("editor-tab-close", index), "×").on_click(
+                        widgets::icon_button(theme, ("editor-tab-close", index), "×").on_click(
                             cx.listener(move |tabs, _, _, cx| {
                                 cx.stop_propagation();
                                 tabs.close_file(index, cx);

@@ -5,6 +5,7 @@ use crate::{
     repo::{self, Base, FileReview},
     text_field::{TextField, TextFieldEvent},
     theme::{self, Theme, hsla},
+    widgets,
 };
 use bareframe_core::git::{Change, Entry, LineKind, Status};
 use gpui::{
@@ -401,7 +402,7 @@ impl CodeReview {
                         ))
                     })
                     .child(
-                        theme::icon_button(theme, "review-close", "×")
+                        widgets::icon_button(theme, "review-close", "×")
                             .on_click(cx.listener(|_, _, _, cx| cx.emit(ReviewEvent::Close))),
                     ),
             )
@@ -432,7 +433,7 @@ impl CodeReview {
                             .text_color(hsla(theme.text_muted))
                             .child(format!("{} files", self.files.len())),
                     )
-                    .child(counts(theme, added, removed)),
+                    .child(widgets::counts(theme, added, removed)),
             )
             .when(self.choosing_base, |this| this.child(self.render_bases(cx)))
             .children(self.render_commit_form(cx))
@@ -786,7 +787,7 @@ impl CodeReview {
                         .child(if excluded { "☐" } else { "☑" }),
                 )
             })
-            .child(theme::chevron(theme, !collapsed))
+            .child(widgets::chevron(theme, !collapsed))
             .child(
                 div()
                     .flex_none()
@@ -810,7 +811,7 @@ impl CodeReview {
                             .child(dir),
                     ),
             )
-            .child(counts(theme, file.counts.0, file.counts.1))
+            .child(widgets::counts(theme, file.counts.0, file.counts.1))
             .child(
                 small_text_button(theme, ("review-copy", index), "Copy").on_click(cx.listener(
                     move |_, _, _, cx| {
@@ -895,32 +896,13 @@ impl Render for CodeReview {
     }
 }
 
-/// `+N −M` in the diff colors.
-pub fn counts(theme: &Theme, added: u64, removed: u64) -> impl IntoElement {
-    div()
-        .flex()
-        .flex_none()
-        .gap_1()
-        .text_size(px(12.0))
-        .child(
-            div()
-                .text_color(hsla(theme.palette[2]))
-                .child(format!("+{added}")),
-        )
-        .child(
-            div()
-                .text_color(hsla(theme.palette[1]))
-                .child(format!("−{removed}")),
-        )
-}
-
 fn button(
     theme: &Theme,
     id: &'static str,
     label: &'static str,
     primary: bool,
 ) -> gpui::Stateful<gpui::Div> {
-    theme::button(theme, id, label, primary)
+    widgets::button(theme, id, label, primary)
         .px_2()
         .py(px(3.0))
         .text_size(px(12.0))
@@ -931,7 +913,7 @@ fn small_text_button(
     id: impl Into<gpui::ElementId>,
     label: &'static str,
 ) -> gpui::Stateful<gpui::Div> {
-    theme::ghost_button(theme, id, label)
+    widgets::ghost_button(theme, id, label)
         .flex_none()
         .px_1()
         .rounded_sm()

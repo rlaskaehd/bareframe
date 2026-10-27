@@ -4,7 +4,10 @@ use super::{
     Diagram, MarkdownEvent, MarkdownPane, TEXT_SIZE, Target,
     parse::{Block, Inline, Style},
 };
-use crate::theme::{self, hsla};
+use crate::{
+    theme::{self, hsla},
+    widgets,
+};
 use gpui::{
     AnyElement, App, Context, Font, FontStyle, FontWeight, InteractiveText, StrikethroughStyle,
     StyledText, TextRun, UnderlineStyle, div, img, prelude::*, px,
@@ -213,7 +216,7 @@ impl MarkdownPane {
         let copied = text.to_owned();
         let inserted = text.to_owned();
         let button = |id: (&'static str, usize), label: &'static str| {
-            theme::ghost_button(theme, id, label)
+            widgets::ghost_button(theme, id, label)
                 .px_2()
                 .py(px(2.0))
                 .rounded_sm()

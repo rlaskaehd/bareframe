@@ -3,6 +3,7 @@
 use crate::{
     text_field::{TextField, TextFieldEvent},
     theme::{self, Theme, hsla},
+    widgets,
 };
 use bareframe_core::{
     keymap::{self, ACTIONS, Trigger},
@@ -489,7 +490,11 @@ impl SettingsPane {
                     .flex()
                     // Wider than the gap between caps, so each shortcut reads as one group.
                     .gap_4()
-                    .children(triggers.iter().map(|trigger| caps(theme, trigger, false))),
+                    .children(
+                        triggers
+                            .iter()
+                            .map(|trigger| widgets::caps(theme, trigger, false)),
+                    ),
             );
         let Some(recording) = editing else {
             return row.into_any_element();
@@ -531,7 +536,7 @@ impl SettingsPane {
                             .flex()
                             .items_center()
                             .gap_2()
-                            .child(caps(theme, trigger, conflict.is_some()))
+                            .child(widgets::caps(theme, trigger, conflict.is_some()))
                             .when_some(conflict, |this, other| {
                                 this.child(
                                     div()
@@ -725,33 +730,4 @@ impl Render for SettingsPane {
                     ),
             )
     }
-}
-
-/// Key caps as Warp draws them, outlined in orange when the shortcut is taken.
-pub fn caps(theme: &Theme, trigger: &Trigger, conflict: bool) -> AnyElement {
-    div()
-        .flex()
-        .gap_1()
-        .children(trigger.caps().into_iter().map(|cap| {
-            div()
-                .min_w(px(22.0))
-                .h(px(22.0))
-                .px_1()
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded_sm()
-                .border_1()
-                .border_color(hsla(if conflict {
-                    theme.group_colors[3]
-                } else {
-                    theme.border
-                }))
-                .bg(hsla(theme.terminal_background))
-                // Explicit, so caps stay readable on the highlighted row.
-                .text_color(hsla(theme.text))
-                .text_size(px(12.0))
-                .child(cap)
-        }))
-        .into_any_element()
 }

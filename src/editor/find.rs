@@ -3,6 +3,7 @@ use super::EditorPane;
 use crate::{
     text_field::{TextField, TextFieldEvent},
     theme::{self, hsla},
+    widgets,
 };
 use bareframe_core::text::Position;
 use gpui::{App, Context, Entity, Subscription, Window, div, prelude::*, px};
@@ -255,7 +256,7 @@ impl EditorPane {
                 .child(input.clone())
         };
         let button = |id: &'static str, label: &'static str| {
-            theme::ghost_button(theme, id, label)
+            widgets::ghost_button(theme, id, label)
                 .flex_none()
                 .px_2()
                 .py(px(2.0))

@@ -21,6 +21,7 @@ mod terminal;
 mod text_field;
 mod theme;
 mod watch;
+mod widgets;
 mod workspace;
 
 use bareframe_core::config::{HELP, LaunchConfig, LaunchRequest};

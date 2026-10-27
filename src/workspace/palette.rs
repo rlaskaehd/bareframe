@@ -3,9 +3,10 @@
 use super::{PaneView, WorkspaceView};
 use crate::{
     app,
-    settings_pane::{self, Section},
+    settings_pane::Section,
     text_field::{TextField, TextFieldEvent},
     theme::hsla,
+    widgets,
 };
 use bareframe_core::{
     fuzzy::fuzzy_match,
@@ -233,7 +234,7 @@ impl WorkspaceView {
                     div().flex().gap_4().children(
                         item.triggers
                             .iter()
-                            .map(|trigger| settings_pane::caps(theme, trigger, false)),
+                            .map(|trigger| widgets::caps(theme, trigger, false)),
                     ),
                 )
         });

@@ -1,6 +1,9 @@
 //! Project explorer: the focused pane's working directory as a lazily loaded file tree,
 //! following Warp's tools panel. Gitignored entries stay visible but dimmed.
-use crate::theme::{self, Theme, hsla};
+use crate::{
+    theme::{self, Theme, hsla},
+    widgets,
+};
 use futures::StreamExt;
 use gpui::{
     Context, EventEmitter, FocusHandle, MouseButton, MouseDownEvent, Pixels, Point, Task,
@@ -394,9 +397,9 @@ impl Explorer {
                 }),
             )
             .child(div().w(px(12.0)).flex_none().when(row.dir, |this| {
-                this.child(theme::chevron(theme, row.expanded))
+                this.child(widgets::chevron(theme, row.expanded))
             }))
-            .child(theme::icon(theme, icon_path))
+            .child(widgets::icon(theme, icon_path))
             .child(div().truncate().child(row.name))
             .into_any_element()
     }

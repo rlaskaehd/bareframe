@@ -4,7 +4,8 @@ use super::{WorkspaceView, menu::MenuAction};
 use crate::{
     explorer::ExplorerEvent,
     search::SearchEvent,
-    theme::{self, Theme, hsla},
+    theme::{Theme, hsla},
+    widgets,
 };
 use bareframe_core::config::quote;
 use gpui::{Context, Pixels, Point, Window, div, prelude::*, px};
@@ -255,7 +256,7 @@ impl WorkspaceView {
                     })
                     .child(div().flex_1())
                     .child(
-                        theme::icon_button(theme, "close-tools", "×").on_click(cx.listener(
+                        widgets::icon_button(theme, "close-tools", "×").on_click(cx.listener(
                             |view, _, window, cx| {
                                 cx.stop_propagation();
                                 view.toggle_tools(window, cx)

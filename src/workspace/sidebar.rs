@@ -6,6 +6,7 @@ use super::{
 use crate::{
     text_field::{TextField, TextFieldEvent},
     theme::{self, Theme, hsla},
+    widgets,
 };
 use bareframe_core::workspace::{GroupId, Tab};
 use gpui::{AnyElement, Context, Hsla, MouseButton, MouseDownEvent, Window, div, prelude::*, px};
@@ -286,7 +287,7 @@ impl WorkspaceView {
                             .children(search),
                     )
                     .child(
-                        theme::icon_button(theme, "new-tab", "+")
+                        widgets::icon_button(theme, "new-tab", "+")
                             .text_size(px(16.0))
                             .on_click(cx.listener(|view, _, window, cx| {
                                 cx.stop_propagation();
@@ -396,7 +397,7 @@ impl WorkspaceView {
                     .invisible()
                     .group_hover(hover, |style| style.visible())
                     .child(
-                        theme::icon_button(theme, ("group-new-tab", id.0), "+").on_click(
+                        widgets::icon_button(theme, ("group-new-tab", id.0), "+").on_click(
                             cx.listener(move |view, _, window, cx| {
                                 cx.stop_propagation();
                                 view.new_tab_in_group(id, window, cx)
@@ -404,7 +405,7 @@ impl WorkspaceView {
                         ),
                     )
                     .child(
-                        theme::icon_button(theme, ("group-close", id.0), "×").on_click(
+                        widgets::icon_button(theme, ("group-close", id.0), "×").on_click(
                             cx.listener(move |view, _, window, cx| {
                                 cx.stop_propagation();
                                 view.close_tabs(&view.model.group_tabs(id), window, cx)
@@ -571,20 +572,20 @@ impl WorkspaceView {
                     .invisible()
                     .group_hover(hover, |style| style.visible())
                     .child(
-                        theme::icon_button(theme, ("tab-menu", index), "⋮").on_click(cx.listener(
-                            move |view, event: &gpui::ClickEvent, _, cx| {
+                        widgets::icon_button(theme, ("tab-menu", index), "⋮").on_click(
+                            cx.listener(move |view, event: &gpui::ClickEvent, _, cx| {
                                 cx.stop_propagation();
                                 view.open_tab_menu(index, event.position(), cx)
-                            },
-                        )),
+                            }),
+                        ),
                     )
                     .child(
-                        theme::icon_button(theme, ("close-tab", index), "×").on_click(cx.listener(
-                            move |view, _, window, cx| {
+                        widgets::icon_button(theme, ("close-tab", index), "×").on_click(
+                            cx.listener(move |view, _, window, cx| {
                                 cx.stop_propagation();
                                 view.close_tabs(&[index], window, cx)
-                            },
-                        )),
+                            }),
+                        ),
                     ),
             )
             .into_any_element()
