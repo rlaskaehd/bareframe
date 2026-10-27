@@ -6,7 +6,7 @@ use crate::{
 };
 use gpui::{
     AnyElement, App, Context, EventEmitter, FocusHandle, Font, FontStyle, FontWeight,
-    InteractiveText, ListAlignment, ListState, StrikethroughStyle, StyledText, TextRun,
+    InteractiveText, ListAlignment, ListState, StrikethroughStyle, StyledText, Task, TextRun,
     UnderlineStyle, Window, div, img, list, prelude::*, px,
 };
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
@@ -488,7 +488,41 @@ pub struct MarkdownPane {
     /// Links and pictures resolved against the disk once per load, not on every redraw.
     links: std::collections::HashMap<String, Option<Target>>,
     pictures: std::collections::HashMap<String, Option<PathBuf>>,
+    /// Mermaid diagrams by their source, drawn off the UI thread; `diagrams_dark` is the
+    /// theme they were drawn in.
+    diagrams: std::collections::HashMap<String, Diagram>,
+    diagrams_dark: bool,
+    _diagrams: Option<Task<()>>,
     _watch: Option<Watch>,
+}
+
+enum Diagram {
+    Pending,
+    Ready(std::sync::Arc<gpui::Image>),
+    Failed(String),
+}
+
+/// The source of every Mermaid code block in `blocks`, nested ones included.
+fn mermaid_sources<'a>(blocks: &'a [Block], out: &mut Vec<&'a str>) {
+    for block in blocks {
+        match block {
+            Block::Code { language, text } if language == "mermaid" => out.push(text),
+            Block::Quote(blocks) => mermaid_sources(blocks, out),
+            Block::List { items, .. } => {
+                for item in items {
+                    mermaid_sources(&item.blocks, out);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Whether the theme is dark, judged by its background's brightness.
+fn is_dark(theme: &Theme) -> bool {
+    let rgb = theme.terminal_background;
+    let (r, g, b) = ((rgb >> 16) & 0xff, (rgb >> 8) & 0xff, rgb & 0xff);
+    r * 299 + g * 587 + b * 114 < 128_000
 }
 
 impl EventEmitter<MarkdownEvent> for MarkdownPane {}
@@ -522,9 +556,13 @@ impl MarkdownPane {
             list: ListState::new(0, ListAlignment::Top, px(600.0)),
             links: Default::default(),
             pictures: Default::default(),
+            diagrams: Default::default(),
+            diagrams_dark: is_dark(theme),
+            _diagrams: None,
             _watch: None,
         };
         pane.load();
+        pane.draw_diagrams(cx);
         pane._watch = pane.watch(cx);
         pane
     }
@@ -544,12 +582,69 @@ impl MarkdownPane {
     pub fn set_theme(&mut self, theme: &'static Theme, mono: String, cx: &mut Context<Self>) {
         self.theme = theme;
         self.mono = mono;
+        // Diagrams carry their colors, so a switch between dark and light redraws them.
+        if is_dark(theme) != self.diagrams_dark {
+            self.diagrams_dark = is_dark(theme);
+            self.diagrams.clear();
+            self.draw_diagrams(cx);
+        }
         cx.notify();
+    }
+
+    /// Draws the document's Mermaid diagrams not drawn yet, in the background. The list is
+    /// laid out again when they arrive, since a picture is taller than its source.
+    fn draw_diagrams(&mut self, cx: &mut Context<Self>) {
+        let mut sources = Vec::new();
+        mermaid_sources(&self.blocks, &mut sources);
+        let wanted: Vec<String> = sources
+            .into_iter()
+            .filter(|source| !self.diagrams.contains_key(*source))
+            .map(str::to_owned)
+            .collect();
+        if wanted.is_empty() {
+            return;
+        }
+        for source in &wanted {
+            self.diagrams.insert(source.clone(), Diagram::Pending);
+        }
+        let dark = self.diagrams_dark;
+        self._diagrams = Some(cx.spawn(async move |pane, cx| {
+            let drawn = cx
+                .background_executor()
+                .spawn(async move {
+                    wanted
+                        .into_iter()
+                        .map(|source| {
+                            let diagram = match crate::diagram::render(&source, dark) {
+                                Ok(svg) => {
+                                    Diagram::Ready(std::sync::Arc::new(gpui::Image::from_bytes(
+                                        gpui::ImageFormat::Svg,
+                                        svg.into_bytes(),
+                                    )))
+                                }
+                                Err(error) => Diagram::Failed(error),
+                            };
+                            (source, diagram)
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .await;
+            pane.update(cx, |pane, cx| {
+                if pane.diagrams_dark != dark {
+                    return;
+                }
+                pane.diagrams.extend(drawn);
+                pane.relayout();
+                cx.notify();
+            })
+            .ok();
+        }));
     }
 
     fn navigate(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         self.path = path;
         self.load();
+        self.draw_diagrams(cx);
         self._watch = self.watch(cx);
         self.list.scroll_to(gpui::ListOffset::default());
         cx.notify();
@@ -594,7 +689,11 @@ impl MarkdownPane {
         }
         self.links = links;
         self.pictures = pictures;
-        // Keep the reader's place when the file changes on disk.
+        self.relayout();
+    }
+
+    /// Measures every block again, keeping the reader's place.
+    fn relayout(&mut self) {
         let top = self.list.logical_scroll_top();
         self.list.reset(self.blocks.len());
         if top.item_ix < self.blocks.len() {
@@ -607,6 +706,7 @@ impl MarkdownPane {
             &self.path,
             |pane, cx| {
                 pane.load();
+                pane.draw_diagrams(cx);
                 cx.notify();
             },
             cx,
@@ -748,6 +848,51 @@ impl MarkdownPane {
     }
 
     fn render_code(
+        &self,
+        language: &str,
+        text: &str,
+        ids: &mut usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.theme;
+        if language == "mermaid" {
+            match self.diagrams.get(text) {
+                Some(Diagram::Ready(image)) => {
+                    return div()
+                        .w_full()
+                        .flex()
+                        .justify_center()
+                        .child(img(image.clone()).max_w_full())
+                        .into_any_element();
+                }
+                Some(Diagram::Pending) | None => {
+                    return div()
+                        .text_color(hsla(theme.text_muted))
+                        .child("Drawing diagram…")
+                        .into_any_element();
+                }
+                // Not drawable: the source as a code block, with why below.
+                Some(Diagram::Failed(error)) => {
+                    let error = format!("Mermaid: {error}");
+                    return div()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child(self.render_source(language, text, ids, cx))
+                        .child(
+                            div()
+                                .text_size(px(12.0))
+                                .text_color(hsla(theme.text_muted))
+                                .child(error),
+                        )
+                        .into_any_element();
+                }
+            }
+        }
+        self.render_source(language, text, ids, cx)
+    }
+
+    fn render_source(
         &self,
         language: &str,
         text: &str,

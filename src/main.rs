@@ -2,6 +2,7 @@
 compile_error!("bareframe currently targets macOS");
 
 mod app;
+mod diagram;
 mod editor;
 mod editor_tabs;
 mod explorer;

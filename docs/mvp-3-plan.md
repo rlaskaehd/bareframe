@@ -163,7 +163,8 @@ Warp 화면: `.md`를 열면 오른쪽 분할 Pane으로 열린다. 머리에 �
 | 렌더링 | `pulldown-cmark` → GPUI 요소. 제목, 문단, 굵게·기울임·취소선, 인라인 코드, 코드 블록(복사 버튼, 셸 블록은 "터미널에 붙여넣기"), 목록·체크 목록, 인용, 구분선, 링크(`open`), 로컬 이미지, GFM 표 |
 | 편집 | `Cmd+E` 또는 `Raw`로 같은 파일을 B3 편집기로 전환(스크롤 위치 유지). 실시간 미리보기는 하지 않는다(Warp와 같음) |
 | 갱신 | 파일이 바뀌면 다시 읽는다 |
-| 제외 | Mermaid, 인라인 HTML |
+| 제외 | 인라인 HTML |
+| Mermaid(추가) | 사용자 요청으로 추가. mmdr, merman, mermaid-svg, Warp의 mermaid-to-svg를 실제 설계 문서(ads-server-drd.md의 flowchart·ER·state·sequence 7개)로 비교해, 서브그래프와 복잡한 상태도를 바르게 그린 merman을 골랐다(SVG와 다이어그램 11종만 빌드). GPUI의 SVG 렌더러가 HTML 라벨을 그리지 못해 `htmlLabels: false`로 그린다 |
 | 구현(3b-1) | `src/markdown.rs`: `pulldown-cmark` 이벤트를 블록·인라인 모델로 바꿔 GPUI 요소로 그린다(파서 테스트 포함). 다른 Markdown으로 가는 링크는 같은 Pane에서 연다. 웹 이미지는 불러오지 않는다(파일을 연 사실이 외부 서버에 알려지지 않게). 설정은 Features › Files에 두었다. `Raw` 전환은 B3 편집기와 함께 3b-4에서 붙인다 |
 
 ### B2. Diff 버튼과 Code review 창

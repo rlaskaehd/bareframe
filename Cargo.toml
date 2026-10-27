@@ -48,6 +48,23 @@ arborium = { version = "2.18", default-features = false, features = [
 ] }
 # Already built for GPUI; used here only to read a picture's size from its header.
 image = { version = "0.25", default-features = false }
+# Mermaid diagrams in the Markdown viewer (MIT/Apache). Compared with mmdr, mermaid-svg and
+# Warp's mermaid-to-svg on a real design document, it alone drew subgraphs and busy state
+# diagrams correctly. Only SVG output and common diagram kinds are built, to keep it lean.
+merman = { version = "0.9.2", default-features = false, features = [
+    "svg",
+    "diagram-class",
+    "diagram-er",
+    "diagram-flowchart",
+    "diagram-gantt",
+    "diagram-git-graph",
+    "diagram-journey",
+    "diagram-mindmap",
+    "diagram-pie",
+    "diagram-sequence",
+    "diagram-state",
+    "diagram-timeline",
+] }
 
 # Dependencies (GPUI's layout and text shaping, tree-sitter, the Mermaid layout) run many
 # times slower unoptimized, which made the app itself sluggish. They are built optimized
