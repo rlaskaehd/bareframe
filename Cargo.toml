@@ -21,6 +21,9 @@ notify = "8"
 futures = "0.3"
 grep = "0.4"
 pulldown-cmark = { version = "0.13", default-features = false }
+trash = "5"
+# Already built for GPUI; used here only to read a picture's size from its header.
+image = { version = "0.25", default-features = false }
 
 [lints.rust]
 unsafe_code = "deny"

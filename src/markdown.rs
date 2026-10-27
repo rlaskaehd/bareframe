@@ -22,6 +22,8 @@ const MAX_DEPTH: usize = 32;
 /// Larger files are not rendered; reading and laying them out would stall the window.
 const MAX_FILE: u64 = 8 << 20;
 const MAX_IMAGE: u64 = 20 << 20;
+/// Pixels a picture may decode to; a small file can claim a huge canvas.
+const MAX_PIXELS: u64 = 50_000_000;
 /// Readable line length; wider panes center the text, as Warp does.
 const MAX_WIDTH: f32 = 860.0;
 
@@ -368,7 +370,26 @@ fn percent_decode(text: &str) -> String {
     String::from_utf8(out).unwrap_or_else(|_| text.to_owned())
 }
 
-/// A picture file of a sensible size: a link could name a device or a huge file.
+/// Reads a regular file of at most `MAX_FILE` bytes; a pipe or device under a `.md` name
+/// would otherwise block or never end. The cap holds even if the file grows meanwhile.
+fn read_document(path: &Path) -> Result<String, String> {
+    use std::io::Read;
+    let file = std::fs::File::open(path).map_err(|error| error.to_string())?;
+    if !file.metadata().is_ok_and(|metadata| metadata.is_file()) {
+        return Err("not a regular file".into());
+    }
+    let mut bytes = Vec::new();
+    file.take(MAX_FILE + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| error.to_string())?;
+    if bytes.len() as u64 > MAX_FILE {
+        return Err(format!("larger than {} MB", MAX_FILE >> 20));
+    }
+    String::from_utf8(bytes).map_err(|_| "not UTF-8 text".into())
+}
+
+/// A picture file of a sensible size: a link could name a device, a huge file, or a small
+/// file that decodes to a huge canvas (only the header is read to check).
 fn is_image(path: &Path) -> bool {
     let picture = path
         .extension()
@@ -380,6 +401,8 @@ fn is_image(path: &Path) -> bool {
     picture
         && std::fs::metadata(path)
             .is_ok_and(|metadata| metadata.is_file() && metadata.len() <= MAX_IMAGE)
+        && image::image_dimensions(path)
+            .is_ok_and(|(width, height)| u64::from(width) * u64::from(height) <= MAX_PIXELS)
 }
 
 /// Code blocks in these languages get Warp's "insert into terminal" button.
@@ -453,23 +476,14 @@ impl MarkdownPane {
     }
 
     fn load(&mut self) {
-        let size = std::fs::metadata(&self.path).map_or(0, |metadata| metadata.len());
-        if size > MAX_FILE {
-            self.blocks.clear();
-            self.error = Some(format!(
-                "{} is too large to show ({} MB).",
-                self.path.display(),
-                size >> 20
-            ));
-            return;
-        }
-        match std::fs::read_to_string(&self.path) {
+        match read_document(&self.path) {
             Ok(text) => {
                 self.blocks = parse(&text);
                 self.error = None;
             }
             Err(error) => {
-                self.error = Some(format!("Could not read {}: {error}", self.path.display()))
+                self.blocks.clear();
+                self.error = Some(format!("Could not show {}: {error}", self.path.display()));
             }
         }
     }
@@ -954,6 +968,29 @@ mod tests {
         assert_eq!(level.as_slice(), [Block::Paragraph(plain("text"))]);
         let list = format!("{}- item\n", "- ".repeat(5000));
         assert!(!parse(&list).is_empty());
+    }
+
+    #[test]
+    fn documents_and_images_are_bounded() {
+        let dir = std::env::temp_dir().join(format!("bareframe-md-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let big = dir.join("big.md");
+        std::fs::write(&big, vec![b'a'; MAX_FILE as usize + 1]).unwrap();
+        assert!(read_document(&big).is_err());
+        assert!(
+            read_document(&dir).is_err(),
+            "a directory is not a document"
+        );
+        // A PNG header claiming 100000 × 100000 pixels, in a file of a few bytes.
+        let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR".to_vec();
+        png.extend(100_000u32.to_be_bytes());
+        png.extend(100_000u32.to_be_bytes());
+        png.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
+        let bomb = dir.join("bomb.png");
+        std::fs::write(&bomb, png).unwrap();
+        assert!(!is_image(&bomb));
+        assert!(!is_image(&dir.join("missing.png")));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
