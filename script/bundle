@@ -2,13 +2,27 @@
 set -euo pipefail
 source "$(dirname "$0")/env"
 cd "$BAREFRAME_ROOT"
-cargo build --locked
 bundle_name=bareframe
-if [[ "${1:-}" == --validation ]]; then
-    bundle_name=bareframe-validation
-    mkdir -p target/validation
+profile=debug
+bundles="$CARGO_TARGET_DIR"
+case "${1:-}" in
+    --validation)
+        bundle_name=bareframe-validation
+        mkdir -p target/validation
+        ;;
+    # An optimized build to hand to others, kept apart from the everyday bundle so a
+    # running copy of that one is never overwritten underneath itself.
+    --release)
+        profile=release
+        bundles="$CARGO_TARGET_DIR/dist"
+        ;;
+esac
+if [[ "$profile" == release ]]; then
+    cargo build --locked --release
+else
+    cargo build --locked
 fi
-bundle_dir="$CARGO_TARGET_DIR/$bundle_name.app/Contents"
+bundle_dir="$bundles/$bundle_name.app/Contents"
 mkdir -p "$bundle_dir/MacOS" "$bundle_dir/Resources"
 # Shell integration (GPLv3) that the app finds at ../Resources/shell-integration/zsh.
 integration="$bundle_dir/Resources/shell-integration"
@@ -20,7 +34,7 @@ cp vendor/gpui-libghostty/crates/gpui-ghostty/vendor/ghostty/src/shell-integrati
 cp resources/shell-integration/README resources/shell-integration/COPYING "$integration/"
 mkdir -p "$integration/bareframe"
 cp resources/shell-integration/bareframe/.zshenv "$integration/bareframe/"
-cp "$CARGO_TARGET_DIR/debug/bareframe" "$bundle_dir/MacOS/bareframe"
+cp "$CARGO_TARGET_DIR/$profile/bareframe" "$bundle_dir/MacOS/bareframe"
 cat > "$bundle_dir/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -58,5 +72,5 @@ if [[ "$bundle_name" == bareframe-validation ]]; then
         -c 'Add :LSEnvironment dict' \
         -c 'Add :LSEnvironment:BAREFRAME_VALIDATION string 1' "$bundle_dir/Info.plist"
 fi
-codesign --force --sign - "$CARGO_TARGET_DIR/$bundle_name.app"
-echo "$CARGO_TARGET_DIR/$bundle_name.app"
+codesign --force --sign - "$bundles/$bundle_name.app"
+echo "$bundles/$bundle_name.app"
