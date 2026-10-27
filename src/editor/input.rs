@@ -1,9 +1,21 @@
 //! The editor as the system input method's client, so Korean composition works.
 use super::EditorPane;
+use bareframe_core::text::Position;
 use gpui::{
     Bounds, Context, EntityInputHandler, Pixels, Point, UTF16Selection, Window, point, px, size,
 };
 use std::ops::Range;
+
+impl EditorPane {
+    /// What the input method replaces: the range it names, else the text being composed,
+    /// else the selection.
+    fn input_range(&self, range_utf16: Option<Range<usize>>) -> Range<Position> {
+        match range_utf16 {
+            Some(range) => self.buffer.from_utf16(range.start)..self.buffer.from_utf16(range.end),
+            None => self.marked.clone().unwrap_or_else(|| self.selection()),
+        }
+    }
+}
 
 impl EntityInputHandler for EditorPane {
     fn text_for_range(
@@ -48,10 +60,7 @@ impl EntityInputHandler for EditorPane {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let range = match range_utf16 {
-            Some(range) => self.buffer.from_utf16(range.start)..self.buffer.from_utf16(range.end),
-            None => self.marked.clone().unwrap_or_else(|| self.selection()),
-        };
+        let range = self.input_range(range_utf16);
         self.replace(range, new_text, cx);
     }
 
@@ -63,10 +72,7 @@ impl EntityInputHandler for EditorPane {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let range = match range_utf16 {
-            Some(range) => self.buffer.from_utf16(range.start)..self.buffer.from_utf16(range.end),
-            None => self.marked.clone().unwrap_or_else(|| self.selection()),
-        };
+        let range = self.input_range(range_utf16);
         let start = range.start.min(range.end);
         let end = self.replace(range, new_text, cx);
         if self.read_only {

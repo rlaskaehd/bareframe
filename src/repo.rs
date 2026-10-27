@@ -47,14 +47,14 @@ fn run_with(root: &Path, args: &[&str], ok: &[i32]) -> Result<String, String> {
     if output.status.code().is_some_and(|code| ok.contains(&code)) {
         Ok(String::from_utf8_lossy(&output.stdout).into_owned())
     } else {
-        let error = String::from_utf8_lossy(&output.stderr);
-        Err(error
-            .trim()
-            .lines()
-            .last()
-            .unwrap_or("git failed")
-            .to_owned())
+        Err(last_line(&output.stderr, "git failed"))
     }
+}
+
+/// git's error: the last line it wrote, which names what went wrong.
+fn last_line(stderr: &[u8], fallback: &str) -> String {
+    let error = String::from_utf8_lossy(stderr);
+    error.trim().lines().last().unwrap_or(fallback).to_owned()
 }
 
 fn run(root: &Path, args: &[&str]) -> Result<String, String> {
@@ -413,13 +413,7 @@ pub fn revert_hunk(root: &Path, patch: &str) -> Result<(), String> {
     if output.status.success() {
         Ok(())
     } else {
-        let error = String::from_utf8_lossy(&output.stderr);
-        Err(error
-            .trim()
-            .lines()
-            .last()
-            .unwrap_or("git apply failed")
-            .to_owned())
+        Err(last_line(&output.stderr, "git apply failed"))
     }
 }
 

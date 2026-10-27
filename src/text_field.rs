@@ -160,6 +160,16 @@ impl TextField {
         utf16_column(&self.content, range.start)..utf16_column(&self.content, range.end)
     }
 
+    /// What the input method replaces: the range it names, else the text being composed,
+    /// else the selection.
+    fn input_range(&self, range_utf16: Option<Range<usize>>) -> Range<usize> {
+        range_utf16
+            .as_ref()
+            .map(|range| self.range_from_utf16(range))
+            .or(self.marked_range.clone())
+            .unwrap_or(self.selected_range.clone())
+    }
+
     fn range_from_utf16(&self, range: &Range<usize>) -> Range<usize> {
         byte_column(&self.content, range.start)..byte_column(&self.content, range.end)
     }
@@ -298,11 +308,7 @@ impl EntityInputHandler for TextField {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let range = range_utf16
-            .as_ref()
-            .map(|range| self.range_from_utf16(range))
-            .or(self.marked_range.clone())
-            .unwrap_or(self.selected_range.clone());
+        let range = self.input_range(range_utf16);
         self.content.replace_range(range.clone(), new_text);
         let cursor = range.start + new_text.len();
         self.selected_range = cursor..cursor;
@@ -318,11 +324,7 @@ impl EntityInputHandler for TextField {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let range = range_utf16
-            .as_ref()
-            .map(|range| self.range_from_utf16(range))
-            .or(self.marked_range.clone())
-            .unwrap_or(self.selected_range.clone());
+        let range = self.input_range(range_utf16);
         self.content.replace_range(range.clone(), new_text);
         self.marked_range =
             (!new_text.is_empty()).then(|| range.start..range.start + new_text.len());
