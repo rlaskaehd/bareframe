@@ -1,7 +1,7 @@
 //! The vertical tabs sidebar: search, groups, tab cards, renaming and drag and drop.
 use super::{PaneView, RenameTarget, WorkspaceView, icon_button, layout::DraggedPane};
 use crate::{
-    rename::{RenameEvent, RenameInput},
+    text_field::{TextField, TextFieldEvent},
     theme::{self, Theme, hsla},
 };
 use bareframe_core::workspace::{GroupId, Tab, TabId};
@@ -134,7 +134,7 @@ impl WorkspaceView {
             return;
         }
         let accent = self.theme().accent;
-        let input = cx.new(|cx| RenameInput::search(accent, window, cx));
+        let input = cx.new(|cx| TextField::search(accent, window, cx));
         let events = cx.subscribe_in(&input, window, |view, _, event, window, cx| {
             view.finish_search(event, window, cx)
         });
@@ -144,8 +144,13 @@ impl WorkspaceView {
     }
 
     /// Enter jumps to the first match; Esc clears the filter.
-    fn finish_search(&mut self, event: &RenameEvent, window: &mut Window, cx: &mut Context<Self>) {
-        if let RenameEvent::Confirm(_) = event
+    fn finish_search(
+        &mut self,
+        event: &TextFieldEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let TextFieldEvent::Confirm(_) = event
             && let Some(matches) = self.search_matches(cx)
         {
             let Some(&first) = matches.first() else {
@@ -205,7 +210,7 @@ impl WorkspaceView {
             },
         };
         let accent = self.theme().accent;
-        let input = cx.new(|cx| RenameInput::new(&text, accent, window, cx));
+        let input = cx.new(|cx| TextField::new(&text, accent, window, cx));
         let subscription = cx.subscribe_in(&input, window, move |view, _, event, window, cx| {
             view.finish_rename(target, event, window, cx)
         });
@@ -216,7 +221,7 @@ impl WorkspaceView {
     fn finish_rename(
         &mut self,
         target: RenameTarget,
-        event: &RenameEvent,
+        event: &TextFieldEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -224,7 +229,7 @@ impl WorkspaceView {
             return;
         }
         self.renaming = None;
-        if let RenameEvent::Confirm(text) = event {
+        if let TextFieldEvent::Confirm(text) = event {
             self.apply_rename(target, text, cx);
         }
         self.sync(window, cx);

@@ -6,11 +6,11 @@ use crate::{
     files,
     markdown::MarkdownPane,
     pane::{PaneEvent, TerminalPane},
-    rename::RenameInput,
     repo::Summary,
     review::CodeReview,
     search::SearchPanel,
     settings_pane::SettingsPane,
+    text_field::TextField,
     theme::{self, Theme, hsla},
 };
 use bareframe_core::{
@@ -203,9 +203,9 @@ pub struct WorkspaceView {
     /// The shown surfaces are swapped for snapshots while a pane menu covers them.
     frozen: bool,
     frozen_panes: Vec<PaneId>,
-    renaming: Option<(RenameTarget, Entity<RenameInput>, Subscription)>,
+    renaming: Option<(RenameTarget, Entity<TextField>, Subscription)>,
     /// The sidebar's tab filter: the field plus its event and change subscriptions.
-    search: Option<(Entity<RenameInput>, [Subscription; 2])>,
+    search: Option<(Entity<TextField>, [Subscription; 2])>,
     /// Set only when it changes; render runs every frame.
     window_title: String,
     /// Recorded on render so the layout can be saved without a window at hand.

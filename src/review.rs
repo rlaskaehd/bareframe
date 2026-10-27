@@ -3,8 +3,8 @@
 //! hunk and committing. Git runs off the UI thread (see `repo`).
 use crate::{
     explorer,
-    rename::{RenameEvent, RenameInput},
     repo::{self, Base, FileReview},
+    text_field::{TextField, TextFieldEvent},
     theme::{self, Theme, hsla},
 };
 use bareframe_core::git::{Change, Entry, LineKind, Status};
@@ -40,7 +40,7 @@ enum Pending {
 }
 
 struct CommitForm {
-    input: Entity<RenameInput>,
+    input: Entity<TextField>,
     /// Files left out of the commit; every change is in by default.
     excluded: HashSet<String>,
     _events: [Subscription; 2],
@@ -295,10 +295,10 @@ impl CodeReview {
         if self.commit.is_some() {
             return;
         }
-        let input = cx.new(|cx| RenameInput::search(self.theme.accent, window, cx));
-        let events = cx.subscribe(&input, |this, _, event: &RenameEvent, cx| match event {
-            RenameEvent::Confirm(_) => this.commit(cx),
-            RenameEvent::Cancel => {
+        let input = cx.new(|cx| TextField::search(self.theme.accent, window, cx));
+        let events = cx.subscribe(&input, |this, _, event: &TextFieldEvent, cx| match event {
+            TextFieldEvent::Confirm(_) => this.commit(cx),
+            TextFieldEvent::Cancel => {
                 this.commit = None;
                 cx.notify();
             }

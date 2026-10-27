@@ -2,8 +2,8 @@
 //! usual movement and editing keys, undo, clipboard, Korean input through the system
 //! input method, saving, and guarding unsaved changes. Syntax colors and find come next.
 use crate::{
-    rename::{RenameEvent, RenameInput},
     syntax::{self, LineSyntax, Syntax},
+    text_field::{TextField, TextFieldEvent},
     theme::{self, Theme, hsla},
     watch::{Watch, watch_file},
 };
@@ -112,8 +112,8 @@ impl LineNumbers {
 
 /// The find bar: the query, an optional replacement, and where the query occurs.
 struct FindBar {
-    query: Entity<RenameInput>,
-    replacement: Option<Entity<RenameInput>>,
+    query: Entity<TextField>,
+    replacement: Option<Entity<TextField>>,
     matches: Vec<Range<Position>>,
     current: Option<usize>,
     /// The text and buffer version `matches` were found for.
@@ -165,7 +165,7 @@ pub struct EditorPane {
     /// The grammar for this file's colors, if one is bundled.
     language: Option<&'static str>,
     find: Option<FindBar>,
-    go_to: Option<(Entity<RenameInput>, Subscription)>,
+    go_to: Option<(Entity<TextField>, Subscription)>,
     line_numbers: LineNumbers,
     autosave: bool,
     _autosave: Option<Task<()>>,
@@ -820,10 +820,10 @@ impl EditorPane {
         let selected = self.buffer.slice(self.selection());
         let seed = (!selected.is_empty() && !selected.contains('\n')).then_some(selected);
         if self.find.is_none() {
-            let query = cx.new(|cx| RenameInput::search(accent, window, cx));
+            let query = cx.new(|cx| TextField::search(accent, window, cx));
             let events = cx.subscribe_in(&query, window, |e, _, event, window, cx| match event {
-                RenameEvent::Confirm(_) => e.find_step(true, cx),
-                RenameEvent::Cancel => e.close_bars(window, cx),
+                TextFieldEvent::Confirm(_) => e.find_step(true, cx),
+                TextFieldEvent::Cancel => e.close_bars(window, cx),
             });
             // Typing in the field jumps to the first match from where the search began.
             let changes = cx.observe(&query, |e, _, cx| {
@@ -851,10 +851,10 @@ impl EditorPane {
             find.query.update(cx, |input, cx| input.set_text(&seed, cx));
         }
         if replace && find.replacement.is_none() {
-            let input = cx.new(|cx| RenameInput::search(accent, window, cx));
+            let input = cx.new(|cx| TextField::search(accent, window, cx));
             let events = cx.subscribe_in(&input, window, |e, _, event, window, cx| match event {
-                RenameEvent::Confirm(_) => e.replace_current(cx),
-                RenameEvent::Cancel => e.close_bars(window, cx),
+                TextFieldEvent::Confirm(_) => e.replace_current(cx),
+                TextFieldEvent::Cancel => e.close_bars(window, cx),
             });
             find._subscriptions.push(events);
             find.replacement = Some(input);
@@ -865,9 +865,9 @@ impl EditorPane {
 
     fn open_go_to(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.find = None;
-        let input = cx.new(|cx| RenameInput::search(self.theme.accent, window, cx));
+        let input = cx.new(|cx| TextField::search(self.theme.accent, window, cx));
         let events = cx.subscribe_in(&input, window, |e, _, event, window, cx| {
-            if let RenameEvent::Confirm(text) = event
+            if let TextFieldEvent::Confirm(text) = event
                 && let Ok(line) = text.trim().parse::<u64>()
             {
                 e.go_to_line(line.max(1), cx);
@@ -997,39 +997,38 @@ impl EditorPane {
 
     fn render_bars(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
         let theme = self.theme;
-        let field =
-            |id: &'static str, input: &Entity<RenameInput>, hint: &'static str, cx: &App| {
-                let empty = input.read(cx).text().is_empty();
-                let focus_input = input.clone();
-                div()
-                    .id(id)
-                    .relative()
-                    .flex_1()
-                    .min_w_0()
-                    .h(px(24.0))
-                    .px_2()
-                    .flex()
-                    .items_center()
-                    .rounded_md()
-                    .border_1()
-                    .border_color(hsla(theme.border))
-                    .bg(hsla(theme.terminal_background))
-                    .overflow_hidden()
-                    .cursor_text()
-                    .on_click(move |_, window, cx| {
-                        focus_input.update(cx, |input, cx| input.focus(window, cx))
-                    })
-                    .when(empty, |this| {
-                        this.child(
-                            div()
-                                .absolute()
-                                .left(px(9.0))
-                                .text_color(hsla(theme.text_muted))
-                                .child(hint),
-                        )
-                    })
-                    .child(input.clone())
-            };
+        let field = |id: &'static str, input: &Entity<TextField>, hint: &'static str, cx: &App| {
+            let empty = input.read(cx).text().is_empty();
+            let focus_input = input.clone();
+            div()
+                .id(id)
+                .relative()
+                .flex_1()
+                .min_w_0()
+                .h(px(24.0))
+                .px_2()
+                .flex()
+                .items_center()
+                .rounded_md()
+                .border_1()
+                .border_color(hsla(theme.border))
+                .bg(hsla(theme.terminal_background))
+                .overflow_hidden()
+                .cursor_text()
+                .on_click(move |_, window, cx| {
+                    focus_input.update(cx, |input, cx| input.focus(window, cx))
+                })
+                .when(empty, |this| {
+                    this.child(
+                        div()
+                            .absolute()
+                            .left(px(9.0))
+                            .text_color(hsla(theme.text_muted))
+                            .child(hint),
+                    )
+                })
+                .child(input.clone())
+        };
         let button = |id: &'static str, label: &'static str| {
             theme::ghost_button(theme, id, label)
                 .flex_none()

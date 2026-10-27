@@ -2,7 +2,7 @@
 //! files and matching lines, as in Warp's tools panel.
 use crate::{
     explorer::{chevron, file_name, icon},
-    rename::{RenameEvent, RenameInput},
+    text_field::{TextField, TextFieldEvent},
     theme::{self, Theme, hsla},
 };
 use futures::StreamExt;
@@ -156,7 +156,7 @@ enum Row {
 }
 
 pub struct SearchPanel {
-    input: Entity<RenameInput>,
+    input: Entity<TextField>,
     query: String,
     case_sensitive: bool,
     regex: bool,
@@ -186,10 +186,10 @@ impl Drop for SearchPanel {
 
 impl SearchPanel {
     pub fn new(theme: &'static Theme, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let input = cx.new(|cx| RenameInput::search(theme.accent, window, cx));
-        let events = cx.subscribe(&input, |this, _, event: &RenameEvent, cx| match event {
-            RenameEvent::Confirm(_) => this.start(cx),
-            RenameEvent::Cancel => cx.emit(SearchEvent::Dismiss),
+        let input = cx.new(|cx| TextField::search(theme.accent, window, cx));
+        let events = cx.subscribe(&input, |this, _, event: &TextFieldEvent, cx| match event {
+            TextFieldEvent::Confirm(_) => this.start(cx),
+            TextFieldEvent::Cancel => cx.emit(SearchEvent::Dismiss),
         });
         let changes = cx.observe(&input, |this, _, cx| this.schedule(cx));
         Self {

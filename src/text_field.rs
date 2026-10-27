@@ -1,5 +1,6 @@
-//! A single-line editor for renaming tabs and groups, adapted from GPUI's input example.
-//! It is an IME client like the terminal, so Korean composition works while renaming.
+//! The single-line text field (renaming tabs and groups, search, find, the commit message),
+//! adapted from GPUI's input example. It is an IME client like the terminal, so Korean
+//! composition works while typing.
 use gpui::{
     App, Bounds, ClipboardItem, Context, CursorStyle, ElementId, ElementInputHandler, Entity,
     EntityInputHandler, EventEmitter, FocusHandle, GlobalElementId, LayoutId, MouseButton,
@@ -9,7 +10,7 @@ use gpui::{
 use std::ops::Range;
 
 actions!(
-    rename_input,
+    text_field,
     [
         Backspace,
         Delete,
@@ -28,15 +29,15 @@ actions!(
     ]
 );
 
-/// Keys only apply while a rename field has focus, so the terminal keeps its own.
-const KEY_CONTEXT: &str = "RenameInput";
+/// Keys only apply while a text field has focus, so the terminal keeps its own.
+const KEY_CONTEXT: &str = "TextField";
 
-pub enum RenameEvent {
+pub enum TextFieldEvent {
     Confirm(String),
     Cancel,
 }
 
-pub struct RenameInput {
+pub struct TextField {
     focus: FocusHandle,
     content: String,
     selected_range: Range<usize>,
@@ -52,9 +53,9 @@ pub struct RenameInput {
     blur: Option<Subscription>,
 }
 
-impl EventEmitter<RenameEvent> for RenameInput {}
+impl EventEmitter<TextFieldEvent> for TextField {}
 
-impl RenameInput {
+impl TextField {
     /// Starts focused with `text` selected, so typing replaces it.
     pub fn new(text: &str, accent: u32, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let mut input = Self::search(accent, window, cx);
@@ -107,9 +108,9 @@ impl RenameInput {
             return;
         }
         cx.emit(if confirm {
-            RenameEvent::Confirm(self.content.clone())
+            TextFieldEvent::Confirm(self.content.clone())
         } else {
-            RenameEvent::Cancel
+            TextFieldEvent::Cancel
         });
     }
 
@@ -274,7 +275,7 @@ impl RenameInput {
     }
 }
 
-impl EntityInputHandler for RenameInput {
+impl EntityInputHandler for TextField {
     fn text_for_range(
         &mut self,
         range_utf16: Range<usize>,
@@ -389,7 +390,7 @@ impl EntityInputHandler for RenameInput {
 }
 
 struct TextElement {
-    input: Entity<RenameInput>,
+    input: Entity<TextField>,
 }
 
 struct PrepaintState {
@@ -568,7 +569,7 @@ impl Element for TextElement {
     }
 }
 
-impl Render for RenameInput {
+impl Render for TextField {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .flex()

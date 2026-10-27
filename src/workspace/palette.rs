@@ -3,8 +3,8 @@
 use super::{PaneView, WorkspaceView};
 use crate::{
     app,
-    rename::{RenameEvent, RenameInput},
     settings_pane::{self, Section},
+    text_field::{TextField, TextFieldEvent},
     theme::hsla,
 };
 use bareframe_core::{
@@ -20,7 +20,7 @@ const WIDTH: f32 = 600.0;
 const LIST_HEIGHT: f32 = 360.0;
 
 pub(super) struct Palette {
-    input: Entity<RenameInput>,
+    input: Entity<TextField>,
     selected: usize,
     scroll: ScrollHandle,
     _subscriptions: [Subscription; 2],
@@ -51,10 +51,10 @@ impl WorkspaceView {
             return;
         }
         self.menu = None;
-        let input = cx.new(|cx| RenameInput::search(self.theme().accent, window, cx));
+        let input = cx.new(|cx| TextField::search(self.theme().accent, window, cx));
         let events = cx.subscribe_in(&input, window, |view, _, event, window, cx| match event {
-            RenameEvent::Confirm(_) => view.run_selected(window, cx),
-            RenameEvent::Cancel => view.close_palette(window, cx),
+            TextFieldEvent::Confirm(_) => view.run_selected(window, cx),
+            TextFieldEvent::Cancel => view.close_palette(window, cx),
         });
         let changes = cx.observe(&input, |view, _, cx| {
             if let Some(palette) = view.palette.as_mut() {

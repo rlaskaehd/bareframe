@@ -1,7 +1,7 @@
 //! The Settings tab, as Warp opens it: section navigation and search on the left, the
 //! section's settings on the right. Rows are built from `bareframe_core::settings::DEFS`.
 use crate::{
-    rename::{RenameEvent, RenameInput},
+    text_field::{TextField, TextFieldEvent},
     theme::{self, Theme, hsla},
 };
 use bareframe_core::{
@@ -69,10 +69,10 @@ pub struct SettingsPane {
     section: Section,
     theme: &'static Theme,
     settings: Settings,
-    search: Entity<RenameInput>,
+    search: Entity<TextField>,
     /// The text setting being edited and its field.
-    editing: Option<(&'static str, Entity<RenameInput>, Subscription)>,
-    shortcut_search: Entity<RenameInput>,
+    editing: Option<(&'static str, Entity<TextField>, Subscription)>,
+    shortcut_search: Entity<TextField>,
     recording: Option<Recording>,
     _search: [Subscription; 2],
 }
@@ -86,9 +86,9 @@ impl SettingsPane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let search = cx.new(|cx| RenameInput::search(theme.accent, window, cx));
+        let search = cx.new(|cx| TextField::search(theme.accent, window, cx));
         let observed = cx.observe(&search, |_, _, cx| cx.notify());
-        let shortcut_search = cx.new(|cx| RenameInput::search(theme.accent, window, cx));
+        let shortcut_search = cx.new(|cx| TextField::search(theme.accent, window, cx));
         let shortcuts_observed = cx.observe(&shortcut_search, |_, _, cx| cx.notify());
         Self {
             focus: cx.focus_handle(),
@@ -125,10 +125,10 @@ impl SettingsPane {
     fn edit(&mut self, key: &'static str, window: &mut Window, cx: &mut Context<Self>) {
         let value = self.settings.get(key).to_owned();
         let accent = self.theme.accent;
-        let input = cx.new(|cx| RenameInput::new(&value, accent, window, cx));
-        let subscription = cx.subscribe(&input, move |this, _, event: &RenameEvent, cx| {
+        let input = cx.new(|cx| TextField::new(&value, accent, window, cx));
+        let subscription = cx.subscribe(&input, move |this, _, event: &TextFieldEvent, cx| {
             this.editing = None;
-            if let RenameEvent::Confirm(text) = event {
+            if let TextFieldEvent::Confirm(text) = event {
                 cx.emit(SettingsEvent::Set(key, text.clone()));
             }
             cx.notify();

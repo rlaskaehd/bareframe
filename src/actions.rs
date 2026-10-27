@@ -140,7 +140,7 @@ pub fn bind_keys(settings: &Settings, cx: &mut App) {
         KeyBinding::new("alt-cmd-h", HideOthers, None),
         KeyBinding::new("cmd-m", Minimize, None),
     ]);
-    cx.bind_keys(crate::rename::key_bindings());
+    cx.bind_keys(crate::text_field::key_bindings());
     cx.bind_keys(crate::explorer::key_bindings());
     cx.bind_keys(crate::editor::key_bindings());
     cx.bind_keys(crate::markdown::key_bindings());
