@@ -1,5 +1,4 @@
-//! Browser panes in the workspace: opening one, and keeping their native views hidden when
-//! their tab isn't shown.
+//! Browser panes in the workspace: opening one, and the tabs its pages open.
 use super::{PaneView, WorkspaceView};
 use crate::{
     browser::{self, BrowserPane, BrowserPaneEvent},
@@ -62,15 +61,5 @@ impl WorkspaceView {
         );
         self.panes
             .insert(id, (PaneView::Browser(pane), Some(events)));
-    }
-
-    /// Shows the browsers of the panes in front and hides the rest.
-    pub(super) fn show_browsers(&self, visible: &[PaneId], cx: &mut Context<Self>) {
-        for (id, (pane, _)) in &self.panes {
-            if let PaneView::Browser(pane) = pane {
-                let shown = visible.contains(id);
-                pane.update(cx, |pane, cx| pane.set_visible(shown, cx));
-            }
-        }
     }
 }

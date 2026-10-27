@@ -291,9 +291,14 @@ pub fn browser(id: i32) -> Option<Browser> {
     ENGINE.with_borrow(|engine| engine.browsers.get(&id).cloned())
 }
 
+/// The host of browser `id`, while it is open, for focus and closing.
+pub fn host(id: i32) -> Option<BrowserHost> {
+    browser(id)?.host()
+}
+
 /// The page's view of browser `id`, while it is open.
 pub fn view(id: i32) -> Option<*mut std::ffi::c_void> {
-    let view = browser(id)?.host()?.window_handle();
+    let view = host(id)?.window_handle();
     (!view.is_null()).then_some(view)
 }
 

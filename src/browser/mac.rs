@@ -244,16 +244,12 @@ pub fn place(view: *mut c_void, bounds: Bounds<Pixels>) {
             return;
         }
         let parent: CGRect = objc2::msg_send![parent, bounds];
-        let (x, y, width, height) = (
-            f64::from(f32::from(bounds.origin.x)),
-            f64::from(f32::from(bounds.origin.y)),
-            f64::from(f32::from(bounds.size.width)),
-            f64::from(f32::from(bounds.size.height)),
-        );
+        let points = |pixels: Pixels| f64::from(f32::from(pixels));
+        let height = points(bounds.size.height);
         let frame = CGRect {
-            x,
-            y: parent.height - y - height,
-            width,
+            x: points(bounds.origin.x),
+            y: parent.height - points(bounds.origin.y) - height,
+            width: points(bounds.size.width),
             height,
         };
         let _: () = objc2::msg_send![view, setFrame: frame];
@@ -276,12 +272,10 @@ pub fn has_keyboard(view: *mut c_void) -> bool {
             return false;
         }
         let is_view: Bool = objc2::msg_send![responder, isKindOfClass: class!(NSView)];
-        let inside: Bool = if is_view.as_bool() {
-            objc2::msg_send![responder, isDescendantOf: view]
-        } else {
-            Bool::NO
-        };
-        inside.as_bool()
+        is_view.as_bool() && {
+            let inside: Bool = objc2::msg_send![responder, isDescendantOf: view];
+            inside.as_bool()
+        }
     }
 }
 

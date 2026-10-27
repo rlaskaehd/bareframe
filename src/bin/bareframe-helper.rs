@@ -8,8 +8,8 @@ use cef::{args::Args, *};
 const WARM_UP: &str = "--bareframe-warm-up";
 
 fn main() {
+    let exe = std::env::current_exe().expect("the helper's own path");
     if std::env::args().nth(1).as_deref() == Some(WARM_UP) {
-        let exe = std::env::current_exe().expect("the helper's own path");
         std::process::exit(i32::from(
             !library_loader::LibraryLoader::new(&exe, true).load(),
         ));
@@ -19,10 +19,7 @@ fn main() {
     // can't reach the user's files.
     let mut sandbox = cef::sandbox::Sandbox::new();
     sandbox.initialize(args.as_main_args());
-    let loader = library_loader::LibraryLoader::new(
-        &std::env::current_exe().expect("the helper's own path"),
-        true,
-    );
+    let loader = library_loader::LibraryLoader::new(&exe, true);
     if !loader.load() {
         eprintln!("bareframe-helper: Chromium Embedded Framework not found");
         std::process::exit(1);

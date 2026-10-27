@@ -286,12 +286,6 @@ impl WorkspaceView {
         self.pane(id)?.terminal()
     }
 
-    fn terminals(&self) -> impl Iterator<Item = (&PaneId, &Entity<TerminalPane>)> {
-        self.panes
-            .iter()
-            .filter_map(|(id, (pane, _))| Some((id, pane.terminal()?)))
-    }
-
     fn pane_title(&self, id: PaneId, cx: &Context<Self>) -> String {
         self.pane(id)
             .map_or_else(String::new, |pane| pane.title(cx))
@@ -331,11 +325,14 @@ impl WorkspaceView {
             std::mem::take(&mut self.frozen_panes)
         };
         for id in &panes {
-            if let Some(pane) = self.terminal(*id) {
-                pane.update(cx, |pane, cx| pane.set_frozen(frozen, cx));
-            }
-            if let Some(PaneView::Browser(pane)) = self.pane(*id) {
-                pane.update(cx, |pane, cx| pane.set_frozen(frozen, cx));
+            match self.pane(*id) {
+                Some(PaneView::Terminal(pane)) => {
+                    pane.update(cx, |pane, cx| pane.set_frozen(frozen, cx))
+                }
+                Some(PaneView::Browser(pane)) => {
+                    pane.update(cx, |pane, cx| pane.set_frozen(frozen, cx))
+                }
+                _ => {}
             }
         }
         if frozen {
@@ -350,13 +347,20 @@ impl WorkspaceView {
             self.dismiss_menu(cx);
         }
         let visible = self.shown_panes();
-        // A clipboard prompt keeps the terminals frozen under it until it is answered.
+        // A clipboard prompt keeps the native views frozen under it until it is answered.
         if self.clipboard_prompt.is_none() {
-            for (id, pane) in self.terminals() {
+            for (id, (pane, _)) in &self.panes {
                 let shown = visible.contains(id);
-                pane.update(cx, |pane, cx| pane.set_visible(shown, cx));
+                match pane {
+                    PaneView::Terminal(pane) => {
+                        pane.update(cx, |pane, cx| pane.set_visible(shown, cx))
+                    }
+                    PaneView::Browser(pane) => {
+                        pane.update(cx, |pane, cx| pane.set_visible(shown, cx))
+                    }
+                    _ => {}
+                }
             }
-            self.show_browsers(&visible, cx);
         }
         // A clipboard prompt keeps the keyboard until it is answered.
         if let Some(prompt) = &self.clipboard_prompt {

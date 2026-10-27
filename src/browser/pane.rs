@@ -19,7 +19,11 @@ use gpui::{
     Bounds, Context, Entity, EventEmitter, FocusHandle, Image, ImageFormat, KeyBinding, Pixels,
     Subscription, Task, Window, actions, canvas, div, img, prelude::*, px,
 };
-use std::{path::Path, sync::Arc, time::Duration};
+use std::{
+    path::Path,
+    sync::{Arc, atomic::Ordering},
+    time::Duration,
+};
 
 actions!(browser, [Copy, Cut, Paste, SelectAll, Undo, Redo]);
 
@@ -108,21 +112,15 @@ impl BrowserPane {
         let page = cx.focus_handle();
         let keyboard = Keyboard::default();
         let focused = cx.on_focus(&page, window, |pane, _, _| {
-            pane.keyboard
-                .store(true, std::sync::atomic::Ordering::Relaxed);
-            if let Some(host) = pane
-                .browser
-                .and_then(engine::browser)
-                .and_then(|b| b.host())
-            {
+            pane.keyboard.store(true, Ordering::Relaxed);
+            if let Some(host) = pane.browser.and_then(engine::host) {
                 host.set_focus(1);
             }
         });
         let blurred = cx.on_blur(&page, window, |pane, window, _| {
-            pane.keyboard
-                .store(false, std::sync::atomic::Ordering::Relaxed);
+            pane.keyboard.store(false, Ordering::Relaxed);
             let Some(id) = pane.browser else { return };
-            if let Some(host) = engine::browser(id).and_then(|browser| browser.host()) {
+            if let Some(host) = engine::host(id) {
                 host.set_focus(0);
             }
             // GPUI's view never takes the keyboard back by itself.
@@ -510,10 +508,9 @@ fn decode(result: &serde_json::Value) -> Option<Image> {
 
 /// An `http` or `https` address, the only kind a page may open in its pane.
 fn is_web(url: &str) -> bool {
-    let scheme = url
-        .split_once(':')
-        .map(|(scheme, _)| scheme.to_ascii_lowercase());
-    matches!(scheme.as_deref(), Some("http" | "https"))
+    url.split_once(':').is_some_and(|(scheme, _)| {
+        scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https")
+    })
 }
 
 /// What was typed in the address bar as a URL: kept if it names a scheme, made `https://`
