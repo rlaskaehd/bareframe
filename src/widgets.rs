@@ -65,6 +65,15 @@ pub fn chevron(theme: &Theme, open: bool) -> impl IntoElement {
         .text_color(hsla(theme.text_muted))
 }
 
+/// A file's type icon: a language logo in its color, else the plain icon in the muted color.
+pub fn file_icon(theme: &Theme, icon: crate::file_icons::FileIcon) -> impl IntoElement {
+    gpui::svg()
+        .path(icon.path)
+        .flex_none()
+        .size(px(14.0))
+        .text_color(hsla(icon.color.unwrap_or(theme.text_muted)))
+}
+
 /// One of the bundled icons, in the muted text color.
 pub fn icon(theme: &Theme, path: &'static str) -> impl IntoElement {
     gpui::svg()

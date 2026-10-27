@@ -1,9 +1,10 @@
 //! The vertical tabs sidebar: search, groups, tab cards and renaming.
 use super::{
-    PaneView, RenameTarget, WorkspaceView,
+    RenameTarget, WorkspaceView,
     drag::{DraggedPane, DraggedTab},
 };
 use crate::{
+    file_icons::FileIcon,
     text_field::{TextField, TextFieldEvent},
     theme::{self, Theme, hsla},
     widgets,
@@ -453,7 +454,7 @@ impl WorkspaceView {
             .and_then(|group| self.model.group(group))
             .map(|group| hsla(theme.group_colors[group.color]));
         let tint = tab.color.map(|color| hsla(theme.group_colors[color]));
-        let icon = self.pane(tab.active_pane).and_then(PaneView::icon);
+        let icon = self.pane(tab.active_pane).and_then(|pane| pane.icon(cx));
         let hover = format!("tab-{index}");
         let dragged = DraggedTab {
             title: if selected {
@@ -633,9 +634,14 @@ pub(super) fn terminal_icon(
     theme: &Theme,
     active: bool,
     tint: Option<Hsla>,
-    icon: Option<&'static str>,
+    icon: Option<FileIcon>,
 ) -> impl IntoElement {
     let color = tint.unwrap_or(hsla(theme.text));
+    // A file's logo keeps its own color; the prompt and the gear follow the card.
+    let (path, icon_color) = match icon {
+        Some(icon) => (icon.path, icon.color.map_or(color, hsla)),
+        None => ("icons/terminal.svg", color),
+    };
     div()
         .flex_none()
         .size(px(28.0))
@@ -651,13 +657,7 @@ pub(super) fn terminal_icon(
                 theme.tab_active
             }),
         })
-        .text_size(px(11.0))
-        .font_weight(gpui::FontWeight::BOLD)
-        .text_color(color)
-        .map(|this| match icon {
-            Some(icon) => this.child(gpui::svg().path(icon).size(px(14.0)).text_color(color)),
-            None => this.child(">_"),
-        })
+        .child(gpui::svg().path(path).size(px(14.0)).text_color(icon_color))
 }
 
 fn pin_mark(theme: &Theme) -> impl IntoElement {

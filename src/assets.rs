@@ -1,36 +1,50 @@
 //! Icons compiled into the binary; GPUI renders them as masks in the text color.
 pub struct Assets;
 
-const ICONS: [(&str, &[u8]); 10] = [
-    ("icons/pin.svg", include_bytes!("../assets/icons/pin.svg")),
-    (
-        "icons/corner.svg",
-        include_bytes!("../assets/icons/corner.svg"),
-    ),
-    (
-        "icons/search.svg",
-        include_bytes!("../assets/icons/search.svg"),
-    ),
-    ("icons/gear.svg", include_bytes!("../assets/icons/gear.svg")),
-    (
-        "icons/wrench.svg",
-        include_bytes!("../assets/icons/wrench.svg"),
-    ),
-    (
-        "icons/folder.svg",
-        include_bytes!("../assets/icons/folder.svg"),
-    ),
-    ("icons/file.svg", include_bytes!("../assets/icons/file.svg")),
-    ("icons/diff.svg", include_bytes!("../assets/icons/diff.svg")),
-    (
-        "icons/chevron-right.svg",
-        include_bytes!("../assets/icons/chevron-right.svg"),
-    ),
-    (
-        "icons/chevron-down.svg",
-        include_bytes!("../assets/icons/chevron-down.svg"),
-    ),
-];
+/// `icons/<name>` for each file under `assets/icons`.
+macro_rules! icons {
+    ($($name:literal,)*) => {
+        &[$((
+            concat!("icons/", $name),
+            include_bytes!(concat!("../assets/icons/", $name)) as &[u8],
+        ),)*]
+    };
+}
+
+const ICONS: &[(&str, &[u8])] = icons!(
+    "pin.svg",
+    "corner.svg",
+    "search.svg",
+    "gear.svg",
+    "wrench.svg",
+    "folder.svg",
+    "file.svg",
+    "diff.svg",
+    "chevron-right.svg",
+    "chevron-down.svg",
+    "terminal.svg",
+    "zap.svg",
+    "lang/rust.svg",
+    "lang/python.svg",
+    "lang/markdown.svg",
+    "lang/javascript.svg",
+    "lang/typescript.svg",
+    "lang/react.svg",
+    "lang/go.svg",
+    "lang/json.svg",
+    "lang/toml.svg",
+    "lang/yaml.svg",
+    "lang/html5.svg",
+    "lang/css3.svg",
+    "lang/c.svg",
+    "lang/cplusplus.svg",
+    "lang/ruby.svg",
+    "lang/swift.svg",
+    "lang/lua.svg",
+    "lang/gnubash.svg",
+    "lang/docker.svg",
+    "lang/git.svg",
+);
 
 impl gpui::AssetSource for Assets {
     fn load(&self, path: &str) -> gpui::Result<Option<std::borrow::Cow<'static, [u8]>>> {

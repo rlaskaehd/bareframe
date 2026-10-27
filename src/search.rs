@@ -371,7 +371,10 @@ impl SearchPanel {
                 base.pl(px(16.0))
                     .on_click(cx.listener(move |this, _, _, cx| this.toggle(&toggled, cx)))
                     .child(widgets::chevron(theme, !collapsed))
-                    .child(widgets::icon(theme, "icons/file.svg"))
+                    .child(widgets::file_icon(
+                        theme,
+                        crate::file_icons::for_path(&path),
+                    ))
                     .child(
                         div()
                             .flex_1()

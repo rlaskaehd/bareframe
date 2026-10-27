@@ -1,6 +1,7 @@
 //! Project explorer: the focused pane's working directory as a lazily loaded file tree,
 //! following Warp's tools panel. Gitignored entries stay visible but dimmed.
 use crate::{
+    file_icons::FileIcon,
     theme::{self, Theme, hsla},
     widgets,
 };
@@ -349,10 +350,10 @@ impl Explorer {
     fn render_row(&self, row: Row, cx: &mut Context<Self>) -> gpui::AnyElement {
         let theme = self.theme;
         let selected = self.selected.as_ref() == Some(&row.path);
-        let icon_path = if row.dir {
-            "icons/folder.svg"
+        let icon = if row.dir {
+            FileIcon::FOLDER
         } else {
-            "icons/file.svg"
+            crate::file_icons::for_path(&row.path)
         };
         let color = hsla(if row.ignored {
             theme.text_muted
@@ -399,7 +400,7 @@ impl Explorer {
             .child(div().w(px(12.0)).flex_none().when(row.dir, |this| {
                 this.child(widgets::chevron(theme, row.expanded))
             }))
-            .child(widgets::icon(theme, icon_path))
+            .child(widgets::file_icon(theme, icon))
             .child(div().truncate().child(row.name))
             .into_any_element()
     }

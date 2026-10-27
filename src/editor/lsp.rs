@@ -337,7 +337,7 @@ impl EditorPane {
             .font_family(theme::UI_FONT)
             .text_size(px(11.5))
             .text_color(hsla(theme.text_muted))
-            .child("⚡");
+            .child(widgets::icon(theme, "icons/zap.svg"));
         let action = |id: &'static str, label: String| {
             widgets::ghost_button(theme, id, label)
                 .px_2()

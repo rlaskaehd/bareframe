@@ -8,6 +8,7 @@ mod diagram;
 mod editor;
 mod editor_tabs;
 mod explorer;
+mod file_icons;
 mod files;
 mod lsp;
 mod markdown;

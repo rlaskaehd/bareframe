@@ -1,7 +1,11 @@
 //! What each pane shows, and what the sidebar, the pane headers and the window title say
 //! about it.
 use crate::{
-    editor_tabs::EditorTabs, files, markdown::MarkdownPane, pane::TerminalPane,
+    editor_tabs::EditorTabs,
+    file_icons::{self, FileIcon},
+    files,
+    markdown::MarkdownPane,
+    pane::TerminalPane,
     settings_pane::SettingsPane,
 };
 use gpui::{AnyView, App, Entity, Window};
@@ -72,12 +76,15 @@ impl PaneView {
         }
     }
 
-    /// The sidebar card's icon in place of the prompt glyph.
-    pub(super) fn icon(&self) -> Option<&'static str> {
+    /// The sidebar card's icon in place of the prompt glyph: a file shows its type.
+    pub(super) fn icon(&self, cx: &App) -> Option<FileIcon> {
         match self {
             Self::Terminal(_) => None,
-            Self::Settings(_) => Some("icons/gear.svg"),
-            Self::Markdown(_) | Self::Editor(_) => Some("icons/file.svg"),
+            Self::Settings(_) => Some(FileIcon::SETTINGS),
+            Self::Markdown(_) | Self::Editor(_) => Some(
+                self.file(cx)
+                    .map_or(FileIcon::FILE, |file| file_icons::for_path(&file)),
+            ),
         }
     }
 

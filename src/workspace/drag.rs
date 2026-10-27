@@ -43,7 +43,7 @@ pub(super) struct DraggedTab {
     pub(super) subtitle: Option<String>,
     pub(super) width: f32,
     pub(super) theme: &'static Theme,
-    pub(super) icon: Option<&'static str>,
+    pub(super) icon: Option<crate::file_icons::FileIcon>,
 }
 
 impl Render for DraggedTab {
