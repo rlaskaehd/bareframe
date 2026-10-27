@@ -1,6 +1,7 @@
 //! Global search: ripgrep's library over the explorer's roots, streamed into a tree of
 //! files and matching lines, as in Warp's tools panel.
 use crate::{
+    explorer::{chevron, icon},
     rename::{RenameEvent, RenameInput},
     theme::{self, Theme, hsla},
 };
@@ -35,21 +36,21 @@ const CONTEXT: usize = 24;
 const SNIPPET: usize = 160;
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct LineMatch {
-    pub line: u64,
-    pub text: String,
+struct LineMatch {
+    line: u64,
+    text: String,
     /// Byte ranges of the matches within `text`.
-    pub ranges: Vec<Range<usize>>,
+    ranges: Vec<Range<usize>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct FileMatches {
-    pub root: PathBuf,
-    pub path: PathBuf,
-    pub lines: Vec<LineMatch>,
+struct FileMatches {
+    root: PathBuf,
+    path: PathBuf,
+    lines: Vec<LineMatch>,
 }
 
-pub fn matcher(query: &str, case_sensitive: bool, regex: bool) -> Result<RegexMatcher, String> {
+fn matcher(query: &str, case_sensitive: bool, regex: bool) -> Result<RegexMatcher, String> {
     RegexMatcherBuilder::new()
         .case_insensitive(!case_sensitive)
         .fixed_strings(!regex)
@@ -60,7 +61,7 @@ pub fn matcher(query: &str, case_sensitive: bool, regex: bool) -> Result<RegexMa
 /// Searches every non-ignored file under `roots`, sending each file with matches as soon as
 /// it is done. Stops when `cancel` is set or after [`MAX_MATCHES`].
 // ponytail: walks one thread; use `WalkBuilder::build_parallel` if huge trees feel slow.
-pub fn search(
+fn search(
     roots: &[PathBuf],
     matcher: &RegexMatcher,
     cancel: &AtomicBool,
@@ -114,7 +115,7 @@ pub fn search(
 
 /// The part of a line shown in the list: leading space dropped and, for long lines, a
 /// window starting a little before the first match. Ranges are shifted to match.
-pub fn snippet(text: &str, ranges: &[Range<usize>]) -> (String, Vec<Range<usize>>) {
+fn snippet(text: &str, ranges: &[Range<usize>]) -> (String, Vec<Range<usize>>) {
     let trimmed = text.len() - text.trim_start().len();
     let first = ranges.first().map_or(trimmed, |range| range.start);
     let mut start = trimmed.max(first.saturating_sub(CONTEXT)).min(text.len());
@@ -342,7 +343,7 @@ impl SearchPanel {
                 let toggled = path.clone();
                 base.pl(px(4.0))
                     .on_click(cx.listener(move |this, _, _, cx| this.toggle(&toggled, cx)))
-                    .child(chevron(theme, collapsed))
+                    .child(chevron(theme, !collapsed))
                     .child(icon(theme, "icons/folder.svg"))
                     .child(div().flex_1().min_w_0().truncate().child(name))
                     .child(badge(theme, count))
@@ -358,7 +359,7 @@ impl SearchPanel {
                 let toggled = path.clone();
                 base.pl(px(16.0))
                     .on_click(cx.listener(move |this, _, _, cx| this.toggle(&toggled, cx)))
-                    .child(chevron(theme, collapsed))
+                    .child(chevron(theme, !collapsed))
                     .child(icon(theme, "icons/file.svg"))
                     .child(
                         div()
@@ -433,26 +434,6 @@ fn file_name(path: &Path) -> String {
         || path.display().to_string(),
         |name| name.to_string_lossy().into(),
     )
-}
-
-fn chevron(theme: &Theme, collapsed: bool) -> impl IntoElement {
-    gpui::svg()
-        .path(if collapsed {
-            "icons/chevron-right.svg"
-        } else {
-            "icons/chevron-down.svg"
-        })
-        .flex_none()
-        .size(px(12.0))
-        .text_color(hsla(theme.text_muted))
-}
-
-fn icon(theme: &Theme, path: &'static str) -> impl IntoElement {
-    gpui::svg()
-        .path(path)
-        .flex_none()
-        .size(px(14.0))
-        .text_color(hsla(theme.text_muted))
 }
 
 fn badge(theme: &Theme, count: usize) -> impl IntoElement {

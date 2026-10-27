@@ -6,6 +6,7 @@ use crate::{
     search::SearchEvent,
     theme::{Theme, hsla},
 };
+use bareframe_core::config::quote;
 use gpui::{
     Context, CursorStyle, MouseButton, MouseMoveEvent, Pixels, Point, Window, div, prelude::*, px,
 };
@@ -202,7 +203,7 @@ impl WorkspaceView {
             eprintln!("bareframe: not typing a path with control characters: {dir:?}");
             return;
         }
-        let line = format!("\u{15}cd {}\r", shell_quote(&dir));
+        let line = format!("\u{15}cd {}\r", quote(&dir));
         terminal.update(cx, |terminal, cx| terminal.type_text(&line, cx));
     }
 
@@ -388,14 +389,9 @@ pub(super) fn reveal_in_finder(path: &Path) {
     }
 }
 
-/// Single-quotes a path for POSIX shells.
-fn shell_quote(text: &str) -> String {
-    format!("'{}'", text.replace('\'', r"'\''"))
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{Document, document_kind, shell_quote};
+    use super::{Document, document_kind};
 
     #[test]
     fn only_plain_documents_are_opened() {
@@ -421,11 +417,5 @@ mod tests {
             None
         );
         std::fs::remove_dir_all(&dir).unwrap();
-    }
-
-    #[test]
-    fn quoting_survives_spaces_and_quotes() {
-        assert_eq!(shell_quote("/tmp/a b"), "'/tmp/a b'");
-        assert_eq!(shell_quote("it's"), r"'it'\''s'");
     }
 }

@@ -127,8 +127,8 @@ impl LaunchConfig {
     }
 }
 
-/// Single-quotes `text` for the `bash -c` that Ghostty runs the command through.
-fn quote(text: &str) -> String {
+/// Single-quotes `text` for a POSIX shell: Ghostty's `bash -c`, or a line typed at a prompt.
+pub fn quote(text: &str) -> String {
     format!("'{}'", text.replace('\'', "'\\''"))
 }
 

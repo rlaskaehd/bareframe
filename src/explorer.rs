@@ -46,11 +46,11 @@ pub enum ExplorerEvent {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Child {
-    pub name: String,
-    pub path: PathBuf,
-    pub dir: bool,
-    pub ignored: bool,
+struct Child {
+    name: String,
+    path: PathBuf,
+    dir: bool,
+    ignored: bool,
 }
 
 /// One visible line of the tree.
@@ -288,7 +288,7 @@ impl Explorer {
     fn render_row(&self, row: Row, cx: &mut Context<Self>) -> gpui::AnyElement {
         let theme = self.theme;
         let selected = self.selected.as_ref() == Some(&row.path);
-        let icon = if row.dir {
+        let icon_path = if row.dir {
             "icons/folder.svg"
         } else {
             "icons/file.svg"
@@ -335,25 +335,13 @@ impl Explorer {
                     cx.notify();
                 }),
             )
-            .child(div().w(px(12.0)).flex_none().when(row.dir, |this| {
-                this.child(
-                    gpui::svg()
-                        .path(if row.expanded {
-                            "icons/chevron-down.svg"
-                        } else {
-                            "icons/chevron-right.svg"
-                        })
-                        .size(px(12.0))
-                        .text_color(hsla(theme.text_muted)),
-                )
-            }))
             .child(
-                gpui::svg()
-                    .path(icon)
+                div()
+                    .w(px(12.0))
                     .flex_none()
-                    .size(px(14.0))
-                    .text_color(hsla(theme.text_muted)),
+                    .when(row.dir, |this| this.child(chevron(theme, row.expanded))),
             )
+            .child(icon(theme, icon_path))
             .child(div().truncate().child(row.name))
             .into_any_element()
     }
@@ -406,9 +394,30 @@ impl Render for Explorer {
     }
 }
 
+/// A tree row's fold mark: down when `open`.
+pub fn chevron(theme: &Theme, open: bool) -> impl IntoElement {
+    gpui::svg()
+        .path(if open {
+            "icons/chevron-down.svg"
+        } else {
+            "icons/chevron-right.svg"
+        })
+        .flex_none()
+        .size(px(12.0))
+        .text_color(hsla(theme.text_muted))
+}
+
+pub fn icon(theme: &Theme, path: &'static str) -> impl IntoElement {
+    gpui::svg()
+        .path(path)
+        .flex_none()
+        .size(px(14.0))
+        .text_color(hsla(theme.text_muted))
+}
+
 /// One directory level, directories first, then names case-insensitively. Entries the
 /// repository's ignore rules would skip are kept and marked, as Warp shows them dimmed.
-pub fn list_dir(dir: &Path, show_hidden: bool) -> Vec<Child> {
+fn list_dir(dir: &Path, show_hidden: bool) -> Vec<Child> {
     let visible: HashSet<PathBuf> = ignore::WalkBuilder::new(dir)
         .max_depth(Some(1))
         .hidden(false)
