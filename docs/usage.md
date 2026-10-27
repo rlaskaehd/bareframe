@@ -200,7 +200,3 @@ cursor-style = bar    # block | bar | underline
 
 셸이 종료되면 그 Pane을 닫는다(마지막 탭의 마지막 Pane이면 새 탭으로 바꾼다). 시작에 실패한 Pane은 Pane 안에 오류와 재시작 방법을 표시한다.
 
-## 실제 동작 검증
-
-위 항목은 구현한 동작의 사용 계약이다. 현재 실행해 확인한 범위는 [MVP 1 검증 기록](mvp-1-validation.md)과 [MVP 2 검증 기록](mvp-2-validation.md)에 표시한다.
-한글 IME와 `vim`, `less`, `htop`, `ssh`는 자동 모델 테스트와 별도로 실제 앱에서 확인한다.

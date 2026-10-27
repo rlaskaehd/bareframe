@@ -1,8 +1,7 @@
 # 개발 빌드
 
-MVP 1의 대상은 macOS arm64다. Rust 1.98.1, Zig 0.16.0, Xcode의 clang과 Metal compiler를 사용한다.
-계획의 Rust 1.95.0 후보 대신 이미 설치된 1.98.1을 프로젝트 toolchain으로 고정했다.
-GPUI·Ghostty 전체 조합의 컴파일 호환성은 아래 검증 기록의 결과를 따른다.
+대상은 macOS 14 이상의 Apple Silicon(arm64)이다. Rust 1.98.1(`rust-toolchain.toml`), Zig 0.16.0,
+Xcode의 clang과 Metal compiler를 사용한다.
 
 ## 준비와 빌드
 
@@ -25,7 +24,6 @@ Cargo 의존성을 해석해 최초 `Cargo.lock`을 생성한 뒤 `cargo build -
 | gpui-libghostty | `vendor/`의 upstream `2bbde4ae53a8e163cdbe05294bd09934b30c1af3` 기반 사본 |
 | Ghostty | 어댑터에 포함된 `9f0e1719dc918368367d368bfe300f59bb68b5a4` 기반 소스 |
 
-`reference/zed`와 `reference/ghostty`의 최신 스냅샷을 앱 빌드에 섞지 않는다.
 어댑터 변경 내용은 [BAREFRAME.md](../vendor/gpui-libghostty/BAREFRAME.md)에 기록한다.
 
 ## 캐시 경로
@@ -46,6 +44,6 @@ Zig의 추가 native 패키지는 어댑터 build script가 필요에 따라 다
 
 첫 명령은 코어의 fmt·Clippy·테스트, C 이벤트 큐 실행 테스트, Objective-C shim 구문 검사를 수행한다.
 두 번째 명령은 여기에 데스크톱 앱의 fmt·Clippy·테스트·빌드를 추가한다.
-실제 창, 한글 IME, GPU 렌더링, TUI 호환성은 별도 실행 검증이 필요하다.
-
-현재 실행 상태는 [MVP 1 검증 기록](mvp-1-validation.md)을 따른다.
+실제 창, 한글 IME, GPU 렌더링, TUI 호환성은 앱을 띄워 직접 확인한다.
+`./script/bundle --validation`은 설정·상태 파일을 `target/validation/` 아래에 따로 두는 검증용 번들
+(`dev.bareframe.validation`)을 만들어, 매일 쓰는 앱과 섞이지 않게 시험할 수 있다.
