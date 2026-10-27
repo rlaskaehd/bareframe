@@ -397,11 +397,8 @@ impl EditorPane {
                     this.child(
                         div()
                             .id("python-chip")
-                            .px(px(5.0))
+                            .px(px(3.0))
                             .rounded_sm()
-                            .border_1()
-                            .border_color(hsla(theme.text_muted).opacity(0.6))
-                            .text_color(hsla(theme.text))
                             .hover(|style| style.bg(hsla(theme.tab_hover)))
                             .child(python.chip())
                             .on_click(cx.listener(|editor, event: &gpui::ClickEvent, _, cx| {
