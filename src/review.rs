@@ -2,7 +2,6 @@
 //! compared with HEAD or with the point a branch split off, plus reverting a file or a
 //! hunk and committing. Git runs off the UI thread (see `repo`).
 use crate::{
-    explorer,
     repo::{self, Base, FileReview},
     text_field::{TextField, TextFieldEvent},
     theme::{self, Theme, hsla},
@@ -787,7 +786,7 @@ impl CodeReview {
                         .child(if excluded { "☐" } else { "☑" }),
                 )
             })
-            .child(explorer::chevron(theme, !collapsed))
+            .child(theme::chevron(theme, !collapsed))
             .child(
                 div()
                     .flex_none()

@@ -128,6 +128,28 @@ pub fn icon_button(theme: &Theme, id: impl Into<ElementId>, label: &'static str)
         .child(label)
 }
 
+/// A tree row's fold mark: down when `open`.
+pub fn chevron(theme: &Theme, open: bool) -> impl IntoElement {
+    gpui::svg()
+        .path(if open {
+            "icons/chevron-down.svg"
+        } else {
+            "icons/chevron-right.svg"
+        })
+        .flex_none()
+        .size(px(12.0))
+        .text_color(hsla(theme.text_muted))
+}
+
+/// One of the bundled icons, in the muted text color.
+pub fn icon(theme: &Theme, path: &'static str) -> impl IntoElement {
+    gpui::svg()
+        .path(path)
+        .flex_none()
+        .size(px(14.0))
+        .text_color(hsla(theme.text_muted))
+}
+
 pub fn hsla(value: u32) -> Hsla {
     rgb(value).into()
 }

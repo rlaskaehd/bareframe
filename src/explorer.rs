@@ -1,4 +1,4 @@
-//! Project explorer: the active tab's working directories as a lazily loaded file tree,
+//! Project explorer: the focused pane's working directory as a lazily loaded file tree,
 //! following Warp's tools panel. Gitignored entries stay visible but dimmed.
 use crate::theme::{self, Theme, hsla};
 use futures::StreamExt;
@@ -122,7 +122,8 @@ impl Explorer {
         }
     }
 
-    /// Roots come from the active tab's terminals; a new root starts expanded.
+    /// The root follows the focused pane (see `refresh_explorer_roots`); a new root starts
+    /// expanded.
     pub fn set_roots(&mut self, roots: Vec<PathBuf>, cx: &mut Context<Self>) {
         if roots == self.roots {
             return;
@@ -392,13 +393,10 @@ impl Explorer {
                     cx.notify();
                 }),
             )
-            .child(
-                div()
-                    .w(px(12.0))
-                    .flex_none()
-                    .when(row.dir, |this| this.child(chevron(theme, row.expanded))),
-            )
-            .child(icon(theme, icon_path))
+            .child(div().w(px(12.0)).flex_none().when(row.dir, |this| {
+                this.child(theme::chevron(theme, row.expanded))
+            }))
+            .child(theme::icon(theme, icon_path))
             .child(div().truncate().child(row.name))
             .into_any_element()
     }
@@ -458,27 +456,6 @@ pub fn file_name(path: &Path) -> String {
         || path.display().to_string(),
         |name| name.to_string_lossy().into(),
     )
-}
-
-/// A tree row's fold mark: down when `open`.
-pub fn chevron(theme: &Theme, open: bool) -> impl IntoElement {
-    gpui::svg()
-        .path(if open {
-            "icons/chevron-down.svg"
-        } else {
-            "icons/chevron-right.svg"
-        })
-        .flex_none()
-        .size(px(12.0))
-        .text_color(hsla(theme.text_muted))
-}
-
-pub fn icon(theme: &Theme, path: &'static str) -> impl IntoElement {
-    gpui::svg()
-        .path(path)
-        .flex_none()
-        .size(px(14.0))
-        .text_color(hsla(theme.text_muted))
 }
 
 /// One directory level, directories first, then names case-insensitively. Entries the
