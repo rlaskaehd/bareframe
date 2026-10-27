@@ -3,7 +3,7 @@
 //! footer that offers to install or enable the server for the project.
 use super::{EditorEvent, EditorPane};
 use crate::{
-    lsp::{Encoding, LanguageServers, LspEvent, State, Status},
+    lsp::{Encoding, LanguageServers, LspEvent, State, Status, python::Interpreter},
     theme::{self, hsla},
     widgets,
 };
@@ -25,6 +25,8 @@ pub(super) struct Language {
     /// Errors and warnings in the buffer's own positions.
     pub(super) marks: Vec<Mark>,
     hover: Option<Hover>,
+    /// The footer's interpreter list, open at a point in the window.
+    pythons: Option<(Point<Pixels>, Vec<Interpreter>)>,
     _hover: Option<Task<()>>,
     _sync: Option<Task<()>>,
     _subscriptions: [Subscription; 2],
@@ -66,6 +68,7 @@ impl EditorPane {
             servers,
             marks: Vec::new(),
             hover: None,
+            pythons: None,
             _hover: None,
             _sync: None,
             _subscriptions: [updates, release],
@@ -370,6 +373,7 @@ impl EditorPane {
                 server,
                 state,
                 progress,
+                python,
             } => {
                 let (color, text) = match (state, progress) {
                     (State::Failed(error), _) => (theme.palette[1], error.clone()),
@@ -388,10 +392,21 @@ impl EditorPane {
                             .truncate()
                             .child(format!("{}: {text}", server.binary)),
                     )
-                    .when(errors + warnings > 0, |this| {
-                        this.child(format!("{errors} errors, {warnings} warnings"))
-                    })
+                    .child(count(theme, "icons/circle-x.svg", theme.palette[1], errors))
+                    .child(count(
+                        theme,
+                        "icons/triangle-alert.svg",
+                        theme.palette[3],
+                        warnings,
+                    ))
                     .child(div().flex_1())
+                    .when_some(python, |this, python| {
+                        this.child(action("lsp-python", format!("Python: {python}")).on_click(
+                            cx.listener(|editor, event: &gpui::ClickEvent, _, cx| {
+                                editor.toggle_pythons(event.position(), cx)
+                            }),
+                        ))
+                    })
                     .child(
                         action("lsp-restart", "Restart".into()).on_click(cx.listener(
                             |editor, _, _, cx| {
@@ -410,6 +425,88 @@ impl EditorPane {
                     )
             }
         })
+    }
+
+    fn toggle_pythons(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
+        let Some(language) = self.language_server.as_mut() else {
+            return;
+        };
+        language.pythons = match language.pythons.take() {
+            Some(_) => None,
+            None => Some((at, language.servers.read(cx).interpreters(&self.path).0)),
+        };
+        cx.notify();
+    }
+
+    fn choose_python(&mut self, python: std::path::PathBuf, cx: &mut Context<Self>) {
+        if let Some(language) = self.language_server.as_mut() {
+            language.pythons = None;
+        }
+        self.with_servers(cx, |servers, path, cx| {
+            servers.choose_python(path, python, cx)
+        });
+    }
+
+    /// The interpreters found for the project, opening upward from the footer.
+    pub(super) fn render_pythons(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+        let language = self.language_server.as_ref()?;
+        let (at, found) = language.pythons.as_ref()?;
+        let current = language.servers.read(cx).interpreters(&self.path).1;
+        let theme = self.theme;
+        Some(deferred(
+            gpui::anchored()
+                .position(*at)
+                .anchor(gpui::Anchor::BottomRight)
+                .snap_to_window()
+                .child(
+                    div()
+                        .id("python-picker")
+                        .occlude()
+                        .min_w(px(260.0))
+                        .max_h(px(320.0))
+                        .overflow_y_scroll()
+                        .py_1()
+                        .rounded_md()
+                        .border_1()
+                        .border_color(hsla(theme.border))
+                        .bg(hsla(theme.chrome))
+                        .shadow_lg()
+                        .font_family(theme::UI_FONT)
+                        .text_size(px(12.0))
+                        .text_color(hsla(theme.text))
+                        .on_mouse_down_out(cx.listener(|editor, _, _, cx| {
+                            if let Some(language) = editor.language_server.as_mut() {
+                                language.pythons = None;
+                                cx.notify();
+                            }
+                        }))
+                        .when(found.is_empty(), |this| {
+                            this.child(div().px_3().py_1().child("No Python interpreters found"))
+                        })
+                        .children(found.iter().enumerate().map(|(index, interpreter)| {
+                            let chosen = current.as_ref() == Some(interpreter);
+                            let python = interpreter.python.clone();
+                            div()
+                                .id(("python", index))
+                                .px_3()
+                                .py_1()
+                                .flex()
+                                .flex_col()
+                                .when(chosen, |this| this.bg(hsla(theme.tab_active)))
+                                .hover(|style| style.bg(hsla(theme.tab_hover)))
+                                .on_click(cx.listener(move |editor, _, _, cx| {
+                                    editor.choose_python(python.clone(), cx)
+                                }))
+                                .child(interpreter.label.clone())
+                                .child(
+                                    div()
+                                        .text_size(px(10.5))
+                                        .text_color(hsla(theme.text_muted))
+                                        .child(interpreter.python.display().to_string()),
+                                )
+                        })),
+                ),
+        ))
     }
 
     fn with_servers(
@@ -435,6 +532,26 @@ impl EditorPane {
         self.with_servers(cx, |servers, path, cx| servers.watch_install(path, cx));
         cx.emit(EditorEvent::RunInTerminal(command.to_owned(), home));
     }
+}
+
+/// An icon and a count, as the footer shows errors and warnings.
+fn count(
+    theme: &crate::theme::Theme,
+    icon: &'static str,
+    color: u32,
+    count: usize,
+) -> impl IntoElement {
+    div()
+        .flex()
+        .items_center()
+        .gap_1()
+        .child(
+            gpui::svg()
+                .path(icon)
+                .size(px(12.0))
+                .text_color(hsla(if count > 0 { color } else { theme.text_muted })),
+        )
+        .child(count.to_string())
 }
 
 /// A hover reply's text: Markdown kept as written, fences dropped.

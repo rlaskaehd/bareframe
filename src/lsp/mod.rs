@@ -3,6 +3,7 @@
 //! file inside it, and stopped when its last file closes. Enabled projects are remembered
 //! in `language-servers` beside the settings file.
 mod client;
+pub mod python;
 
 use bareframe_core::lsp::{self, Server};
 use client::Client;
@@ -11,6 +12,7 @@ use futures::{
     channel::{mpsc, oneshot},
 };
 use gpui::{App, AppContext, Context, Entity, EventEmitter, Global, Subscription, Task};
+use python::Interpreter;
 use serde_json::{Value, json};
 use std::{
     collections::{HashMap, HashSet},
@@ -19,6 +21,16 @@ use std::{
     sync::OnceLock,
     time::{Duration, Instant},
 };
+
+const PYRIGHT: &str = "pyright-langserver";
+
+/// The interpreters for the project at `root` (see `python::discover`).
+fn find_interpreters(root: &Path) -> Vec<Interpreter> {
+    match (crate::files::home_dir(), login_path()) {
+        (Some(home), Some(path)) => python::discover(root, &home, path),
+        _ => Vec::new(),
+    }
+}
 
 /// A server binary and the project root it serves.
 type Key = (&'static str, PathBuf);
@@ -54,6 +66,8 @@ pub enum Status<'a> {
         server: &'static Server,
         state: &'a State,
         progress: Option<&'a str>,
+        /// The Python interpreter pyright uses, as the picker labels it.
+        python: Option<String>,
     },
 }
 
@@ -96,6 +110,8 @@ pub struct LanguageServers {
     installed: HashMap<&'static str, Installed>,
     running: HashMap<Key, Running>,
     documents: HashMap<PathBuf, Document>,
+    /// The interpreter picked for each project; others get `python::default`.
+    python: HashMap<PathBuf, PathBuf>,
     /// Looks again for a server being installed in a terminal.
     _recheck: Option<Task<()>>,
     _quit: Subscription,
@@ -118,6 +134,7 @@ pub fn init(cx: &mut App) {
         installed: HashMap::new(),
         running: HashMap::new(),
         documents: HashMap::new(),
+        python: python::load_chosen(),
         _recheck: None,
         // Dropping the clients asks every server to exit.
         _quit: cx.on_app_quit(|servers: &mut LanguageServers, _| {
@@ -219,6 +236,10 @@ impl LanguageServers {
                 server,
                 state: &running.state,
                 progress: running.progress.last().map(|(_, text)| text.as_str()),
+                python: (key.0 == PYRIGHT)
+                    .then(|| self.python_for(&key.1))
+                    .flatten()
+                    .map(|interpreter| interpreter.label),
             });
         }
         Some(match self.installed.get(server.binary) {
@@ -277,6 +298,29 @@ impl LanguageServers {
         self.running.remove(&key);
         self.clear_diagnostics(&key);
         cx.emit(LspEvent::Updated);
+    }
+
+    /// The interpreters found for the project of `path`, and the one in use.
+    pub fn interpreters(&self, path: &Path) -> (Vec<Interpreter>, Option<Interpreter>) {
+        let root = lsp::project_root(path);
+        let current = self.python_for(&root);
+        (find_interpreters(&root), current)
+    }
+
+    /// The footer's pick: remembered for the project; pyright restarts to use it.
+    pub fn choose_python(&mut self, path: &Path, python: PathBuf, cx: &mut Context<Self>) {
+        self.python.insert(lsp::project_root(path), python);
+        python::save_chosen(&self.python);
+        self.restart(path, cx);
+    }
+
+    fn python_for(&self, root: &Path) -> Option<Interpreter> {
+        let found = find_interpreters(root);
+        let chosen = self
+            .python
+            .get(root)
+            .and_then(|chosen| found.iter().find(|found| &found.python == chosen));
+        chosen.or_else(|| python::default(&found, root)).cloned()
     }
 
     pub fn restart(&mut self, path: &Path, cx: &mut Context<Self>) {
@@ -474,6 +518,10 @@ impl LanguageServers {
     }
 
     fn handle(&mut self, key: &Key, message: Value, cx: &mut Context<Self>) {
+        // pyright asks for the `python` section to learn which interpreter to use.
+        let python = (key.0 == PYRIGHT && message["method"] == "workspace/configuration")
+            .then(|| self.python_for(&key.1))
+            .flatten();
         let Some(running) = self.running.get_mut(key) else {
             return;
         };
@@ -497,8 +545,18 @@ impl LanguageServers {
                 let id = id.clone();
                 match method {
                     "workspace/configuration" => {
-                        let items = message["params"]["items"].as_array().map_or(0, Vec::len);
-                        client.respond(id, Value::Array(vec![Value::Null; items]));
+                        let answers = message["params"]["items"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .map(|item| match (&python, item["section"].as_str()) {
+                                (Some(python), Some("python")) => {
+                                    json!({"pythonPath": python.python})
+                                }
+                                _ => Value::Null,
+                            })
+                            .collect();
+                        client.respond(id, Value::Array(answers));
                     }
                     "workspace/workspaceFolders" => {
                         let uri = lsp::path_to_uri(&key.1);

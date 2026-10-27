@@ -603,6 +603,9 @@ impl SettingsPane {
             .child(line(
                 "Bundles Ghostty's zsh shell integration (GPL-3.0); libghostty and gpui-libghostty are MIT, GPUI is Apache-2.0.".into(),
             ))
+            .child(line(
+                "Icons are Lucide (ISC, © Lucide Contributors; parts © Cole Bemis as Feather, MIT); language logos are Simple Icons (CC0).".into(),
+            ))
             .into_any_element()
     }
 }

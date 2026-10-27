@@ -24,6 +24,8 @@ const ICONS: &[(&str, &[u8])] = icons!(
     "chevron-down.svg",
     "terminal.svg",
     "zap.svg",
+    "circle-x.svg",
+    "triangle-alert.svg",
     "lang/rust.svg",
     "lang/python.svg",
     "lang/markdown.svg",

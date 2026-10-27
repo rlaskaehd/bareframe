@@ -728,6 +728,7 @@ impl Render for EditorPane {
             .children(self.render_language(cx))
             .child(self.render_status())
             .children(self.render_hover())
+            .children(self.render_pythons(cx))
     }
 }
 
