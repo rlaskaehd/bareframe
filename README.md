@@ -31,7 +31,8 @@ Rust 1.98.1은 `rust-toolchain.toml`로 선택하며 전역 기본 toolchain을 
 - `src/app.rs`: 앱 시작과 창. 액션·키 바인딩은 `actions.rs`, 메뉴바는 `menu_bar.rs`, 설정·상태 파일은 `files.rs`.
 - `src/workspace.rs`: 창 하나의 뷰 상태와 Pane 수명. `src/workspace/` 아래에 사이드바, 분할 레이아웃, 드래그 앤 드롭(`drag.rs`), 사이드 열 크기(`columns.rs`), 액션 배선(`commands.rs`), 저장·복원(`persist.rs`), 설정 적용(`prefs.rs`) 등이 기능별로 있다.
 - `src/terminal.rs`: GPUI 입력과 Ghostty 연결. native 자원은 이 계층이 관리한다.
-- `src/editor/`, `src/markdown/`: 코드 편집기와 Markdown 뷰어. 그리기·찾기·파일·파싱을 모듈로 나눴다.
+- `src/editor/`, `src/markdown/`: 코드 편집기와 Markdown 뷰어. 그리기·찾기·파일·언어 서버·상태 줄·파싱을 모듈로 나눴다.
+- `src/lsp/`: 언어 서버 관리. 서버 찾기(`install.rs`), 실행 중 서버와의 대화(`server.rs`), 프로세스(`client.rs`), Python 인터프리터(`python.rs`), 기억해 둔 선택(`store.rs`). 프로세스가 필요 없는 부분(서버 표, 프레이밍, URI)은 core의 `lsp.rs`.
 - `src/widgets.rs`, `src/theme.rs`: 여러 패널이 쓰는 작은 위젯과 색 테마.
 - `vendor/gpui-libghostty`: 고정된 upstream 사본과 macOS 통합 수정.
 - `reference/`: 변경하지 않는 upstream 참조 자료.
