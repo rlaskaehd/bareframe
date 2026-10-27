@@ -19,6 +19,8 @@ pub fn is_validation_instance() -> bool {
 pub fn name() -> &'static str {
     if is_validation_instance() {
         "bareframe validation"
+    } else if cfg!(debug_assertions) {
+        "bareframe dev"
     } else {
         "bareframe"
     }

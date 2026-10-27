@@ -7,7 +7,7 @@ bareframe을 직접 고치거나 포크해 쓰려는 사람을 위한 안내다.
 
 - 설정 파일만으로 되는 것은 코드를 고치지 않아도 된다. 테마, 폰트, 단축키(`keybind`), 셸,
   프롬프트 위치 등은 `~/.config/bareframe/config`에서 바꾼다([사용 안내](usage.md#settings)).
-- 매일 쓰는 번들은 `./script/bundle`(디버그, `target/bareframe.app`)로 만든다.
+- 매일 쓰는 번들은 `./script/bundle`(디버그, `target/bareframe-dev.app`, 번들 id `dev.bareframe.dev`)로 만든다.
   `./script/run`은 번들 없이 바로 실행한다.
 - 고친 뒤에는 `./script/check`를 통과시킨다. fmt, Clippy(`-D warnings`), core와 앱 테스트,
   빌드를 차례로 돈다. 상태를 바꾸는 규칙은 `crates/bareframe-core`에 두고 거기서 테스트한다.

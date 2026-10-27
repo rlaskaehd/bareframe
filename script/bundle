@@ -2,7 +2,9 @@
 set -euo pipefail
 source "$(dirname "$0")/env"
 cd "$BAREFRAME_ROOT"
-bundle_name=bareframe
+# The everyday development bundle has its own name and id, so it is never mistaken for an
+# installed release.
+bundle_name=bareframe-dev
 profile=debug
 bundles="$CARGO_TARGET_DIR"
 case "${1:-}" in
@@ -14,6 +16,7 @@ case "${1:-}" in
     # running copy of that one is never overwritten underneath itself.
     --release)
         profile=release
+        bundle_name=bareframe
         bundles="$CARGO_TARGET_DIR/dist"
         ;;
 esac
@@ -71,6 +74,11 @@ if [[ -f "$icon_source" ]]; then
     done
     iconutil -c icns "$iconset" -o "$bundle_dir/Resources/AppIcon.icns"
     /usr/libexec/PlistBuddy -c 'Add :CFBundleIconFile string AppIcon' "$bundle_dir/Info.plist"
+fi
+if [[ "$bundle_name" == bareframe-dev ]]; then
+    /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier dev.bareframe.dev' \
+        -c 'Set :CFBundleName bareframe-dev' \
+        -c 'Set :CFBundleDisplayName bareframe dev' "$bundle_dir/Info.plist"
 fi
 if [[ "$bundle_name" == bareframe-validation ]]; then
     /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier dev.bareframe.validation' \
