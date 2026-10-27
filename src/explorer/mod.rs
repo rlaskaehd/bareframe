@@ -1,5 +1,8 @@
 //! Project explorer: the focused pane's working directory as a lazily loaded file tree,
-//! following Warp's tools panel. Gitignored entries stay visible but dimmed.
+//! following Warp's tools panel. Gitignored entries stay visible but dimmed. Making,
+//! renaming, moving and deleting files is in `edit`.
+mod edit;
+
 use crate::{
     file_icons::FileIcon,
     theme::{self, Theme, hsla},
@@ -60,6 +63,8 @@ struct Child {
 /// One visible line of the tree.
 #[derive(Clone)]
 struct Row {
+    /// The field naming a new entry in the folder `path`, rather than an entry.
+    input: bool,
     path: PathBuf,
     root: PathBuf,
     name: String,
@@ -87,6 +92,10 @@ pub struct Explorer {
     scroll: UniformListScrollHandle,
     /// Present only while the panel is visible, as in Warp.
     watcher: Option<(RecommendedWatcher, Task<()>)>,
+    /// A name being typed for a new or renamed entry.
+    editing: Option<edit::Editing>,
+    /// Why the last change to the files failed; shown until the next one.
+    error: Option<String>,
 }
 
 impl EventEmitter<ExplorerEvent> for Explorer {}
@@ -106,6 +115,8 @@ impl Explorer {
             focus: cx.focus_handle(),
             scroll: UniformListScrollHandle::new(),
             watcher: None,
+            editing: None,
+            error: None,
         }
     }
 
@@ -265,6 +276,7 @@ impl Explorer {
             let name = file_name(&root);
             let expanded = self.expanded.contains(&root);
             rows.push(Row {
+                input: false,
                 path: root.clone(),
                 root: root.clone(),
                 name,
@@ -281,9 +293,24 @@ impl Explorer {
     }
 
     fn push_children(&mut self, root: &Path, dir: &Path, depth: usize, rows: &mut Vec<Row>) {
+        if let Some(edit::Edit::New { dir: at, folder }) = self.editing.as_ref().map(|e| &e.edit)
+            && at == dir
+        {
+            rows.push(Row {
+                input: true,
+                path: dir.to_path_buf(),
+                root: root.to_path_buf(),
+                name: String::new(),
+                depth,
+                dir: *folder,
+                ignored: false,
+                expanded: false,
+            });
+        }
         for child in self.listing(dir) {
             let expanded = child.dir && self.expanded.contains(&child.path);
             rows.push(Row {
+                input: false,
                 path: child.path.clone(),
                 root: root.to_path_buf(),
                 name: child.name,
@@ -348,7 +375,27 @@ impl Explorer {
     }
 
     fn render_row(&self, row: Row, cx: &mut Context<Self>) -> gpui::AnyElement {
+        if row.input {
+            return self
+                .render_input(row.depth, row.dir)
+                .unwrap_or_else(|| div().into_any_element());
+        }
         let theme = self.theme;
+        let renaming = self
+            .editing
+            .as_ref()
+            .filter(
+                |editing| matches!(&editing.edit, edit::Edit::Rename(path) if *path == row.path),
+            )
+            .map(|editing| editing.input.clone());
+        // Dropped on a folder, an entry moves into it; on a file, into the file's folder.
+        let target = if row.dir {
+            row.path.clone()
+        } else {
+            row.path
+                .parent()
+                .map_or_else(|| row.path.clone(), Path::to_path_buf)
+        };
         let selected = self.selected.as_ref() == Some(&row.path);
         let icon = if row.dir {
             FileIcon::FOLDER
@@ -401,7 +448,34 @@ impl Explorer {
                 this.child(widgets::chevron(theme, row.expanded))
             }))
             .child(widgets::file_icon(theme, icon))
-            .child(div().truncate().child(row.name))
+            .map(|this| match renaming {
+                Some(input) => this.child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .px_1()
+                        .rounded_sm()
+                        .border_1()
+                        .border_color(hsla(theme.accent))
+                        .bg(hsla(theme.terminal_background))
+                        .child(input),
+                ),
+                None => this.child(div().truncate().child(row.name)),
+            })
+            // A root stays where it is; everything below it can be dragged.
+            .when(row.depth > 0, |this| {
+                this.on_drag(self.dragged(&row.path), |dragged, _, _, cx| {
+                    cx.new(|_| dragged.clone())
+                })
+            })
+            .drag_over::<edit::DraggedEntry>(move |style, _, _, _| {
+                style.bg(hsla(theme.accent).opacity(0.18))
+            })
+            .on_drop(
+                cx.listener(move |this, dragged: &edit::DraggedEntry, _, cx| {
+                    this.drop_entry(&dragged.path, &target, cx)
+                }),
+            )
             .into_any_element()
     }
 }
@@ -426,6 +500,21 @@ impl Render for Explorer {
                     this.activate(&row, cx);
                 }
             }))
+            .when_some(self.error.clone(), |this, error| {
+                this.child(
+                    div()
+                        .id("explorer-error")
+                        .px_3()
+                        .py_1()
+                        .text_size(px(12.0))
+                        .text_color(hsla(theme.palette[1]))
+                        .child(error)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.error = None;
+                            cx.notify();
+                        })),
+                )
+            })
             .when(count == 0, |this| {
                 this.child(
                     div()

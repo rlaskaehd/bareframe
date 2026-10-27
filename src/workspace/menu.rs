@@ -36,6 +36,10 @@ pub(super) enum MenuAction {
     Reveal(std::path::PathBuf),
     CdTo(std::path::PathBuf),
     NewTabAt(std::path::PathBuf),
+    /// A new file (`false`) or folder (`true`) named in the explorer, in this folder.
+    NewEntry(std::path::PathBuf, bool),
+    RenameEntry(std::path::PathBuf),
+    TrashEntry(std::path::PathBuf),
     /// Rendered as a divider line.
     Separator,
     /// Rendered as the row of color dots for this tab.
@@ -280,6 +284,21 @@ impl WorkspaceView {
             MenuAction::Reveal(path) => super::external::reveal_in_finder(&path),
             MenuAction::CdTo(path) => return self.cd_to(&path, window, cx),
             MenuAction::NewTabAt(path) => return self.new_tab_at(path, window, cx),
+            // The name is typed in the explorer, which keeps the focus meanwhile.
+            MenuAction::NewEntry(dir, folder) => {
+                return self.explorer.update(cx, |explorer, cx| {
+                    explorer.new_entry(dir, folder, window, cx)
+                });
+            }
+            MenuAction::RenameEntry(path) => {
+                return self
+                    .explorer
+                    .update(cx, |explorer, cx| explorer.rename_entry(path, window, cx));
+            }
+            MenuAction::TrashEntry(path) => {
+                self.explorer
+                    .update(cx, |explorer, cx| explorer.delete_entry(&path, cx));
+            }
             MenuAction::SetTabColor(index, color) => self.model.set_tab_color(index, color),
             MenuAction::Separator | MenuAction::TabColors(_) => {}
         }

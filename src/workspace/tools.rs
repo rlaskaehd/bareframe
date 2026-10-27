@@ -172,6 +172,26 @@ impl WorkspaceView {
             items.push(("Open".into(), MenuAction::OpenPath(path.to_path_buf())));
         }
         items.push((String::new(), MenuAction::Separator));
+        // New entries go in the folder, or beside the file, that was right-clicked.
+        let folder = if dir {
+            path.to_path_buf()
+        } else {
+            path.parent().unwrap_or(root).to_path_buf()
+        };
+        items.push((
+            "New File".into(),
+            MenuAction::NewEntry(folder.clone(), false),
+        ));
+        items.push(("New Folder".into(), MenuAction::NewEntry(folder, true)));
+        // A root is the terminal's directory; renaming or deleting it is left to the shell.
+        if path != root {
+            items.push(("Rename".into(), MenuAction::RenameEntry(path.to_path_buf())));
+            items.push((
+                "Move to Trash".into(),
+                MenuAction::TrashEntry(path.to_path_buf()),
+            ));
+        }
+        items.push((String::new(), MenuAction::Separator));
         items.push((
             "Reveal in Finder".into(),
             MenuAction::Reveal(path.to_path_buf()),
