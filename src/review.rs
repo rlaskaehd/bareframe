@@ -872,7 +872,8 @@ impl Render for CodeReview {
     }
 }
 
-fn counts(theme: &Theme, added: u64, removed: u64) -> impl IntoElement {
+/// `+N −M` in the diff colors.
+pub fn counts(theme: &Theme, added: u64, removed: u64) -> impl IntoElement {
     div()
         .flex()
         .flex_none()
@@ -896,19 +897,10 @@ fn button(
     label: &'static str,
     primary: bool,
 ) -> gpui::Stateful<gpui::Div> {
-    div()
-        .id(id)
+    theme::button(theme, id, label, primary)
         .px_2()
         .py(px(3.0))
-        .rounded_md()
-        .border_1()
         .text_size(px(12.0))
-        .border_color(hsla(if primary { theme.accent } else { theme.border }))
-        .when(primary, |this| {
-            this.bg(hsla(theme.accent)).text_color(hsla(theme.chrome))
-        })
-        .hover(|style| style.opacity(0.85))
-        .child(label)
 }
 
 fn small_text_button(
@@ -916,13 +908,9 @@ fn small_text_button(
     id: impl Into<gpui::ElementId>,
     label: &'static str,
 ) -> gpui::Stateful<gpui::Div> {
-    div()
-        .id(id)
+    theme::ghost_button(theme, id, label)
         .flex_none()
         .px_1()
         .rounded_sm()
         .text_size(px(11.0))
-        .text_color(hsla(theme.text_muted))
-        .hover(|style| style.bg(hsla(theme.tab_hover)).text_color(hsla(theme.text)))
-        .child(label)
 }

@@ -932,15 +932,11 @@ impl EditorPane {
                     .child(input.clone())
             };
         let button = |id: &'static str, label: &'static str| {
-            div()
-                .id(id)
+            theme::ghost_button(theme, id, label)
                 .flex_none()
                 .px_2()
                 .py(px(2.0))
                 .rounded_md()
-                .text_color(hsla(theme.text_muted))
-                .hover(|style| style.bg(hsla(theme.tab_hover)).text_color(hsla(theme.text)))
-                .child(label)
         };
         let bar = div()
             .flex()
@@ -1030,18 +1026,7 @@ impl EditorPane {
             .file_name()
             .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
         let button = |id: &'static str, label: &'static str, primary: bool| {
-            div()
-                .id(id)
-                .px_2()
-                .py(px(2.0))
-                .rounded_md()
-                .border_1()
-                .border_color(hsla(if primary { theme.accent } else { theme.border }))
-                .when(primary, |this| {
-                    this.bg(hsla(theme.accent)).text_color(hsla(theme.chrome))
-                })
-                .hover(|style| style.opacity(0.85))
-                .child(label)
+            theme::button(theme, id, label, primary).px_2().py(px(2.0))
         };
         let (message, buttons): (String, Vec<gpui::Stateful<gpui::Div>>) = match notice {
             Notice::ConfirmClose => (

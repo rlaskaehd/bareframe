@@ -3,7 +3,7 @@
 use super::{WorkspaceView, column_width};
 use crate::{
     repo::{self, Summary},
-    review::ReviewEvent,
+    review::{self, ReviewEvent},
     theme::hsla,
     watch::{Watch, watch},
 };
@@ -126,16 +126,7 @@ impl WorkspaceView {
                     view.toggle_review(window, cx)
                 }))
                 .child(div().text_color(hsla(theme.text_muted)).child("±"))
-                .child(
-                    div()
-                        .text_color(hsla(theme.palette[2]))
-                        .child(format!("+{}", summary.added)),
-                )
-                .child(
-                    div()
-                        .text_color(hsla(theme.palette[1]))
-                        .child(format!("−{}", summary.removed)),
-                ),
+                .child(review::counts(theme, summary.added, summary.removed)),
         )
     }
 

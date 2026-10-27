@@ -3,7 +3,7 @@ use bareframe_core::{
     settings::{Settings, ThemeName},
     workspace::GROUP_COLORS,
 };
-use gpui::{Hsla, rgb};
+use gpui::{Div, ElementId, Hsla, Stateful, div, prelude::*, rgb};
 use gpui_libghostty::{TerminalColor, TerminalTheme};
 
 pub const UI_FONT: &str = ".SystemUIFont";
@@ -80,6 +80,35 @@ impl Theme {
             .collect();
         theme
     }
+}
+
+/// A bordered button; `primary` fills it with the accent. Callers set the padding.
+pub fn button(
+    theme: &Theme,
+    id: impl Into<ElementId>,
+    label: &'static str,
+    primary: bool,
+) -> Stateful<Div> {
+    div()
+        .id(id)
+        .rounded_md()
+        .border_1()
+        .border_color(hsla(if primary { theme.accent } else { theme.border }))
+        .when(primary, |this| {
+            this.bg(hsla(theme.accent)).text_color(hsla(theme.chrome))
+        })
+        .hover(|style| style.opacity(0.85))
+        .child(label)
+}
+
+/// A plain-text button in the muted color that lights up under the pointer. Callers set
+/// the padding and corners.
+pub fn ghost_button(theme: &Theme, id: impl Into<ElementId>, label: &'static str) -> Stateful<Div> {
+    div()
+        .id(id)
+        .text_color(hsla(theme.text_muted))
+        .hover(|style| style.bg(hsla(theme.tab_hover)).text_color(hsla(theme.text)))
+        .child(label)
 }
 
 pub fn hsla(value: u32) -> Hsla {

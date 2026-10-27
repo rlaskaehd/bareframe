@@ -1,7 +1,7 @@
 //! Asks before a clipboard operation the terminal would not do on its own: an unsafe paste,
 //! or a program reading or writing the clipboard (OSC 52) when Settings say to ask.
 use super::WorkspaceView;
-use crate::theme::hsla;
+use crate::theme::{self, hsla};
 use bareframe_core::{session::ClipboardOperation, workspace::PaneId};
 use gpui::{
     Context, FocusHandle, Subscription, Window, anchored, deferred, div, point, prelude::*, px,
@@ -159,18 +159,7 @@ impl WorkspaceView {
         let more = lines.len().saturating_sub(PREVIEW_LINES);
         let preview: Vec<String> = lines.into_iter().take(PREVIEW_LINES).map(visible).collect();
         let button = |id: &'static str, label: &'static str, primary: bool| {
-            div()
-                .id(id)
-                .px_3()
-                .py(px(5.0))
-                .rounded_md()
-                .border_1()
-                .border_color(hsla(if primary { theme.accent } else { theme.border }))
-                .when(primary, |this| {
-                    this.bg(hsla(theme.accent)).text_color(hsla(theme.chrome))
-                })
-                .hover(|style| style.opacity(0.85))
-                .child(label)
+            theme::button(theme, id, label, primary).px_3().py(px(5.0))
         };
         let (width, height) = self.window_size();
         // Catches clicks outside the card, so the sidebar and top bar can't open a tab

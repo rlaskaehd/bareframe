@@ -705,16 +705,12 @@ impl MarkdownPane {
         let copied = text.to_owned();
         let inserted = text.to_owned();
         let button = |id: (&'static str, usize), label: &'static str| {
-            div()
-                .id(id)
+            theme::ghost_button(theme, id, label)
                 .px_2()
                 .py(px(2.0))
                 .rounded_sm()
                 .text_size(px(11.0))
                 .font_family(theme::UI_FONT)
-                .text_color(hsla(theme.text_muted))
-                .hover(|style| style.bg(hsla(theme.tab_hover)).text_color(hsla(theme.text)))
-                .child(label)
         };
         div()
             .relative()
