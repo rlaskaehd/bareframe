@@ -376,6 +376,23 @@ pub const DEFS: &[Def] = &[
     def(
         Features,
         "Terminal",
+        "scrollback-limit-lines",
+        "Scrollback limit (lines)",
+        "Lines each terminal keeps above the screen. Ghostty also caps it at 50 MB of memory \
+         per terminal. Applies to terminals opened afterwards.",
+        Choice(&[
+            ("unlimited", "No line limit"),
+            ("1000", "1,000"),
+            ("10000", "10,000"),
+            ("100000", "100,000"),
+            ("1000000", "1,000,000"),
+        ]),
+        "unlimited",
+        Same,
+    ),
+    def(
+        Features,
+        "Terminal",
         "copy-on-select",
         "Copy on select",
         "Copies selected text to the clipboard right away.",
@@ -749,6 +766,8 @@ mod tests {
         settings.set("font-ligatures", "false").unwrap();
         settings.set("terminal-padding", "8").unwrap();
         settings.set("left-option-as-meta", "true").unwrap();
+        assert!(settings.set("scrollback-limit-lines", "5").is_err());
+        settings.set("scrollback-limit-lines", "10000").unwrap();
         let lines = settings.ghostty_lines();
         let has = |key: &str, value: &str| lines.iter().any(|(k, v)| *k == key && v == value);
         assert!(has("font-feature", "-calt"));
@@ -756,6 +775,7 @@ mod tests {
         assert!(has("macos-option-as-alt", "left"));
         assert!(has("adjust-cell-height", "0%"));
         assert!(has("clipboard-read", "deny"));
+        assert!(has("scrollback-limit-lines", "10000"));
         assert!(
             !lines.iter().any(|(key, _)| *key == "font-style"),
             "default omitted"
