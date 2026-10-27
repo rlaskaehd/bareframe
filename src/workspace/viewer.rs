@@ -1,5 +1,5 @@
 //! Files opened inside bareframe: Markdown in the viewer, other text in the code editor.
-use super::{PaneView, WorkspaceView, tools::open_externally};
+use super::{PaneView, WorkspaceView, external::open_externally};
 use crate::{
     editor::{EditorPane, LineNumbers, is_text_file},
     editor_tabs::{EditorTabs, TabsEvent},
@@ -8,13 +8,6 @@ use crate::{
 use bareframe_core::workspace::{Axis, PaneId};
 use gpui::{AppContext, Context, Window};
 use std::path::{Path, PathBuf};
-
-/// What waits on answers about unsaved changes.
-#[derive(Clone, Copy)]
-pub enum Exit {
-    Quit,
-    CloseWindow,
-}
 
 impl WorkspaceView {
     /// Markdown opens in the viewer and other text in the editor when Settings say so;
@@ -178,54 +171,6 @@ impl WorkspaceView {
         let numbers = LineNumbers::from_setting(self.settings.get("editor-line-numbers"));
         let autosave = self.settings.flag("editor-autosave");
         pane.update(cx, |pane, cx| pane.set_options(numbers, autosave, cx));
-    }
-
-    /// Quits or closes the window, unless an editor has unsaved changes: then it asks, and
-    /// the exit goes on once every such editor is answered (Cancel stops it).
-    pub fn exit(&mut self, exit: Exit, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.confirm_unsaved(window, cx) {
-            self.pending_exit = Some(exit);
-            return;
-        }
-        match exit {
-            Exit::Quit => cx.quit(),
-            Exit::CloseWindow => {
-                self.shutdown(cx);
-                window.remove_window();
-            }
-        }
-    }
-
-    /// The window's close button found unsaved changes; close once they are answered.
-    pub fn wait_to_close(&mut self) {
-        self.pending_exit = Some(Exit::CloseWindow);
-    }
-
-    fn resume_exit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(exit) = self.pending_exit.take() {
-            self.exit(exit, window, cx);
-        }
-    }
-
-    /// Before quitting or closing the window: the first editor with unsaved changes asks,
-    /// and the quit waits for the answer. Returns whether nothing is left unsaved.
-    pub fn confirm_unsaved(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        let groups: Vec<(PaneId, gpui::Entity<EditorTabs>)> = self
-            .panes
-            .iter()
-            .filter_map(|(id, (pane, _))| match pane {
-                PaneView::Editor(tabs) => Some((*id, tabs.clone())),
-                _ => None,
-            })
-            .collect();
-        for (id, tabs) in groups {
-            if !tabs.update(cx, |tabs, cx| tabs.request_close(cx)) {
-                self.model.focus(id);
-                self.sync(window, cx);
-                return false;
-            }
-        }
-        true
     }
 
     /// A file already open is shown again rather than opened twice. Otherwise it opens

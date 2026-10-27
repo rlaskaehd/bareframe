@@ -16,6 +16,7 @@ use bareframe_core::{
     workspace::{Axis, Closed, Direction, GroupId, Layout, PaneId, TabId, Workspace},
 };
 use columns::Column;
+pub use exit::Exit;
 use gpui::{
     Bounds, Context, Entity, FocusHandle, MouseButton, MouseMoveEvent, Pixels, Subscription,
     Window, anchored, deferred, div, point, prelude::*, px,
@@ -23,13 +24,14 @@ use gpui::{
 use menu::ContextMenu;
 use pane_view::PaneView;
 use std::collections::HashMap;
-pub use viewer::Exit;
 
 mod changes;
 mod clipboard;
 mod columns;
 mod commands;
 mod drag;
+mod exit;
+mod external;
 mod layout;
 mod menu;
 mod palette;
@@ -97,7 +99,7 @@ pub struct WorkspaceView {
     menu: Option<ContextMenu>,
     clipboard_prompt: Option<clipboard::ClipboardPrompt>,
     /// A quit or window close waiting for answers about unsaved editor changes.
-    pending_exit: Option<viewer::Exit>,
+    pending_exit: Option<Exit>,
     palette: Option<palette::Palette>,
     /// The shown surfaces are swapped for snapshots while a pane menu covers them.
     frozen: bool,
@@ -471,18 +473,6 @@ impl WorkspaceView {
         let layout = &mut self.model.tabs[resize.tab].layout;
         if layout.set_ratio(&resize.path, ratio) {
             cx.notify();
-        }
-    }
-
-    pub fn shutdown(&mut self, cx: &mut Context<Self>) {
-        // Quitting and closing the window both land here, before the panes go away.
-        if !self.panes.is_empty() {
-            self.save_state(cx);
-        }
-        for (_, (pane, _)) in self.panes.drain() {
-            if let PaneView::Terminal(pane) = pane {
-                pane.update(cx, |pane, cx| pane.shutdown(cx));
-            }
         }
     }
 
