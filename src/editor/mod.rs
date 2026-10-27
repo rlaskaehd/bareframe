@@ -492,7 +492,7 @@ impl EditorPane {
         if tabs { "\t" } else { "    " }
     }
 
-    fn render_status(&self) -> impl IntoElement {
+    fn render_status(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = self.theme;
         let line = self.buffer.line(self.head.line);
         let column = line[..self.head.column.min(line.len())].chars().count() + 1;
@@ -514,6 +514,7 @@ impl EditorPane {
                 this.child(format!("{selected} selected"))
             })
             .child(div().flex_1())
+            .children(self.render_language(cx))
             .when(self.read_only, |this| this.child("Read-only"))
             .child(match self.buffer.line_ending {
                 LineEnding::Lf => "LF",
@@ -725,10 +726,9 @@ impl Render for EditorPane {
             .children(self.render_notice(cx))
             .children(self.render_bars(cx))
             .child(self.render_text(cx))
-            .children(self.render_language(cx))
-            .child(self.render_status())
+            .child(self.render_status(cx))
             .children(self.render_hover())
-            .children(self.render_pythons(cx))
+            .children(self.render_popup(cx))
     }
 }
 

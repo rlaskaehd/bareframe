@@ -25,11 +25,18 @@ pub(super) struct Language {
     /// Errors and warnings in the buffer's own positions.
     pub(super) marks: Vec<Mark>,
     hover: Option<Hover>,
-    /// The footer's interpreter list, open at a point in the window.
-    pythons: Option<(Point<Pixels>, Vec<Interpreter>)>,
+    /// A menu the status line opened, at a point in the window.
+    popup: Option<(Point<Pixels>, Popup)>,
     _hover: Option<Task<()>>,
     _sync: Option<Task<()>>,
     _subscriptions: [Subscription; 2],
+}
+
+/// What the status line has open above it.
+enum Popup {
+    /// The lightning icon's menu: install, enable, restart or disable the server.
+    Server,
+    Pythons(Vec<Interpreter>),
 }
 
 pub(super) struct Mark {
@@ -68,7 +75,7 @@ impl EditorPane {
             servers,
             marks: Vec::new(),
             hover: None,
-            pythons: None,
+            popup: None,
             _hover: None,
             _sync: None,
             _subscriptions: [updates, release],
@@ -323,136 +330,219 @@ impl EditorPane {
         ))
     }
 
-    /// Warp's footer: offers the server, or shows how it is doing.
+    /// The language part of the status line: a lightning icon whose dot tells how the
+    /// server is doing and whose menu offers it, then errors, warnings and, for Python, the
+    /// interpreter, which opens the list to pick another.
     pub(super) fn render_language(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
         let language = self.language_server.as_ref()?;
         let status = language.servers.read(cx).status(&self.path)?;
         let theme = self.theme;
-        let row = div()
-            .flex()
-            .flex_none()
-            .gap_2()
-            .px_3()
-            .h(px(26.0))
-            .items_center()
-            .border_t_1()
-            .border_color(hsla(theme.border))
-            .font_family(theme::UI_FONT)
-            .text_size(px(11.5))
-            .text_color(hsla(theme.text_muted))
-            .child(widgets::icon(theme, "icons/zap.svg"));
-        let action = |id: &'static str, label: String| {
-            widgets::ghost_button(theme, id, label)
-                .px_2()
-                .rounded_sm()
-                .text_color(hsla(theme.text))
-        };
-        Some(match status {
-            Status::Checking => row.child("Looking for a language server…"),
-            Status::Install(server) => row
-                .child("Language support is not currently enabled for this codebase")
-                .child(
-                    action("lsp-install", format!("Install {}", server.binary)).on_click(
-                        cx.listener(move |editor, _, _, cx| {
-                            editor.install_language_server(server.install, cx)
-                        }),
-                    ),
-                ),
-            Status::Enable(server, name) => row
-                .child(format!(
-                    "Language support is not currently enabled for {name}"
-                ))
-                .child(
-                    action("lsp-enable", format!("Enable {}", server.binary)).on_click(
-                        cx.listener(|editor, _, _, cx| {
-                            editor.with_servers(cx, |servers, path, cx| servers.enable(path, cx))
-                        }),
-                    ),
-                ),
+        let (dot, python) = match status {
+            Status::Checking => (None, None),
+            Status::Install(_) | Status::Enable(..) => (Some(theme.text_muted), None),
             Status::Running {
-                server,
                 state,
                 progress,
                 python,
-            } => {
-                let (color, text) = match (state, progress) {
-                    (State::Failed(error), _) => (theme.palette[1], error.clone()),
-                    (State::Starting, progress) | (State::Ready, progress @ Some(_)) => {
-                        (theme.palette[3], progress.unwrap_or("starting").to_owned())
-                    }
-                    (State::Ready, None) => (theme.palette[2], "ready".to_owned()),
-                };
-                let (errors, warnings) = language.marks.iter().fold((0, 0), |(e, w), mark| {
+                ..
+            } => (Some(state_color(theme, state, progress)), Some(python)),
+        };
+        let (errors, warnings) =
+            language.marks.iter().fold(
+                (0, 0),
+                |(e, w), mark| {
                     if mark.error { (e + 1, w) } else { (e, w + 1) }
-                });
-                row.child(div().size(px(7.0)).rounded_full().bg(hsla(color)))
-                    .child(
-                        div()
-                            .min_w_0()
-                            .truncate()
-                            .child(format!("{}: {text}", server.binary)),
-                    )
-                    .child(count(theme, "icons/circle-x.svg", theme.palette[1], errors))
-                    .child(count(
-                        theme,
-                        "icons/triangle-alert.svg",
-                        theme.palette[3],
-                        warnings,
-                    ))
-                    .child(div().flex_1())
-                    .when_some(python, |this, python| {
-                        this.child(action("lsp-python", format!("Python: {python}")).on_click(
-                            cx.listener(|editor, event: &gpui::ClickEvent, _, cx| {
-                                editor.toggle_pythons(event.position(), cx)
-                            }),
+                },
+            );
+        Some(
+            div()
+                .flex()
+                .items_center()
+                .gap_3()
+                .child(
+                    div()
+                        .id("lsp-menu")
+                        .relative()
+                        .flex()
+                        .items_center()
+                        .p(px(2.0))
+                        .rounded_sm()
+                        .hover(|style| style.bg(hsla(theme.tab_hover)))
+                        .child(widgets::icon(theme, "icons/zap.svg"))
+                        .when_some(dot, |this, color| {
+                            this.child(
+                                div()
+                                    .absolute()
+                                    .top(px(1.0))
+                                    .right(px(1.0))
+                                    .size(px(5.0))
+                                    .rounded_full()
+                                    .bg(hsla(color)),
+                            )
+                        })
+                        .on_click(cx.listener(|editor, event: &gpui::ClickEvent, _, cx| {
+                            editor.toggle_popup(event.position(), false, cx)
+                        })),
+                )
+                .when(python.is_some(), |this| {
+                    this.child(count(theme, "icons/circle-x.svg", theme.palette[1], errors))
+                        .child(count(
+                            theme,
+                            "icons/triangle-alert.svg",
+                            theme.palette[3],
+                            warnings,
                         ))
-                    })
-                    .child(
-                        action("lsp-restart", "Restart".into()).on_click(cx.listener(
-                            |editor, _, _, cx| {
-                                editor
-                                    .with_servers(cx, |servers, path, cx| servers.restart(path, cx))
-                            },
-                        )),
+                })
+                .when_some(python.flatten(), |this, python| {
+                    this.child(
+                        div()
+                            .id("python-chip")
+                            .px(px(5.0))
+                            .rounded_sm()
+                            .border_1()
+                            .border_color(hsla(theme.text_muted).opacity(0.6))
+                            .text_color(hsla(theme.text))
+                            .hover(|style| style.bg(hsla(theme.tab_hover)))
+                            .child(python.chip())
+                            .on_click(cx.listener(|editor, event: &gpui::ClickEvent, _, cx| {
+                                editor.toggle_popup(event.position(), true, cx)
+                            })),
                     )
-                    .child(
-                        action("lsp-disable", "Disable".into()).on_click(cx.listener(
-                            |editor, _, _, cx| {
-                                editor
-                                    .with_servers(cx, |servers, path, cx| servers.disable(path, cx))
-                            },
-                        )),
-                    )
-            }
-        })
+                }),
+        )
     }
 
-    fn toggle_pythons(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
+    fn toggle_popup(&mut self, at: Point<Pixels>, pythons: bool, cx: &mut Context<Self>) {
         let Some(language) = self.language_server.as_mut() else {
             return;
         };
-        language.pythons = match language.pythons.take() {
+        language.popup = match language.popup.take() {
             Some(_) => None,
-            None => Some((at, language.servers.read(cx).interpreters(&self.path).0)),
+            None if pythons => {
+                let found = language.servers.read(cx).interpreters(&self.path).0;
+                Some((at, Popup::Pythons(found)))
+            }
+            None => Some((at, Popup::Server)),
         };
         cx.notify();
     }
 
-    fn choose_python(&mut self, python: std::path::PathBuf, cx: &mut Context<Self>) {
-        if let Some(language) = self.language_server.as_mut() {
-            language.pythons = None;
+    fn close_popup(&mut self, cx: &mut Context<Self>) {
+        if let Some(language) = self.language_server.as_mut()
+            && language.popup.take().is_some()
+        {
+            cx.notify();
         }
-        self.with_servers(cx, |servers, path, cx| {
-            servers.choose_python(path, python, cx)
-        });
     }
 
-    /// The interpreters found for the project, opening upward from the footer.
-    pub(super) fn render_pythons(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+    /// The open menu, rising from where it was clicked.
+    pub(super) fn render_popup(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
         let language = self.language_server.as_ref()?;
-        let (at, found) = language.pythons.as_ref()?;
-        let current = language.servers.read(cx).interpreters(&self.path).1;
+        let (at, popup) = language.popup.as_ref()?;
         let theme = self.theme;
+        let note = |text: String| {
+            div()
+                .px_3()
+                .py_1()
+                .text_color(hsla(theme.text_muted))
+                .child(text)
+                .into_any_element()
+        };
+        let item = |id: (&'static str, usize), label: String| {
+            div()
+                .id(id)
+                .px_3()
+                .py_1()
+                .flex()
+                .flex_col()
+                .hover(|style| style.bg(hsla(theme.tab_hover)))
+                .child(label)
+        };
+        let servers = language.servers.read(cx);
+        let rows: Vec<gpui::AnyElement> = match popup {
+            Popup::Server => match servers.status(&self.path)? {
+                Status::Checking => vec![note("Looking for a language server…".into())],
+                Status::Install(server) => vec![
+                    note("Language support is not enabled for this codebase".into()),
+                    item(("lsp", 0), format!("Install {}", server.binary))
+                        .on_click(cx.listener(move |editor, _, _, cx| {
+                            editor.close_popup(cx);
+                            editor.install_language_server(server.install, cx)
+                        }))
+                        .into_any_element(),
+                ],
+                Status::Enable(server, name) => vec![
+                    note(format!("Language support is not enabled for {name}")),
+                    item(("lsp", 0), format!("Enable {}", server.binary))
+                        .on_click(cx.listener(|editor, _, _, cx| {
+                            editor.close_popup(cx);
+                            editor.with_servers(cx, |servers, path, cx| servers.enable(path, cx))
+                        }))
+                        .into_any_element(),
+                ],
+                Status::Running {
+                    server,
+                    state,
+                    progress,
+                    ..
+                } => {
+                    let text = match (state, progress) {
+                        (State::Failed(error), _) => error.clone(),
+                        (_, Some(progress)) => progress.to_owned(),
+                        (State::Starting, None) => "starting".into(),
+                        (State::Ready, None) => "ready".into(),
+                    };
+                    vec![
+                        note(format!("{}: {text}", server.binary)),
+                        item(("lsp", 0), "Restart".into())
+                            .on_click(cx.listener(|editor, _, _, cx| {
+                                editor.close_popup(cx);
+                                editor
+                                    .with_servers(cx, |servers, path, cx| servers.restart(path, cx))
+                            }))
+                            .into_any_element(),
+                        item(("lsp", 1), "Disable".into())
+                            .on_click(cx.listener(|editor, _, _, cx| {
+                                editor.close_popup(cx);
+                                editor
+                                    .with_servers(cx, |servers, path, cx| servers.disable(path, cx))
+                            }))
+                            .into_any_element(),
+                    ]
+                }
+            },
+            Popup::Pythons(found) => {
+                let current = servers.interpreters(&self.path).1;
+                let mut rows = Vec::new();
+                if found.is_empty() {
+                    rows.push(note("No Python interpreters found".into()));
+                }
+                for (index, interpreter) in found.iter().enumerate() {
+                    let python = interpreter.python.clone();
+                    rows.push(
+                        item(("python", index), interpreter.label.clone())
+                            .when(current.as_ref() == Some(interpreter), |this| {
+                                this.bg(hsla(theme.tab_active))
+                            })
+                            .child(
+                                div()
+                                    .text_size(px(10.5))
+                                    .text_color(hsla(theme.text_muted))
+                                    .child(interpreter.python.display().to_string()),
+                            )
+                            .on_click(cx.listener(move |editor, _, _, cx| {
+                                editor.close_popup(cx);
+                                let python = python.clone();
+                                editor.with_servers(cx, |servers, path, cx| {
+                                    servers.choose_python(path, python, cx)
+                                })
+                            }))
+                            .into_any_element(),
+                    );
+                }
+                rows
+            }
+        };
         Some(deferred(
             gpui::anchored()
                 .position(*at)
@@ -460,9 +550,9 @@ impl EditorPane {
                 .snap_to_window()
                 .child(
                     div()
-                        .id("python-picker")
+                        .id("status-popup")
                         .occlude()
-                        .min_w(px(260.0))
+                        .min_w(px(220.0))
                         .max_h(px(320.0))
                         .overflow_y_scroll()
                         .py_1()
@@ -474,37 +564,8 @@ impl EditorPane {
                         .font_family(theme::UI_FONT)
                         .text_size(px(12.0))
                         .text_color(hsla(theme.text))
-                        .on_mouse_down_out(cx.listener(|editor, _, _, cx| {
-                            if let Some(language) = editor.language_server.as_mut() {
-                                language.pythons = None;
-                                cx.notify();
-                            }
-                        }))
-                        .when(found.is_empty(), |this| {
-                            this.child(div().px_3().py_1().child("No Python interpreters found"))
-                        })
-                        .children(found.iter().enumerate().map(|(index, interpreter)| {
-                            let chosen = current.as_ref() == Some(interpreter);
-                            let python = interpreter.python.clone();
-                            div()
-                                .id(("python", index))
-                                .px_3()
-                                .py_1()
-                                .flex()
-                                .flex_col()
-                                .when(chosen, |this| this.bg(hsla(theme.tab_active)))
-                                .hover(|style| style.bg(hsla(theme.tab_hover)))
-                                .on_click(cx.listener(move |editor, _, _, cx| {
-                                    editor.choose_python(python.clone(), cx)
-                                }))
-                                .child(interpreter.label.clone())
-                                .child(
-                                    div()
-                                        .text_size(px(10.5))
-                                        .text_color(hsla(theme.text_muted))
-                                        .child(interpreter.python.display().to_string()),
-                                )
-                        })),
+                        .on_mouse_down_out(cx.listener(|editor, _, _, cx| editor.close_popup(cx)))
+                        .children(rows),
                 ),
         ))
     }
@@ -534,7 +595,16 @@ impl EditorPane {
     }
 }
 
-/// An icon and a count, as the footer shows errors and warnings.
+/// The server's dot: green when ready, yellow while starting or busy, red when it failed.
+fn state_color(theme: &crate::theme::Theme, state: &State, progress: Option<&str>) -> u32 {
+    match (state, progress) {
+        (State::Failed(_), _) => theme.palette[1],
+        (State::Ready, None) => theme.palette[2],
+        _ => theme.palette[3],
+    }
+}
+
+/// An icon and a count, as the status line shows errors and warnings.
 fn count(
     theme: &crate::theme::Theme,
     icon: &'static str,

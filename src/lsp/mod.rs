@@ -66,8 +66,8 @@ pub enum Status<'a> {
         server: &'static Server,
         state: &'a State,
         progress: Option<&'a str>,
-        /// The Python interpreter pyright uses, as the picker labels it.
-        python: Option<String>,
+        /// The Python interpreter pyright uses.
+        python: Option<Interpreter>,
     },
 }
 
@@ -238,8 +238,7 @@ impl LanguageServers {
                 progress: running.progress.last().map(|(_, text)| text.as_str()),
                 python: (key.0 == PYRIGHT)
                     .then(|| self.python_for(&key.1))
-                    .flatten()
-                    .map(|interpreter| interpreter.label),
+                    .flatten(),
             });
         }
         Some(match self.installed.get(server.binary) {
