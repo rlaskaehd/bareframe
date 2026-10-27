@@ -416,7 +416,10 @@ impl EditorPane {
         language.popup = match language.popup.take() {
             Some(_) => None,
             None if pythons => {
-                let found = language.servers.read(cx).interpreters(&self.path).0;
+                let found = language.servers.update(cx, |servers, _| {
+                    servers.find_pythons(&self.path);
+                    servers.interpreters(&self.path).0
+                });
                 Some((at, Popup::Pythons(found)))
             }
             None => Some((at, Popup::Server)),

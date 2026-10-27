@@ -77,6 +77,10 @@ pub struct LanguageServers {
     documents: HashMap<PathBuf, Document>,
     /// The interpreter picked for each project; others get `python::default`.
     python: HashMap<PathBuf, PathBuf>,
+    /// The interpreters found for each project, looked for when its first Python file
+    /// opens, when the list is opened and on restart; reading folders on every redraw
+    /// would stall the window.
+    interpreters: HashMap<PathBuf, Vec<Interpreter>>,
     /// Looks again for a server being installed in a terminal.
     _recheck: Option<Task<()>>,
     _quit: Subscription,
@@ -100,6 +104,7 @@ pub fn init(cx: &mut App) {
         running: HashMap::new(),
         documents: HashMap::new(),
         python: store::load_pythons(),
+        interpreters: HashMap::new(),
         _recheck: None,
         // Dropping the clients asks every server to exit.
         _quit: cx.on_app_quit(|servers: &mut LanguageServers, _| {
@@ -136,6 +141,9 @@ impl LanguageServers {
             did_open(client, path, &document);
         }
         self.documents.insert(path.to_path_buf(), document);
+        if key.0 == PYRIGHT && !self.interpreters.contains_key(&key.1) {
+            self.find_pythons(path);
+        }
         self.check_installed(server, cx);
         if self.enabled.contains(&key) {
             self.start(server, key, cx);
@@ -264,11 +272,18 @@ impl LanguageServers {
         cx.emit(LspEvent::Updated);
     }
 
-    /// The interpreters found for the project of `path`, and the one in use.
+    /// The interpreters last found for the project of `path`, and the one in use.
     pub fn interpreters(&self, path: &Path) -> (Vec<Interpreter>, Option<Interpreter>) {
         let root = lsp::project_root(path);
-        let current = self.python_for(&root);
-        (find_interpreters(&root), current)
+        let found = self.interpreters.get(&root).cloned().unwrap_or_default();
+        (found, self.python_for(&root))
+    }
+
+    /// Looks for the interpreters of `path`'s project again.
+    pub fn find_pythons(&mut self, path: &Path) {
+        let root = lsp::project_root(path);
+        let found = find_interpreters(&root);
+        self.interpreters.insert(root, found);
     }
 
     /// The footer's pick: remembered for the project; pyright restarts to use it.
@@ -279,18 +294,21 @@ impl LanguageServers {
     }
 
     fn python_for(&self, root: &Path) -> Option<Interpreter> {
-        let found = find_interpreters(root);
+        let found = self.interpreters.get(root).map_or(&[][..], Vec::as_slice);
         let chosen = self
             .python
             .get(root)
             .and_then(|chosen| found.iter().find(|found| &found.python == chosen));
-        chosen.or_else(|| python::default(&found, root)).cloned()
+        chosen.or_else(|| python::default(found, root)).cloned()
     }
 
     pub fn restart(&mut self, path: &Path, cx: &mut Context<Self>) {
         let Some((key, server, _)) = key_for(path) else {
             return;
         };
+        if key.0 == PYRIGHT {
+            self.find_pythons(path);
+        }
         self.running.remove(&key);
         self.clear_diagnostics(&key);
         self.start(server, key, cx);
