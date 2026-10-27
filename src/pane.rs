@@ -37,6 +37,8 @@ pub struct TerminalPane {
     stale: Vec<Arc<RenderImage>>,
     /// The running or last finished command, from the shell integration's titles.
     last_command: Option<String>,
+    /// Hands the snapshots back to the window when the pane goes, however it is closed.
+    _snapshots: Subscription,
 }
 
 impl EventEmitter<PaneEvent> for TerminalPane {}
@@ -58,6 +60,10 @@ impl TerminalPane {
             frozen: None,
             stale: Vec::new(),
             last_command: None,
+            _snapshots: cx.on_release_in(window, |pane: &mut Self, window, _| {
+                pane.stale.extend(pane.frozen.take());
+                pane.drop_stale(window);
+            }),
         };
         pane.start(theme, window, cx);
         pane
@@ -217,6 +223,14 @@ impl TerminalPane {
         }
     }
 
+    fn drop_stale(&mut self, window: &mut Window) {
+        for image in self.stale.drain(..) {
+            if let Err(error) = window.drop_image(image) {
+                eprintln!("bareframe: releasing a terminal snapshot: {error}");
+            }
+        }
+    }
+
     pub fn shutdown(&mut self, cx: &mut Context<Self>) {
         self.release(cx);
         self.session.close();
@@ -225,11 +239,7 @@ impl TerminalPane {
 
 impl Render for TerminalPane {
     fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        for image in self.stale.drain(..) {
-            if let Err(error) = window.drop_image(image) {
-                eprintln!("bareframe: releasing a terminal snapshot: {error}");
-            }
-        }
+        self.drop_stale(window);
         let error = match &self.session.status {
             SessionStatus::Failed(error) => Some(format!(
                 "Could not start terminal: {error}\nCmd+Shift+R to retry"

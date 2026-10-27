@@ -107,17 +107,37 @@ pub struct MarkdownPane {
     /// theme they were drawn in.
     diagrams: std::collections::HashMap<String, Diagram>,
     diagrams_dark: bool,
+    /// Diagrams no longer shown; GPUI keeps them until the window lets them go.
+    stale: Vec<std::sync::Arc<gpui::Image>>,
     _diagrams: Option<Task<()>>,
     /// The text of each piece drawn so far, for copying a selection (see `select`).
     pieces: std::cell::RefCell<std::collections::BTreeMap<usize, String>>,
     selection: Option<select::Selection>,
     _watch: Option<Watch>,
+    _release: gpui::Subscription,
 }
 
 pub(super) enum Diagram {
     Pending,
     Ready(std::sync::Arc<gpui::Image>),
     Failed(String),
+}
+
+/// Drops the diagrams whose source `gone` picks, moving their pictures to `stale`.
+fn forget(
+    diagrams: &mut std::collections::HashMap<String, Diagram>,
+    stale: &mut Vec<std::sync::Arc<gpui::Image>>,
+    gone: impl Fn(&str) -> bool,
+) {
+    diagrams.retain(|source, diagram| {
+        if !gone(source) {
+            return true;
+        }
+        if let Diagram::Ready(image) = diagram {
+            stale.push(image.clone());
+        }
+        false
+    });
 }
 
 /// Whether the theme is dark, judged by its background's brightness.
@@ -130,7 +150,13 @@ fn is_dark(theme: &Theme) -> bool {
 impl EventEmitter<MarkdownEvent> for MarkdownPane {}
 
 impl MarkdownPane {
-    pub fn new(path: PathBuf, theme: &'static Theme, mono: String, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        path: PathBuf,
+        theme: &'static Theme,
+        mono: String,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let mut pane = Self {
             path,
             blocks: Vec::new(),
@@ -143,10 +169,15 @@ impl MarkdownPane {
             pictures: Default::default(),
             diagrams: Default::default(),
             diagrams_dark: is_dark(theme),
+            stale: Vec::new(),
             _diagrams: None,
             pieces: Default::default(),
             selection: None,
             _watch: None,
+            _release: cx.on_release_in(window, |pane: &mut Self, window, cx| {
+                forget(&mut pane.diagrams, &mut pane.stale, |_| true);
+                pane.drop_stale(window, cx);
+            }),
         };
         pane.load();
         pane.draw_diagrams(cx);
@@ -172,7 +203,7 @@ impl MarkdownPane {
         // Diagrams carry their colors, so a switch between dark and light redraws them.
         if is_dark(theme) != self.diagrams_dark {
             self.diagrams_dark = is_dark(theme);
-            self.diagrams.clear();
+            forget(&mut self.diagrams, &mut self.stale, |_| true);
             self.draw_diagrams(cx);
         }
         cx.notify();
@@ -183,6 +214,10 @@ impl MarkdownPane {
     fn draw_diagrams(&mut self, cx: &mut Context<Self>) {
         let mut sources = Vec::new();
         mermaid_sources(&self.blocks, &mut sources);
+        // Diagrams whose source left the document (edited, or another file) are let go.
+        forget(&mut self.diagrams, &mut self.stale, |source| {
+            !sources.contains(&source)
+        });
         let wanted: Vec<String> = sources
             .into_iter()
             .filter(|source| !self.diagrams.contains_key(*source))
@@ -226,6 +261,19 @@ impl MarkdownPane {
             })
             .ok();
         }));
+    }
+
+    /// Hands the pictures of forgotten diagrams back: GPUI's image cache and the window's
+    /// texture atlas keep them otherwise.
+    fn drop_stale(&mut self, window: &mut Window, cx: &mut gpui::App) {
+        for image in self.stale.drain(..) {
+            if let Some(data) = image.clone().get_render_image(window, cx)
+                && let Err(error) = window.drop_image(data)
+            {
+                eprintln!("bareframe: releasing a diagram: {error}");
+            }
+            image.remove_asset(cx);
+        }
     }
 
     fn navigate(&mut self, path: PathBuf, cx: &mut Context<Self>) {
@@ -330,7 +378,8 @@ impl MarkdownPane {
 }
 
 impl Render for MarkdownPane {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.drop_stale(window, cx);
         let theme = self.theme;
         let switch = view_switch(self.theme, false, {
             let pane = cx.entity().downgrade();

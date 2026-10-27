@@ -39,6 +39,8 @@ const SNIPPET: usize = 160;
 #[derive(Clone, Debug, PartialEq)]
 struct LineMatch {
     line: u64,
+    /// The part of the line shown (see `snippet`), not the whole line: a minified file's
+    /// lines run to tens of kilobytes, times thousands of matches.
     text: String,
     /// Byte ranges of the matches within `text`.
     ranges: Vec<Range<usize>>,
@@ -96,11 +98,8 @@ fn search(
                         true
                     });
                     total += ranges.len().max(1);
-                    lines.push(LineMatch {
-                        line,
-                        text: text.to_owned(),
-                        ranges,
-                    });
+                    let (text, ranges) = snippet(text, &ranges);
+                    lines.push(LineMatch { line, text, ranges });
                 }
                 Ok(total < MAX_MATCHES && !cancel.load(Ordering::Relaxed))
             });
@@ -391,7 +390,7 @@ impl SearchPanel {
             Row::Line(file, line) => {
                 let file = &self.results[file];
                 let (path, line) = (file.path.clone(), &file.lines[line]);
-                let (text, ranges) = snippet(&line.text, &line.ranges);
+                let (text, ranges) = (line.text.clone(), line.ranges.clone());
                 let highlight = HighlightStyle {
                     background_color: Some(hsla(theme.accent).opacity(0.35)),
                     color: Some(hsla(theme.text)),

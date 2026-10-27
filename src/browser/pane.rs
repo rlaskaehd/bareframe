@@ -17,7 +17,7 @@ use cef::*;
 use futures::{StreamExt, future::Either};
 use gpui::{
     Bounds, Context, Entity, EventEmitter, FocusHandle, Image, ImageFormat, KeyBinding, Pixels,
-    Subscription, Task, Window, actions, canvas, div, img, prelude::*, px,
+    RenderImage, Subscription, Task, Window, actions, canvas, div, img, prelude::*, px,
 };
 use std::{
     path::Path,
@@ -60,7 +60,7 @@ enum Frozen {
     No,
     /// The page stays up until its snapshot is ready.
     Capturing,
-    Shot(Option<Arc<Image>>),
+    Shot(Option<Arc<RenderImage>>),
 }
 
 pub struct BrowserPane {
@@ -84,8 +84,10 @@ pub struct BrowserPane {
     page: FocusHandle,
     keyboard: Keyboard,
     _events: Option<Task<()>>,
+    /// Snapshots no longer shown; GPUI keeps their textures until the window drops them.
+    stale: Vec<Arc<RenderImage>>,
     _snapshot: Option<Task<()>>,
-    _subscriptions: [Subscription; 4],
+    _subscriptions: [Subscription; 5],
 }
 
 impl EventEmitter<BrowserPaneEvent> for BrowserPane {}
@@ -110,6 +112,12 @@ impl BrowserPane {
             }
         });
         let release = cx.on_release(|pane: &mut Self, _| pane.close());
+        let snapshots = cx.on_release_in(window, |pane: &mut Self, window, _| {
+            if let Frozen::Shot(Some(image)) = std::mem::replace(&mut pane.frozen, Frozen::No) {
+                pane.stale.push(image);
+            }
+            pane.drop_stale(window);
+        });
         let page = cx.focus_handle();
         let keyboard = Keyboard::default();
         let focused = cx.on_focus(&page, window, |pane, _, _| {
@@ -149,8 +157,9 @@ impl BrowserPane {
             page,
             keyboard,
             _events: None,
+            stale: Vec::new(),
             _snapshot: None,
-            _subscriptions: [entered, release, focused, blurred],
+            _subscriptions: [entered, release, snapshots, focused, blurred],
         }
     }
 
@@ -190,7 +199,7 @@ impl BrowserPane {
     /// snapshot of the page stands in for it, taken over DevTools.
     pub fn set_frozen(&mut self, frozen: bool, cx: &mut Context<Self>) {
         if let Frozen::Shot(Some(image)) = std::mem::replace(&mut self.frozen, Frozen::No) {
-            image.remove_asset(cx);
+            self.stale.push(image);
         }
         if frozen {
             self.frozen = Frozen::Capturing;
@@ -211,7 +220,9 @@ impl BrowserPane {
                 };
                 pane.update(cx, |pane, cx| {
                     if matches!(pane.frozen, Frozen::Capturing) {
-                        pane.frozen = Frozen::Shot(image.map(Arc::new));
+                        let image =
+                            image.and_then(|image| image.to_image_data(cx.svg_renderer()).ok());
+                        pane.frozen = Frozen::Shot(image);
                         pane.show_view();
                         cx.notify();
                     }
@@ -231,6 +242,14 @@ impl BrowserPane {
             // A blank page is waiting for an address.
             self.address
                 .update(cx, |address, cx| address.focus(window, cx));
+        }
+    }
+
+    fn drop_stale(&mut self, window: &mut Window) {
+        for image in self.stale.drain(..) {
+            if let Err(error) = window.drop_image(image) {
+                eprintln!("bareframe: releasing a page snapshot: {error}");
+            }
         }
     }
 
@@ -433,7 +452,8 @@ impl BrowserPane {
 }
 
 impl Render for BrowserPane {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.drop_stale(window);
         let theme = self.theme;
         let pane = cx.entity().downgrade();
         let page = canvas(

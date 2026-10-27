@@ -249,7 +249,7 @@ impl WorkspaceView {
     ) {
         let theme = self.theme();
         let mono = self.mono_font();
-        let pane = cx.new(|cx| MarkdownPane::new(path, theme, mono, cx));
+        let pane = cx.new(|cx| MarkdownPane::new(path, theme, mono, window, cx));
         let events = cx.subscribe_in(
             &pane,
             window,
