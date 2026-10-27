@@ -16,6 +16,12 @@ use std::{
 };
 
 const TEXT_SIZE: f32 = 14.0;
+/// Quotes and lists nested deeper than this are read into the level above, so a hostile
+/// file can't exhaust the stack while parsing or drawing.
+const MAX_DEPTH: usize = 32;
+/// Larger files are not rendered; reading and laying them out would stall the window.
+const MAX_FILE: u64 = 8 << 20;
+const MAX_IMAGE: u64 = 20 << 20;
 /// Readable line length; wider panes center the text, as Warp does.
 const MAX_WIDTH: f32 = 860.0;
 
@@ -85,7 +91,7 @@ pub fn parse(text: &str) -> Vec<Block> {
         | Options::ENABLE_STRIKETHROUGH
         | Options::ENABLE_TASKLISTS
         | Options::ENABLE_GFM;
-    blocks(&mut Parser::new_ext(text, options).peekable())
+    blocks(&mut Parser::new_ext(text, options).peekable(), 0)
 }
 
 type Events<'a> = std::iter::Peekable<Parser<'a>>;
@@ -126,8 +132,10 @@ fn is_inline(event: &Event) -> bool {
 
 /// The blocks of a container up to its end (consumed), or to the end of the input. Loose
 /// text, as in a tight list item, becomes a paragraph.
-fn blocks(events: &mut Events) -> Vec<Block> {
+fn blocks(events: &mut Events, depth: usize) -> Vec<Block> {
     let mut out = Vec::new();
+    // Containers past `MAX_DEPTH` whose contents are read into this level.
+    let mut flattened = 0;
     while let Some(event) = events.peek() {
         if is_inline(event) {
             out.push(Block::Paragraph(inline(events)));
@@ -137,6 +145,10 @@ fn blocks(events: &mut Events) -> Vec<Block> {
             break;
         };
         match event {
+            Event::Start(Tag::BlockQuote(_) | Tag::List(_) | Tag::Item) if depth >= MAX_DEPTH => {
+                flattened += 1
+            }
+            Event::End(_) if flattened > 0 => flattened -= 1,
             Event::End(_) => break,
             Event::Rule => out.push(Block::Rule),
             Event::Start(Tag::Paragraph) => {
@@ -155,7 +167,7 @@ fn blocks(events: &mut Events) -> Vec<Block> {
                 out.push(Block::Heading(level, inline(events)));
                 events.next();
             }
-            Event::Start(Tag::BlockQuote(_)) => out.push(Block::Quote(blocks(events))),
+            Event::Start(Tag::BlockQuote(_)) => out.push(Block::Quote(blocks(events, depth + 1))),
             Event::Start(Tag::CodeBlock(kind)) => {
                 let language = match kind {
                     CodeBlockKind::Fenced(info) => {
@@ -188,7 +200,7 @@ fn blocks(events: &mut Events) -> Vec<Block> {
                     };
                     items.push(Item {
                         checked,
-                        blocks: blocks(events),
+                        blocks: blocks(events, depth + 1),
                     });
                 }
                 events.next();
@@ -204,7 +216,7 @@ fn blocks(events: &mut Events) -> Vec<Block> {
                 }
             }
             // Footnote definitions, definition lists and the like show their contents.
-            Event::Start(_) => out.extend(blocks(events)),
+            Event::Start(_) => out.extend(blocks(events, depth + 1)),
             _ => {}
         }
     }
@@ -356,6 +368,20 @@ fn percent_decode(text: &str) -> String {
     String::from_utf8(out).unwrap_or_else(|_| text.to_owned())
 }
 
+/// A picture file of a sensible size: a link could name a device or a huge file.
+fn is_image(path: &Path) -> bool {
+    let picture = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            ["png", "jpg", "jpeg", "gif", "webp", "bmp"]
+                .contains(&extension.to_ascii_lowercase().as_str())
+        });
+    picture
+        && std::fs::metadata(path)
+            .is_ok_and(|metadata| metadata.is_file() && metadata.len() <= MAX_IMAGE)
+}
+
 /// Code blocks in these languages get Warp's "insert into terminal" button.
 fn is_shell(language: &str) -> bool {
     ["sh", "bash", "zsh", "shell", "console", "fish"].contains(&language)
@@ -427,6 +453,16 @@ impl MarkdownPane {
     }
 
     fn load(&mut self) {
+        let size = std::fs::metadata(&self.path).map_or(0, |metadata| metadata.len());
+        if size > MAX_FILE {
+            self.blocks.clear();
+            self.error = Some(format!(
+                "{} is too large to show ({} MB).",
+                self.path.display(),
+                size >> 20
+            ));
+            return;
+        }
         match std::fs::read_to_string(&self.path) {
             Ok(text) => {
                 self.blocks = parse(&text);
@@ -742,7 +778,9 @@ impl MarkdownPane {
             .images
             .iter()
             .map(|image| match resolve(&image.source, &base) {
-                Some(Target::File(path)) => img(path).max_w_full().into_any_element(),
+                Some(Target::File(path)) if is_image(&path) => {
+                    img(path).max_w_full().into_any_element()
+                }
                 // Only files next to the document: fetching a web image would tell its
                 // server that this file was opened.
                 _ => div()
@@ -900,6 +938,22 @@ mod tests {
                 alt: "alt text".into()
             }]
         );
+    }
+
+    #[test]
+    fn deep_nesting_is_flattened_not_recursed() {
+        let deep = format!("{}text\n", "> ".repeat(5000));
+        let blocks = parse(&deep);
+        let mut depth = 0;
+        let mut level = &blocks;
+        while let [Block::Quote(inner)] = level.as_slice() {
+            depth += 1;
+            level = inner;
+        }
+        assert_eq!(depth, MAX_DEPTH);
+        assert_eq!(level.as_slice(), [Block::Paragraph(plain("text"))]);
+        let list = format!("{}- item\n", "- ".repeat(5000));
+        assert!(!parse(&list).is_empty());
     }
 
     #[test]
