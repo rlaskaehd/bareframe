@@ -1,9 +1,10 @@
 //! The app's language servers, run as Warp runs them: one per server and project root,
 //! started once the user enables that server for the project, shared by every editor on a
 //! file inside it, and stopped when its last file closes. Enabled projects are remembered
-//! in `language-servers` beside the settings file.
+//! beside the settings file (`store`).
 mod client;
 pub mod python;
+mod store;
 
 use bareframe_core::lsp::{self, Server};
 use client::Client;
@@ -130,11 +131,11 @@ impl Global for GlobalServers {}
 
 pub fn init(cx: &mut App) {
     let servers = cx.new(|cx| LanguageServers {
-        enabled: load_enabled(),
+        enabled: store::load_enabled(),
         installed: HashMap::new(),
         running: HashMap::new(),
         documents: HashMap::new(),
-        python: python::load_chosen(),
+        python: store::load_pythons(),
         _recheck: None,
         // Dropping the clients asks every server to exit.
         _quit: cx.on_app_quit(|servers: &mut LanguageServers, _| {
@@ -284,7 +285,7 @@ impl LanguageServers {
             return;
         };
         self.enabled.insert(key.clone());
-        save_enabled(&self.enabled);
+        store::save_enabled(&self.enabled);
         self.start(server, key, cx);
     }
 
@@ -293,7 +294,7 @@ impl LanguageServers {
             return;
         };
         self.enabled.remove(&key);
-        save_enabled(&self.enabled);
+        store::save_enabled(&self.enabled);
         self.running.remove(&key);
         self.clear_diagnostics(&key);
         cx.emit(LspEvent::Updated);
@@ -309,7 +310,7 @@ impl LanguageServers {
     /// The footer's pick: remembered for the project; pyright restarts to use it.
     pub fn choose_python(&mut self, path: &Path, python: PathBuf, cx: &mut Context<Self>) {
         self.python.insert(lsp::project_root(path), python);
-        python::save_chosen(&self.python);
+        store::save_pythons(&self.python);
         self.restart(path, cx);
     }
 
@@ -724,44 +725,4 @@ fn login_path() -> Option<&'static str> {
         shell_path.or_else(|| std::env::var("PATH").ok())
     })
     .as_deref()
-}
-
-fn enabled_file() -> Option<PathBuf> {
-    Some(crate::files::config_file()?.with_file_name("language-servers"))
-}
-
-/// `binary<TAB>root` per line.
-fn load_enabled() -> HashSet<Key> {
-    let Some(file) = enabled_file() else {
-        return HashSet::new();
-    };
-    let text = crate::files::read_optional(&file)
-        .inspect_err(|error| eprintln!("bareframe: {}: {error}", file.display()))
-        .ok()
-        .flatten()
-        .unwrap_or_default();
-    text.lines()
-        .filter_map(|line| {
-            let (binary, root) = line.split_once('\t')?;
-            let server = lsp::SERVERS.iter().find(|server| server.binary == binary)?;
-            Some((server.binary, PathBuf::from(root)))
-        })
-        .collect()
-}
-
-fn save_enabled(enabled: &HashSet<Key>) {
-    let Some(file) = enabled_file() else {
-        return;
-    };
-    // A line break in a folder name would start a line of its own and enable a project
-    // the user never chose; such a project stays enabled for this run only.
-    let mut lines: Vec<String> = enabled
-        .iter()
-        .filter(|(_, root)| !root.to_string_lossy().chars().any(char::is_control))
-        .map(|(binary, root)| format!("{binary}\t{}\n", root.display()))
-        .collect();
-    lines.sort();
-    if let Err(error) = crate::files::write_atomically(&file, &lines.concat()) {
-        eprintln!("bareframe: {}: {error}", file.display());
-    }
 }

@@ -1,10 +1,7 @@
 //! Python interpreters for pyright, chosen as in VS Code: the ones found for a project are
-//! listed in the editor's footer, and the one picked is remembered per project. Finding
-//! them only reads folders; nothing is run, least of all a project's own `.venv`.
-use std::{
-    collections::HashMap,
-    path::{Path, PathBuf},
-};
+//! listed in the editor's footer, and the one picked is remembered per project (`store`).
+//! Finding them only reads folders; nothing is run, least of all a project's own `.venv`.
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Interpreter {
@@ -175,39 +172,6 @@ pub fn default<'a>(found: &'a [Interpreter], root: &Path) -> Option<&'a Interpre
         .find(|interpreter| interpreter.label.starts_with('/'))
         .or(outside.first())
         .copied()
-}
-
-fn chosen_file() -> Option<PathBuf> {
-    Some(crate::files::config_file()?.with_file_name("python-interpreters"))
-}
-
-/// `root<TAB>python` per line, beside the settings file.
-pub fn load_chosen() -> HashMap<PathBuf, PathBuf> {
-    let text = chosen_file()
-        .and_then(|file| crate::files::read_optional(&file).ok().flatten())
-        .unwrap_or_default();
-    text.lines()
-        .filter_map(|line| {
-            let (root, python) = line.split_once('\t')?;
-            Some((PathBuf::from(root), PathBuf::from(python)))
-        })
-        .collect()
-}
-
-pub fn save_chosen(chosen: &HashMap<PathBuf, PathBuf>) {
-    let Some(file) = chosen_file() else {
-        return;
-    };
-    let plain = |path: &PathBuf| !path.to_string_lossy().chars().any(char::is_control);
-    let mut lines: Vec<String> = chosen
-        .iter()
-        .filter(|(root, python)| plain(root) && plain(python))
-        .map(|(root, python)| format!("{}\t{}\n", root.display(), python.display()))
-        .collect();
-    lines.sort();
-    if let Err(error) = crate::files::write_atomically(&file, &lines.concat()) {
-        eprintln!("bareframe: {}: {error}", file.display());
-    }
 }
 
 #[cfg(test)]
