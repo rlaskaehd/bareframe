@@ -79,16 +79,29 @@ fn subfolders(dir: &Path) -> Vec<PathBuf> {
 }
 
 /// The one used until the user picks: the project's own environment, else the first on PATH.
+/// pyright runs the interpreter it is given, so a project's own is taken unasked only when it
+/// is a real virtual environment: its `python` links to an interpreter outside the project.
+/// A `python` file a repository ships itself is offered in the list but never chosen for
+/// the user.
 pub fn default<'a>(found: &'a [Interpreter], root: &Path) -> Option<&'a Interpreter> {
+    // Both sides resolved: on macOS a temporary or linked folder may be reached two ways.
+    let real_root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let outside = |interpreter: &&Interpreter| {
+        std::fs::canonicalize(&interpreter.python).is_ok_and(|real| !real.starts_with(&real_root))
+    };
     found
         .iter()
-        .find(|interpreter| interpreter.python.starts_with(root))
+        .find(|interpreter| interpreter.python.starts_with(root) && outside(interpreter))
         .or_else(|| {
             found
                 .iter()
                 .find(|interpreter| interpreter.label.starts_with('/'))
         })
-        .or(found.first())
+        .or_else(|| {
+            found
+                .iter()
+                .find(|interpreter| !interpreter.python.starts_with(root))
+        })
 }
 
 fn chosen_file() -> Option<PathBuf> {
@@ -133,12 +146,21 @@ mod tests {
         std::fs::write(at, "").unwrap();
     }
 
+    /// A virtual environment's `python`: a link to an interpreter elsewhere.
+    fn venv_python(at: &Path, real: &Path) {
+        std::fs::create_dir_all(at.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(real, at).unwrap();
+    }
+
     #[test]
     fn project_venvs_conda_pyenv_and_path_are_found() {
         let dir = std::env::temp_dir().join(format!("bareframe-python-{}", std::process::id()));
         let (root, home, bin) = (dir.join("project"), dir.join("home"), dir.join("bin"));
-        python(&root.join(".venv/bin/python"));
         python(&home.join("miniforge3/bin/python"));
+        venv_python(
+            &root.join(".venv/bin/python"),
+            &home.join("miniforge3/bin/python"),
+        );
         python(&home.join("miniforge3/envs/claude/bin/python"));
         python(&home.join(".pyenv/versions/3.12.4/bin/python"));
         python(&bin.join("python3"));
@@ -156,8 +178,11 @@ mod tests {
             ]
         );
         assert_eq!(default(&found, &root).unwrap().label, ".venv");
+        // A `python` the repository ships itself is listed but not chosen unasked.
         std::fs::remove_dir_all(root.join(".venv")).unwrap();
+        python(&root.join("venv/bin/python"));
         let found = discover(&root, &home, &bin.display().to_string());
+        assert_eq!(found[0].label, "venv");
         assert_eq!(default(&found, &root).unwrap().label, on_path);
         std::fs::remove_dir_all(&dir).unwrap();
     }
