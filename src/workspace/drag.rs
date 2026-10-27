@@ -6,6 +6,7 @@ use super::{
     sidebar::{tab_label, terminal_icon},
 };
 use crate::{
+    explorer::DraggedEntry,
     theme::{Theme, hsla},
     widgets,
 };
@@ -109,9 +110,19 @@ impl WorkspaceView {
         cx.notify();
     }
 
+    /// A file from the explorer is lifted: one bareframe opens itself can be dropped beside
+    /// a pane, so the terminals freeze for the drop zones as for a pane; others can't.
+    pub(super) fn start_file_drag(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
+        if self.opens_inside(path) {
+            self.dragged_file = Some(path.to_path_buf());
+            self.start_drag(Vec::new(), cx);
+        }
+    }
+
     /// A drag ends, dropped on a target or not.
     pub(super) fn end_drag(&mut self, cx: &mut Context<Self>) {
         self.dragging.clear();
+        self.dragged_file = None;
         self.drop_target = None;
         if std::mem::take(&mut self.drag_frozen) {
             self.set_frozen(false, cx);
@@ -119,7 +130,7 @@ impl WorkspaceView {
         cx.notify();
     }
 
-    /// Lets pane `id`'s element take dragged panes and tabs beside it, with the zone a drop
+    /// Lets pane `id`'s element take dragged panes, tabs and files beside it, with the zone a drop
     /// would fill drawn over it; call it last in the element's chain.
     pub(super) fn pane_drop_target(
         &self,
@@ -144,12 +155,25 @@ impl WorkspaceView {
                 view.hover_drop(id, allowed, event.bounds, event.event.position, cx)
             }),
         )
+        .on_drag_move(
+            cx.listener(move |view, event: &DragMoveEvent<DraggedEntry>, _, cx| {
+                let allowed = view.dragged_file.as_ref() == Some(&event.drag(cx).path);
+                view.hover_drop(id, allowed, event.bounds, event.event.position, cx)
+            }),
+        )
         .on_drop(cx.listener(move |view, dragged: &DraggedPane, window, cx| {
             view.drop_pane(id, dragged.pane, window, cx)
         }))
         .on_drop(cx.listener(move |view, dragged: &DraggedTab, window, cx| {
             view.drop_tabs(id, &dragged.tabs, window, cx)
         }))
+        .on_drop(
+            cx.listener(move |view, dragged: &DraggedEntry, window, cx| {
+                if let Some(side) = view.take_drop(id, cx) {
+                    view.open_file_beside(&dragged.path, id, side, window, cx);
+                }
+            }),
+        )
         .children(zone)
     }
 

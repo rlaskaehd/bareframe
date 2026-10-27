@@ -715,6 +715,14 @@ impl Workspace {
     }
 
     /// Puts `layout` at `side` of `target` and focuses `focus` there.
+    /// A new pane beside `target` on `side`, focused; `None` if `target` is gone.
+    pub fn split_beside(&mut self, target: PaneId, side: Direction) -> Option<PaneId> {
+        self.tab_of(target)?;
+        let pane = self.allocate();
+        self.place(target, side, Layout::Pane(pane), pane)
+            .then_some(pane)
+    }
+
     fn place(&mut self, target: PaneId, side: Direction, layout: Layout, focus: PaneId) -> bool {
         let Some(index) = self.tab_of(target) else {
             return false;
@@ -759,6 +767,15 @@ mod tests {
         assert_eq!(ws.close(first), Some(Closed::Replaced(PaneId(5))));
         assert_eq!(ws.active().layout, Layout::Pane(PaneId(5)));
         assert_eq!(ws.close(PaneId(99)), None);
+    }
+
+    #[test]
+    fn a_pane_opens_beside_another() {
+        let (mut ws, first) = Workspace::new();
+        let left = ws.split_beside(first, Direction::Left).unwrap();
+        assert_eq!(ws.active().layout.panes(), [left, first]);
+        assert_eq!(ws.active_pane(), left);
+        assert_eq!(ws.split_beside(PaneId(99), Direction::Up), None);
     }
 
     #[test]

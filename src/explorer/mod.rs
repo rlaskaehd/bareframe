@@ -3,6 +3,8 @@
 //! renaming, moving and deleting files is in `edit`.
 mod edit;
 
+pub use edit::DraggedEntry;
+
 use crate::{
     file_icons::FileIcon,
     theme::{self, Theme, hsla},
@@ -44,6 +46,8 @@ pub fn key_bindings() -> Vec<gpui::KeyBinding> {
 pub enum ExplorerEvent {
     /// A file was activated; directories expand in place instead.
     Open(PathBuf),
+    /// A file or folder started being dragged.
+    Drag(PathBuf),
     ContextMenu {
         path: PathBuf,
         root: PathBuf,
@@ -454,7 +458,12 @@ impl Explorer {
             })
             // A root stays where it is; everything below it can be dragged.
             .when(row.depth > 0, |this| {
-                this.on_drag(self.dragged(&row.path), |dragged, _, _, cx| {
+                let explorer = cx.entity().downgrade();
+                this.on_drag(self.dragged(&row.path), move |dragged, _, _, cx| {
+                    let path = dragged.path.clone();
+                    explorer
+                        .update(cx, |_, cx| cx.emit(ExplorerEvent::Drag(path)))
+                        .ok();
                     cx.new(|_| dragged.clone())
                 })
             })

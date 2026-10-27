@@ -5,7 +5,7 @@ use crate::{
     editor_tabs::{EditorTabs, TabsEvent},
     markdown::{MarkdownEvent, MarkdownPane, Target, is_markdown},
 };
-use bareframe_core::layout::{Axis, PaneId};
+use bareframe_core::layout::{Axis, Direction, PaneId};
 use gpui::{AppContext, Context, Window};
 use std::path::{Path, PathBuf};
 
@@ -31,6 +31,47 @@ impl WorkspaceView {
         } else {
             open_externally(path);
         }
+    }
+
+    /// Whether `path` opens in a pane here (the Markdown viewer or the editor, as Settings
+    /// say) rather than in another app.
+    pub(super) fn opens_inside(&self, path: &Path) -> bool {
+        path.is_file()
+            && (is_markdown(path) && self.settings.flag("open-markdown-in-viewer")
+                || self.settings.flag("open-files-in-editor") && is_text_file(path))
+    }
+
+    /// A file dropped beside pane `target` opens in a new pane on that `side`; one already
+    /// open is shown where it is, as opening it from the explorer does.
+    pub(super) fn open_file_beside(
+        &mut self,
+        path: &Path,
+        target: PaneId,
+        side: Direction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        let open = self.panes.values().any(|(pane, _)| match pane {
+            PaneView::Editor(tabs) => tabs
+                .read(cx)
+                .editors()
+                .any(|editor| editor.read(cx).path() == path),
+            PaneView::Markdown(pane) => pane.read(cx).path() == path,
+            _ => false,
+        });
+        if open {
+            return self.open_file(&path, window, cx);
+        }
+        let Some(id) = self.model.split_beside(target, side) else {
+            return;
+        };
+        if is_markdown(&path) && self.settings.flag("open-markdown-in-viewer") {
+            self.insert_markdown_pane(id, path, window, cx);
+        } else {
+            self.insert_editor_pane(id, vec![path], 0, window, cx);
+        }
+        self.sync(window, cx);
     }
 
     /// A file already open is shown again rather than opened twice. Otherwise it joins

@@ -27,10 +27,11 @@ pub(super) struct Editing {
     _events: Subscription,
 }
 
-/// A file or folder lifted in the tree; it lands in the folder it is dropped on.
+/// A file or folder lifted in the tree; it lands in the folder it is dropped on, and a file
+/// bareframe opens itself can be dropped beside a pane to open there.
 #[derive(Clone)]
-pub(super) struct DraggedEntry {
-    pub(super) path: PathBuf,
+pub struct DraggedEntry {
+    pub path: PathBuf,
     theme: &'static Theme,
 }
 

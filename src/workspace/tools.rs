@@ -140,6 +140,7 @@ impl WorkspaceView {
     ) {
         match event {
             ExplorerEvent::Open(path) => self.open_file(path, window, cx),
+            ExplorerEvent::Drag(path) => self.start_file_drag(path, cx),
             ExplorerEvent::ContextMenu {
                 path,
                 root,
