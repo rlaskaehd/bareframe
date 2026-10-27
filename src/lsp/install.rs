@@ -137,7 +137,14 @@ pub(super) fn login_path() -> Option<&'static str> {
     PATH.get_or_init(|| {
         const MARK: &str = "__bareframe_path__";
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
-        let shell_path = Command::new(shell)
+        let mut command = Command::new(shell);
+        // From the home folder, not wherever bareframe was started (a project, with
+        // `--cwd`): rc files that activate per-folder tools (mise, direnv, nvm) would
+        // otherwise act on that project's files before its server is enabled.
+        if let Some(home) = crate::files::home_dir() {
+            command.current_dir(home);
+        }
+        let shell_path = command
             .args([
                 "-l",
                 "-i",
