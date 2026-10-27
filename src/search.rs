@@ -390,7 +390,6 @@ impl SearchPanel {
             Row::Line(file, line) => {
                 let file = &self.results[file];
                 let (path, line) = (file.path.clone(), &file.lines[line]);
-                let (text, ranges) = (line.text.clone(), line.ranges.clone());
                 let highlight = HighlightStyle {
                     background_color: Some(hsla(theme.accent).opacity(0.35)),
                     color: Some(hsla(theme.text)),
@@ -402,13 +401,11 @@ impl SearchPanel {
                     .on_click(cx.listener(move |_, _, _, cx| {
                         cx.emit(SearchEvent::Open(path.clone(), number))
                     }))
-                    .child(
-                        div().min_w_0().truncate().child(
-                            StyledText::new(text).with_highlights(
-                                ranges.into_iter().map(|range| (range, highlight)),
-                            ),
+                    .child(div().min_w_0().truncate().child(
+                        StyledText::new(line.text.clone()).with_highlights(
+                            line.ranges.iter().map(|range| (range.clone(), highlight)),
                         ),
-                    )
+                    ))
                     .into_any_element()
             }
         }

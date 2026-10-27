@@ -200,9 +200,6 @@ impl Buffer {
             bytes -= size(&self.history[forget]);
             forget += 1;
         }
-        if forget == 0 {
-            return;
-        }
         self.history.drain(..forget);
         self.applied -= forget;
         // A save among the forgotten edits can't be undone back to any more.

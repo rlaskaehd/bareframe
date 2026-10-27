@@ -76,7 +76,7 @@ merman = { version = "0.9.2", default-features = false, features = [
     "diagram-timeline",
 ] }
 # The allocator for Rust's memory (see main.rs).
-mimalloc = { version = "0.1.52", default-features = false }
+mimalloc = "0.1.52"
 
 # Dependencies (GPUI's layout and text shaping, tree-sitter, the Mermaid layout) run many
 # times slower unoptimized, which made the app itself sluggish. They are built optimized

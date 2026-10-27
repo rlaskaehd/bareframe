@@ -247,9 +247,7 @@ impl BrowserPane {
 
     fn drop_stale(&mut self, window: &mut Window) {
         for image in self.stale.drain(..) {
-            if let Err(error) = window.drop_image(image) {
-                eprintln!("bareframe: releasing a page snapshot: {error}");
-            }
+            let _ = window.drop_image(image);
         }
     }
 

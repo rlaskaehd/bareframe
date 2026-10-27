@@ -129,15 +129,11 @@ fn forget(
     stale: &mut Vec<std::sync::Arc<gpui::Image>>,
     gone: impl Fn(&str) -> bool,
 ) {
-    diagrams.retain(|source, diagram| {
-        if !gone(source) {
-            return true;
-        }
-        if let Diagram::Ready(image) = diagram {
-            stale.push(image.clone());
-        }
-        false
-    });
+    let forgotten = diagrams.extract_if(|source, _| gone(source));
+    stale.extend(forgotten.filter_map(|(_, diagram)| match diagram {
+        Diagram::Ready(image) => Some(image),
+        _ => None,
+    }));
 }
 
 /// Whether the theme is dark, judged by its background's brightness.
@@ -267,10 +263,8 @@ impl MarkdownPane {
     /// texture atlas keep them otherwise.
     fn drop_stale(&mut self, window: &mut Window, cx: &mut gpui::App) {
         for image in self.stale.drain(..) {
-            if let Some(data) = image.clone().get_render_image(window, cx)
-                && let Err(error) = window.drop_image(data)
-            {
-                eprintln!("bareframe: releasing a diagram: {error}");
+            if let Some(data) = image.clone().get_render_image(window, cx) {
+                let _ = window.drop_image(data);
             }
             image.remove_asset(cx);
         }

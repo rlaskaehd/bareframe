@@ -130,7 +130,6 @@ impl CodeReview {
 
     /// The panel closed: its diffs and their colors are let go until it opens again.
     pub fn unload(&mut self, cx: &mut Context<Self>) {
-        self.generation += 1;
         self._load = None;
         self.loading = false;
         self.files = Vec::new();
