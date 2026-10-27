@@ -27,21 +27,44 @@ fn fonts() -> Option<&'static NativeFontContext> {
 
 /// Mermaid's plain `base` theme in the app's colors, set out the way VS Code and cmux draw
 /// diagrams: boxes filled apart from the page with a clear light (or dark) border, groups on
-/// a gray ground, and edge labels on gray chips. Dark first, then light.
+/// a gray ground, and edge labels on gray chips; ER rows striped in two quiet shades; pie
+/// slices, mind map and timeline sections and git branches in the app's accent colors with
+/// dark labels. Dark first, then light.
 const THEME_VARIABLES: [&str; 2] = [
     r##""background": "#262624", "primaryColor": "#1c1b1a", "mainBkg": "#1c1b1a",
     "nodeBkg": "#1c1b1a", "primaryTextColor": "#ece9e1", "textColor": "#ece9e1",
     "nodeTextColor": "#ece9e1", "titleColor": "#ece9e1", "primaryBorderColor": "#bdbab1",
     "nodeBorder": "#bdbab1", "lineColor": "#bdbab1", "secondaryColor": "#30302e",
     "tertiaryColor": "#3a3936", "clusterBkg": "#3a3936", "clusterBorder": "#5e5c57",
-    "edgeLabelBackground": "#4a4945""##,
+    "edgeLabelBackground": "#4a4945",
+    "rowOdd": "#2c2b29", "rowEven": "#1c1b1a""##,
     r##""background": "#faf9f5", "primaryColor": "#ffffff", "mainBkg": "#ffffff",
     "nodeBkg": "#ffffff", "primaryTextColor": "#141413", "textColor": "#141413",
     "nodeTextColor": "#141413", "titleColor": "#141413", "primaryBorderColor": "#5c5b56",
     "nodeBorder": "#5c5b56", "lineColor": "#5c5b56", "secondaryColor": "#f5f4ed",
     "tertiaryColor": "#f0eee6", "clusterBkg": "#f0eee6", "clusterBorder": "#c9c6bd",
-    "edgeLabelBackground": "#e8e6dc""##,
+    "edgeLabelBackground": "#e8e6dc",
+    "rowOdd": "#ffffff", "rowEven": "#f5f4ed""##,
 ];
+
+/// Series colors shared by both themes: pie slices, mind map and timeline sections and git
+/// branches in the app's accents, each labelled in dark text.
+const SERIES: [&str; 8] = [
+    "#d97757", "#6a9bcc", "#8fa36f", "#d4a27f", "#c77d9a", "#6fb0aa", "#e0b765", "#9a8fd1",
+];
+
+fn series_variables() -> String {
+    let mut variables = String::from(
+        r##""pieSectionTextColor": "#1c1b1a", "pieStrokeColor": "#1c1b1a", "pieOuterStrokeColor": "#5e5c57""##,
+    );
+    for (index, color) in SERIES.iter().enumerate() {
+        let pie = index + 1;
+        variables.push_str(&format!(
+            r##", "pie{pie}": "{color}", "cScale{index}": "{color}", "cScaleLabel{index}": "#1c1b1a", "git{index}": "{color}", "gitBranchLabel{index}": "#1c1b1a""##
+        ));
+    }
+    variables
+}
 
 /// The diagram in `source` as SVG, in the app's dark or light colors.
 ///
@@ -50,7 +73,11 @@ const THEME_VARIABLES: [&str; 2] = [
 /// wrap when measured but not when written, so long labels spilled out of their boxes.)
 pub fn render(source: &str, dark: bool) -> Result<String, String> {
     // An init directive is one line.
-    let variables = THEME_VARIABLES[usize::from(!dark)].replace('\n', " ");
+    let variables = format!(
+        "{}, {}",
+        THEME_VARIABLES[usize::from(!dark)].replace('\n', " "),
+        series_variables()
+    );
     let mut environment = SvgEnvironment::deterministic();
     let mut family = String::new();
     if let Some(fonts) = fonts()
