@@ -15,9 +15,9 @@ pub(super) const SIDEBAR_MAX_SHARE: f32 = 0.5;
 /// Tabs being dragged in the sidebar (the selection, or one tab); renders as the whole
 /// card following the cursor, as in Warp.
 #[derive(Clone)]
-struct DraggedTab {
+pub(super) struct DraggedTab {
     /// Ids, not indices: a shell can exit and close a tab while the drag is under way.
-    tabs: Vec<TabId>,
+    pub(super) tabs: Vec<TabId>,
     title: String,
     subtitle: Option<String>,
     width: f32,
@@ -618,7 +618,7 @@ impl WorkspaceView {
                 let tabs = dragged.tabs.clone();
                 if let Err(error) = weak.update(cx, |view, cx| {
                     view.dragging = tabs;
-                    cx.notify();
+                    view.start_drag(cx);
                 }) {
                     eprintln!("bareframe: starting a tab drag: {error}");
                 }

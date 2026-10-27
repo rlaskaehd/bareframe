@@ -189,6 +189,10 @@ pub struct WorkspaceView {
     _repo_watch: Option<crate::watch::Watch>,
     /// Tabs being dragged in the sidebar; their rows show an empty slot meanwhile.
     dragging: Vec<TabId>,
+    /// Where a dragged pane or tab would land: beside this pane, on that side.
+    drop_target: Option<(PaneId, Direction)>,
+    /// The terminals were frozen for a drag, so the drop zones can be drawn over them.
+    drag_frozen: bool,
     menu: Option<ContextMenu>,
     clipboard_prompt: Option<clipboard::ClipboardPrompt>,
     /// A quit or window close waiting for answers about unsaved editor changes.
@@ -279,6 +283,8 @@ impl WorkspaceView {
             _repo_task: None,
             _repo_watch: None,
             dragging: Vec::new(),
+            drop_target: None,
+            drag_frozen: false,
             menu: None,
             clipboard_prompt: None,
             pending_exit: None,
@@ -971,6 +977,9 @@ impl Render for WorkspaceView {
                     if !view.dragging.is_empty() {
                         view.dragging.clear();
                         cx.notify();
+                    }
+                    if view.drag_frozen || view.drop_target.is_some() {
+                        view.end_drag(cx);
                     }
                 }),
             )

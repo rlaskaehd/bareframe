@@ -108,19 +108,40 @@ impl Layout {
 
     /// Replaces `target` with a split holding it first and `new` second.
     fn split(&mut self, target: PaneId, axis: Axis, new: PaneId) -> bool {
+        let side = match axis {
+            Axis::Horizontal => Direction::Right,
+            Axis::Vertical => Direction::Down,
+        };
+        self.insert(target, side, Self::Pane(new))
+    }
+
+    /// Replaces `target` with an even split holding it and `new` on its `side`.
+    fn insert(&mut self, target: PaneId, side: Direction, new: Layout) -> bool {
         match self {
             Self::Pane(id) if *id == target => {
+                let (axis, before) = match side {
+                    Direction::Left => (Axis::Horizontal, true),
+                    Direction::Right => (Axis::Horizontal, false),
+                    Direction::Up => (Axis::Vertical, true),
+                    Direction::Down => (Axis::Vertical, false),
+                };
+                let (target, new) = (Box::new(Self::Pane(target)), Box::new(new));
+                let (first, second) = if before { (new, target) } else { (target, new) };
                 *self = Self::Split {
                     axis,
                     ratio: 0.5,
-                    first: Box::new(Self::Pane(target)),
-                    second: Box::new(Self::Pane(new)),
+                    first,
+                    second,
                 };
                 true
             }
             Self::Pane(_) => false,
             Self::Split { first, second, .. } => {
-                first.split(target, axis, new) || second.split(target, axis, new)
+                if first.contains(target) {
+                    first.insert(target, side, new)
+                } else {
+                    second.insert(target, side, new)
+                }
             }
         }
     }
@@ -815,6 +836,76 @@ impl Workspace {
         true
     }
 
+    /// Drag and drop: moves `pane` to `side` of `target`, from its own tab or another one.
+    /// A tab left without panes goes; the moved pane takes focus.
+    pub fn move_pane(&mut self, pane: PaneId, target: PaneId, side: Direction) -> bool {
+        let (Some(from), Some(_)) = (self.tab_of(pane), self.tab_of(target)) else {
+            return false;
+        };
+        if pane == target {
+            return false;
+        }
+        let tab = &mut self.tabs[from];
+        if let Some(nearest) = tab.layout.remove(pane) {
+            tab.maximized = false;
+            if tab.active_pane == pane {
+                tab.active_pane = nearest;
+            }
+        } else {
+            self.take(&[from]);
+        }
+        self.place(target, side, Layout::Pane(pane), pane)
+    }
+
+    /// Drag and drop: moves every pane of `tabs` to `side` of `target`, in tab order, and
+    /// those tabs go. The tab holding `target` itself is left alone.
+    pub fn merge_tabs(&mut self, tabs: &[TabId], target: PaneId, side: Direction) -> bool {
+        let Some(into) = self.tab_of(target) else {
+            return false;
+        };
+        let indices: Vec<usize> = tabs
+            .iter()
+            .filter_map(|&id| self.tab_index(id))
+            .filter(|&index| index != into)
+            .collect();
+        let taken = self.take(&indices);
+        let Some(focus) = taken.first().map(|tab| tab.active_pane) else {
+            return false;
+        };
+        let axis = match side {
+            Direction::Left | Direction::Right => Axis::Horizontal,
+            Direction::Up | Direction::Down => Axis::Vertical,
+        };
+        let Some(layout) = taken
+            .into_iter()
+            .map(|tab| tab.layout)
+            .reduce(|first, second| Layout::Split {
+                axis,
+                ratio: 0.5,
+                first: Box::new(first),
+                second: Box::new(second),
+            })
+        else {
+            return false;
+        };
+        self.place(target, side, layout, focus)
+    }
+
+    /// Puts `layout` at `side` of `target` and focuses `focus` there.
+    fn place(&mut self, target: PaneId, side: Direction, layout: Layout, focus: PaneId) -> bool {
+        let Some(index) = self.tab_of(target) else {
+            return false;
+        };
+        let tab = &mut self.tabs[index];
+        let placed = tab.layout.insert(target, side, layout);
+        tab.active_pane = focus;
+        tab.maximized = false;
+        self.active_tab = index;
+        self.clear_selection();
+        self.normalize();
+        placed
+    }
+
     pub fn panes(&self) -> impl Iterator<Item = PaneId> + '_ {
         self.tabs.iter().flat_map(|tab| tab.layout.panes())
     }
@@ -845,6 +936,43 @@ mod tests {
         assert_eq!(ws.close(first), Some(Closed::Replaced(PaneId(5))));
         assert_eq!(ws.active().layout, Layout::Pane(PaneId(5)));
         assert_eq!(ws.close(PaneId(99)), None);
+    }
+
+    #[test]
+    fn panes_move_beside_others_and_tabs_merge_into_one() {
+        let (mut ws, a) = Workspace::new();
+        let b = ws.split(Axis::Horizontal);
+        // Within a tab: b goes above a.
+        assert!(ws.move_pane(b, a, Direction::Up));
+        assert_eq!(
+            ws.active().layout,
+            Layout::Split {
+                axis: Axis::Vertical,
+                ratio: 0.5,
+                first: Box::new(Layout::Pane(b)),
+                second: Box::new(Layout::Pane(a)),
+            }
+        );
+        assert!(!ws.move_pane(a, a, Direction::Left));
+        // From another tab: its only pane moves and the emptied tab goes.
+        let c = ws.new_tab();
+        assert_eq!(ws.tabs.len(), 2);
+        assert!(ws.move_pane(c, a, Direction::Left));
+        assert_eq!(ws.tabs.len(), 1);
+        assert_eq!(ws.active().layout.panes(), [b, c, a]);
+        assert_eq!(ws.active_pane(), c);
+        // Whole tabs: two split ones merge beside `a`, keeping their own layouts.
+        let d = ws.new_tab();
+        let e = ws.split(Axis::Vertical);
+        let f = ws.new_tab();
+        let (first, second) = (ws.tabs[1].id, ws.tabs[2].id);
+        ws.tabs[1].selected = true;
+        assert!(ws.merge_tabs(&[first, second, ws.tabs[0].id], a, Direction::Right));
+        assert_eq!(ws.tabs.len(), 1);
+        assert_eq!(ws.active().layout.panes(), [b, c, a, d, e, f]);
+        assert_eq!(ws.active_pane(), e);
+        assert!(ws.tabs.iter().all(|tab| !tab.selected));
+        assert!(!ws.merge_tabs(&[ws.tabs[0].id], a, Direction::Right));
     }
 
     #[test]
