@@ -15,16 +15,20 @@ use std::path::{Path, PathBuf};
 mod files;
 mod parse;
 mod render;
+mod select;
 
 pub use files::{Target, is_markdown};
 
-gpui::actions!(markdown, [ToggleRaw]);
+gpui::actions!(markdown, [ToggleRaw, CopySelection]);
 
 /// Keys of a Markdown file's pane, rendered or raw.
 pub const KEY_CONTEXT: &str = "Markdown";
 
 pub fn key_bindings() -> Vec<gpui::KeyBinding> {
-    vec![gpui::KeyBinding::new("cmd-e", ToggleRaw, Some(KEY_CONTEXT))]
+    vec![
+        gpui::KeyBinding::new("cmd-e", ToggleRaw, Some(KEY_CONTEXT)),
+        gpui::KeyBinding::new("cmd-c", CopySelection, Some(KEY_CONTEXT)),
+    ]
 }
 
 /// Warp's `Rendered | Raw` switch above a Markdown file, in both of its views.
@@ -104,6 +108,9 @@ pub struct MarkdownPane {
     diagrams: std::collections::HashMap<String, Diagram>,
     diagrams_dark: bool,
     _diagrams: Option<Task<()>>,
+    /// The text of each piece drawn so far, for copying a selection (see `select`).
+    pieces: std::cell::RefCell<std::collections::BTreeMap<usize, String>>,
+    selection: Option<select::Selection>,
     _watch: Option<Watch>,
 }
 
@@ -137,6 +144,8 @@ impl MarkdownPane {
             diagrams: Default::default(),
             diagrams_dark: is_dark(theme),
             _diagrams: None,
+            pieces: Default::default(),
+            selection: None,
             _watch: None,
         };
         pane.load();
@@ -254,6 +263,9 @@ impl MarkdownPane {
     }
 
     fn load(&mut self) {
+        // Piece numbers follow the blocks, which are about to change.
+        self.pieces.borrow_mut().clear();
+        self.selection = None;
         match read_document(&self.path) {
             Ok(text) => {
                 self.blocks = parse(&text);
@@ -375,6 +387,11 @@ impl Render for MarkdownPane {
             .line_height(gpui::relative(1.55))
             .text_color(hsla(theme.text))
             .on_action(cx.listener(|_, _: &ToggleRaw, _, cx| cx.emit(MarkdownEvent::ShowRaw)))
+            .on_action(cx.listener(|pane, _: &CopySelection, _, cx| pane.copy_selection(cx)))
+            .on_mouse_up(
+                gpui::MouseButton::Left,
+                cx.listener(|pane, _, _, _| pane.end_selection()),
+            )
             .child(switch)
             .child(content)
     }

@@ -85,6 +85,7 @@ MVP 1의 셸 실행 모드는 zsh를 기준으로 한다. 다른 셸을 지정�
 
 - Project explorer나 Global search에서 `.md`(`.markdown` 등 포함) 파일을 열면 bareframe 안에서 렌더링해 보여 준다. Settings › Features › Files의 `Open Markdown files in the Markdown viewer`(기본 켬)를 끄면 기본 앱으로 연다. `Choose a layout to open files`로 활성 Pane 오른쪽 분할(기본)과 새 탭 중에 고른다. 이미 열린 파일은 그 Pane으로 이동한다.
 - 제목(Warp와 같은 크기 비율), 문단, 굵게·기울임·취소선, 인라인 코드, 코드 블록, 목록·체크 목록, 인용, 구분선, 표, 링크, 이미지를 보인다. 인라인 HTML과 HTML 블록은 보이지 않는다. ` ```mermaid ` 코드 블록은 다이어그램으로 그린다(merman). 색은 앱 테마를 따르고 VS Code·cmux처럼 노드는 바탕과 다른 채움색에 또렷한 테두리, 묶음(subgraph)은 회색 바탕, 선 라벨은 회색 상자로 그린다. flowchart, sequence, state, ER, class, gantt, git graph, journey, mindmap, pie, timeline을 지원하고, 그리지 못하면 원문과 이유를 보인다.
+- Rendered 화면의 글자(코드 블록 포함)는 마우스로 끌어 선택하고 `Cmd+C`로 복사한다. `Shift`+클릭은 선택을 그 자리까지 늘린다. 여러 덩어리(문단·목록 항목·표 칸)에 걸치면 한 줄에 하나씩 복사된다. 다른 글자를 누르면 선택이 풀린다.
 - 코드 블록 오른쪽 위 `Copy`는 내용을 클립보드에 복사한다. 셸 코드 블록(`sh`, `bash`, `zsh`, `shell`, `console`, `fish`)에는 `Insert into terminal`이 있어, 같은 탭의 터미널에 붙여 넣는다(실행하지는 않는다). Ghostty의 붙여넣기 경로를 쓰므로 위험한 붙여넣기 확인이 그대로 적용되고, 내용은 클립보드에도 남는다.
 - 링크: 웹(`https://`, `http://`, `mailto:`)은 기본 브라우저로, 다른 Markdown 파일은 같은 Pane에서, 그 밖의 로컬 파일은 Project explorer처럼 연다. 문서 안 앵커(`#…`)와 다른 스킴은 따르지 않는다.
 - 이미지는 문서 옆의 로컬 파일만 보인다. 웹 이미지는 그 서버에 파일을 연 사실이 알려지지 않도록 불러오지 않고 `[image: 설명]`으로 표시한다.

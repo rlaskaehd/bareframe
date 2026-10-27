@@ -267,7 +267,21 @@ impl MarkdownPane {
                     .font_family(self.mono.clone())
                     .text_size(px(13.0))
                     .whitespace_nowrap()
-                    .child(text.to_owned()),
+                    .child(self.selectable(
+                        id,
+                        text.to_owned(),
+                        vec![TextRun {
+                            len: text.len(),
+                            font: gpui::font(self.mono.clone()),
+                            color: hsla(theme.text),
+                            background_color: None,
+                            underline: None,
+                            strikethrough: None,
+                        }],
+                        hsla(theme.accent).opacity(0.3),
+                        IntoElement::into_any_element,
+                        cx,
+                    )),
             )
             .into_any_element()
     }
@@ -332,27 +346,29 @@ impl MarkdownPane {
                 },
             )
             .collect::<Vec<_>>();
-        let styled = StyledText::new(text.text.clone()).with_runs(runs);
+        let shade = hsla(theme.accent).opacity(0.3);
+        let links = move |styled: StyledText| {
+            InteractiveText::new(("md-text", id), styled)
+                .on_click(ranges, move |index, _, cx: &mut App| {
+                    let Some(Some(target)) = targets.get(index).cloned() else {
+                        return;
+                    };
+                    pane.update(cx, |pane, cx| match target {
+                        // A linked document replaces this one, as in a browser.
+                        Target::Markdown(path) => pane.navigate(path, cx),
+                        Target::Anchor(anchor) => pane.go_to_anchor(&anchor),
+                        target => cx.emit(MarkdownEvent::Open(target)),
+                    })
+                    .ok();
+                })
+                .into_any_element()
+        };
         div()
             .flex()
             .flex_col()
             .gap_2()
             .when(!text.text.is_empty(), |this| {
-                this.child(InteractiveText::new(("md-text", id), styled).on_click(
-                    ranges,
-                    move |index, _, cx: &mut App| {
-                        let Some(Some(target)) = targets.get(index).cloned() else {
-                            return;
-                        };
-                        pane.update(cx, |pane, cx| match target {
-                            // A linked document replaces this one, as in a browser.
-                            Target::Markdown(path) => pane.navigate(path, cx),
-                            Target::Anchor(anchor) => pane.go_to_anchor(&anchor),
-                            target => cx.emit(MarkdownEvent::Open(target)),
-                        })
-                        .ok();
-                    },
-                ))
+                this.child(self.selectable(id, text.text.clone(), runs, shade, links, cx))
             })
             .children(images)
             .into_any_element()
