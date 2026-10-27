@@ -226,11 +226,12 @@ impl EditorTabs {
                             .child(file.editor.read(cx).file_name()),
                     )
                     .child(
-                        crate::workspace::icon_button(("editor-tab-close", index), "×", theme)
-                            .on_click(cx.listener(move |tabs, _, _, cx| {
+                        theme::icon_button(theme, ("editor-tab-close", index), "×").on_click(
+                            cx.listener(move |tabs, _, _, cx| {
                                 cx.stop_propagation();
                                 tabs.close_file(index, cx);
-                            })),
+                            }),
+                        ),
                     )
             }))
     }

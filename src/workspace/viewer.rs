@@ -279,10 +279,6 @@ impl WorkspaceView {
             .insert(id, (PaneView::Markdown(pane), Some(events)));
     }
 
-    pub(super) fn mono_font(&self) -> String {
-        self.settings.font_family().unwrap_or("Menlo").to_owned()
-    }
-
     /// Warp's "insert into terminal": the text goes to a terminal in the viewer's tab
     /// through the clipboard and Ghostty's paste, so bracketed paste and the unsafe-paste
     /// prompt apply and nothing runs until Enter. It stays on the clipboard.

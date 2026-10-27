@@ -402,7 +402,7 @@ impl CodeReview {
                         ))
                     })
                     .child(
-                        crate::workspace::icon_button("review-close", "×", theme)
+                        theme::icon_button(theme, "review-close", "×")
                             .on_click(cx.listener(|_, _, _, cx| cx.emit(ReviewEvent::Close))),
                     ),
             )

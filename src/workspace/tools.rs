@@ -1,10 +1,10 @@
 //! Warp's tools panel: a column between the tab sidebar and the panes, holding the project
 //! explorer (and global search, 3a-3).
-use super::{WorkspaceView, icon_button, menu::MenuAction};
+use super::{WorkspaceView, menu::MenuAction};
 use crate::{
     explorer::ExplorerEvent,
     search::SearchEvent,
-    theme::{Theme, hsla},
+    theme::{self, Theme, hsla},
 };
 use bareframe_core::config::quote;
 use gpui::{Context, Pixels, Point, Window, div, prelude::*, px};
@@ -254,12 +254,14 @@ impl WorkspaceView {
                         )
                     })
                     .child(div().flex_1())
-                    .child(icon_button("close-tools", "×", theme).on_click(cx.listener(
-                        |view, _, window, cx| {
-                            cx.stop_propagation();
-                            view.toggle_tools(window, cx)
-                        },
-                    ))),
+                    .child(
+                        theme::icon_button(theme, "close-tools", "×").on_click(cx.listener(
+                            |view, _, window, cx| {
+                                cx.stop_propagation();
+                                view.toggle_tools(window, cx)
+                            },
+                        )),
+                    ),
             )
             .child(div().flex_1().min_h_0().pt_1().map(|this| match shown {
                 Tool::Explorer => this.child(self.explorer.clone()),

@@ -2,7 +2,6 @@
 use super::{
     PaneView, RenameTarget, WorkspaceView,
     drag::{DraggedPane, DraggedTab},
-    icon_button,
 };
 use crate::{
     text_field::{TextField, TextFieldEvent},
@@ -287,7 +286,7 @@ impl WorkspaceView {
                             .children(search),
                     )
                     .child(
-                        icon_button("new-tab", "+", theme)
+                        theme::icon_button(theme, "new-tab", "+")
                             .text_size(px(16.0))
                             .on_click(cx.listener(|view, _, window, cx| {
                                 cx.stop_propagation();
@@ -397,20 +396,20 @@ impl WorkspaceView {
                     .invisible()
                     .group_hover(hover, |style| style.visible())
                     .child(
-                        icon_button(("group-new-tab", id.0), "+", theme).on_click(cx.listener(
-                            move |view, _, window, cx| {
+                        theme::icon_button(theme, ("group-new-tab", id.0), "+").on_click(
+                            cx.listener(move |view, _, window, cx| {
                                 cx.stop_propagation();
                                 view.new_tab_in_group(id, window, cx)
-                            },
-                        )),
+                            }),
+                        ),
                     )
                     .child(
-                        icon_button(("group-close", id.0), "×", theme).on_click(cx.listener(
-                            move |view, _, window, cx| {
+                        theme::icon_button(theme, ("group-close", id.0), "×").on_click(
+                            cx.listener(move |view, _, window, cx| {
                                 cx.stop_propagation();
                                 view.close_tabs(&view.model.group_tabs(id), window, cx)
-                            },
-                        )),
+                            }),
+                        ),
                     ),
             )
             .into_any_element()
@@ -572,7 +571,7 @@ impl WorkspaceView {
                     .invisible()
                     .group_hover(hover, |style| style.visible())
                     .child(
-                        icon_button(("tab-menu", index), "⋮", theme).on_click(cx.listener(
+                        theme::icon_button(theme, ("tab-menu", index), "⋮").on_click(cx.listener(
                             move |view, event: &gpui::ClickEvent, _, cx| {
                                 cx.stop_propagation();
                                 view.open_tab_menu(index, event.position(), cx)
@@ -580,7 +579,7 @@ impl WorkspaceView {
                         )),
                     )
                     .child(
-                        icon_button(("close-tab", index), "×", theme).on_click(cx.listener(
+                        theme::icon_button(theme, ("close-tab", index), "×").on_click(cx.listener(
                             move |view, _, window, cx| {
                                 cx.stop_propagation();
                                 view.close_tabs(&[index], window, cx)

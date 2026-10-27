@@ -1,7 +1,9 @@
-//! The Settings tab and the settings file: changes made on screen are validated, written
-//! back to `~/.config/bareframe/config` and applied; outside edits to the file are reloaded.
+//! Settings: the Settings tab and the settings file (changes made on screen are validated,
+//! written back to `~/.config/bareframe/config` and applied; outside edits to the file are
+//! reloaded), and the theme and fonts they put on every pane.
 use super::{PaneView, WorkspaceView};
 use crate::{
+    actions::bind_keys,
     files,
     settings_pane::{SettingsEvent, SettingsPane},
     theme::Theme,
@@ -13,6 +15,7 @@ use bareframe_core::{
     workspace::PaneId,
 };
 use gpui::{AppContext, Context, Window, WindowAppearance};
+use gpui_libghostty::TerminalTheme;
 use notify::RecursiveMode;
 use std::time::Duration;
 
@@ -23,14 +26,81 @@ pub(super) fn is_dark(appearance: WindowAppearance) -> bool {
     )
 }
 
+/// The theme in effect: the configured one, or the OS appearance for "Sync with OS".
+pub(super) fn theme_for(settings: &Settings, dark: bool) -> &'static Theme {
+    Theme::get(settings.theme().unwrap_or(if dark {
+        ThemeName::Dark
+    } else {
+        ThemeName::Light
+    }))
+}
+
 impl WorkspaceView {
-    /// The theme in effect: the configured one, or the OS appearance for "Sync with OS".
     pub(super) fn theme(&self) -> &'static Theme {
-        Theme::get(self.settings.theme().unwrap_or(if self.dark_appearance {
-            ThemeName::Dark
-        } else {
-            ThemeName::Light
-        }))
+        theme_for(&self.settings, self.dark_appearance)
+    }
+
+    pub(super) fn terminal_theme(&self) -> TerminalTheme {
+        self.theme().terminal(&self.settings)
+    }
+
+    pub(super) fn mono_font(&self) -> String {
+        self.settings.font_family().unwrap_or("Menlo").to_owned()
+    }
+
+    pub(super) fn apply_settings(&mut self, cx: &mut Context<Self>) {
+        self.update_tools(cx);
+        let theme = self.terminal_theme();
+        let ui = self.theme();
+        for (pane, _) in self.panes.values() {
+            match pane {
+                PaneView::Terminal(pane) => {
+                    pane.update(cx, |pane, cx| pane.apply_theme(&theme, cx))
+                }
+                PaneView::Settings(pane) => pane.update(cx, |pane, cx| {
+                    pane.set_theme(ui, cx);
+                    pane.set_settings(self.settings.clone(), cx);
+                }),
+                PaneView::Markdown(pane) => {
+                    let mono = self.mono_font();
+                    pane.update(cx, |pane, cx| pane.set_theme(ui, mono, cx))
+                }
+                PaneView::Editor(tabs) => {
+                    tabs.update(cx, |tabs, cx| tabs.set_theme(ui, cx));
+                    let editors: Vec<_> = tabs.read(cx).editors().cloned().collect();
+                    for editor in editors {
+                        let (mono, size) = (self.mono_font(), self.settings.font_size());
+                        editor.update(cx, |editor, cx| editor.set_style(ui, mono, size, cx));
+                        self.apply_editor_options(&editor, cx);
+                    }
+                }
+            }
+        }
+        let show_hidden = self.settings.flag("show-hidden-files");
+        self.explorer.update(cx, |explorer, cx| {
+            explorer.set_theme(ui, cx);
+            explorer.set_show_hidden(show_hidden, cx);
+        });
+        self.global_search
+            .update(cx, |search, cx| search.set_theme(ui, cx));
+        let mono = self.mono_font();
+        self.review
+            .update(cx, |review, cx| review.set_theme(ui, mono, cx));
+        bind_keys(&self.settings, cx);
+        cx.notify();
+    }
+
+    pub(super) fn set_theme(&mut self, name: ThemeName, cx: &mut Context<Self>) {
+        let value = match name {
+            ThemeName::Dark => "dark",
+            ThemeName::Light => "light",
+        };
+        self.set_setting("theme", value, cx);
+    }
+
+    pub(super) fn step_font_size(&mut self, steps: f32, cx: &mut Context<Self>) {
+        self.settings.step_font_size(steps);
+        self.apply_settings(cx);
     }
 
     /// Warp keeps one Settings tab per window: open it, or go back to it.

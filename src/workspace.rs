@@ -1,151 +1,50 @@
 use crate::{
-    actions::*,
     app,
-    editor_tabs::EditorTabs,
     explorer::Explorer,
     files,
-    markdown::MarkdownPane,
     pane::{PaneEvent, TerminalPane},
     repo::Summary,
     review::CodeReview,
     search::SearchPanel,
-    settings_pane::SettingsPane,
     text_field::TextField,
-    theme::{self, Theme, hsla},
+    theme::{self, hsla},
 };
 use bareframe_core::{
     config::LaunchConfig,
-    settings::{Settings, ThemeName},
-    state::{self, SavedPane, SavedState},
+    settings::Settings,
+    state::SavedState,
     workspace::{Axis, Closed, Direction, GroupId, Layout, PaneId, TabId, Workspace},
 };
 use columns::Column;
 use gpui::{
-    AnyView, App, Bounds, Context, Entity, FocusHandle, MouseButton, MouseMoveEvent, Pixels,
-    Subscription, Window, WindowControlArea, anchored, deferred, div, point, prelude::*, px,
+    Bounds, Context, Entity, FocusHandle, MouseButton, MouseMoveEvent, Pixels, Subscription,
+    Window, anchored, deferred, div, point, prelude::*, px,
 };
-use gpui_libghostty::TerminalTheme;
-use menu::{ContextMenu, MenuAction};
+use menu::ContextMenu;
+use pane_view::PaneView;
 use std::collections::HashMap;
 pub use viewer::Exit;
 
 mod changes;
 mod clipboard;
 mod columns;
+mod commands;
 mod drag;
 mod layout;
 mod menu;
 mod palette;
+mod pane_view;
+mod persist;
 mod prefs;
 mod sidebar;
 mod tools;
+mod top_bar;
 mod viewer;
 
 #[derive(Clone, Copy, PartialEq)]
 enum RenameTarget {
     Tab(TabId),
     Group(GroupId),
-}
-
-/// What a pane shows. The layout model only knows `PaneId`s; native surfaces exist only
-/// for terminals, so hiding and freezing apply to them alone.
-#[derive(Clone)]
-enum PaneView {
-    Terminal(Entity<TerminalPane>),
-    Settings(Entity<SettingsPane>),
-    Markdown(Entity<MarkdownPane>),
-    Editor(Entity<EditorTabs>),
-}
-
-impl PaneView {
-    fn terminal(&self) -> Option<&Entity<TerminalPane>> {
-        match self {
-            Self::Terminal(pane) => Some(pane),
-            Self::Settings(_) | Self::Markdown(_) | Self::Editor(_) => None,
-        }
-    }
-
-    /// The pane header and window title.
-    fn title(&self, cx: &App) -> String {
-        match self {
-            Self::Terminal(pane) => pane.read(cx).title(),
-            Self::Settings(_) => "Settings".into(),
-            Self::Markdown(pane) => pane.read(cx).file_name(),
-            Self::Editor(tabs) => editor_name(tabs, cx),
-        }
-    }
-
-    /// The sidebar card's first line.
-    fn name(&self, cx: &App) -> String {
-        match self {
-            Self::Terminal(pane) => pane.read(cx).name(),
-            Self::Settings(_) => "Settings".into(),
-            Self::Markdown(pane) => pane.read(cx).file_name(),
-            Self::Editor(tabs) => editor_name(tabs, cx),
-        }
-    }
-
-    /// The file a file pane shows: the viewer's, or the editor's shown tab.
-    fn file(&self, cx: &App) -> Option<std::path::PathBuf> {
-        match self {
-            Self::Markdown(pane) => Some(pane.read(cx).path().to_path_buf()),
-            Self::Editor(tabs) => {
-                let editor = tabs.read(cx).active()?;
-                Some(editor.read(cx).path().to_path_buf())
-            }
-            _ => None,
-        }
-    }
-
-    /// The sidebar card's second line.
-    fn location(&self, cx: &App) -> Option<String> {
-        match self {
-            Self::Terminal(pane) => Some(pane.read(cx).display_cwd()),
-            Self::Settings(_) => None,
-            Self::Markdown(_) | Self::Editor(_) => {
-                let path = self.file(cx)?;
-                let dir = path.parent()?;
-                Some(files::home_dir().map_or_else(
-                    || dir.display().to_string(),
-                    |home| bareframe_core::config::display_path(dir, &home),
-                ))
-            }
-        }
-    }
-
-    /// The sidebar card's icon in place of the prompt glyph.
-    fn icon(&self) -> Option<&'static str> {
-        match self {
-            Self::Terminal(_) => None,
-            Self::Settings(_) => Some("icons/gear.svg"),
-            Self::Markdown(_) | Self::Editor(_) => Some("icons/file.svg"),
-        }
-    }
-
-    fn focus(&self, window: &mut Window, cx: &mut App) {
-        match self {
-            Self::Terminal(pane) => pane.update(cx, |pane, cx| pane.focus(window, cx)),
-            Self::Settings(pane) => pane.update(cx, |pane, cx| pane.focus(window, cx)),
-            Self::Markdown(pane) => pane.update(cx, |pane, cx| pane.focus(window, cx)),
-            Self::Editor(tabs) => tabs.update(cx, |tabs, cx| tabs.focus(window, cx)),
-        }
-    }
-
-    fn view(&self) -> AnyView {
-        match self {
-            Self::Terminal(pane) => pane.clone().into(),
-            Self::Settings(pane) => pane.clone().into(),
-            Self::Markdown(pane) => pane.clone().into(),
-            Self::Editor(pane) => pane.clone().into(),
-        }
-    }
-}
-
-/// The editor's shown file, with a dot if it has unsaved changes.
-fn editor_name(tabs: &Entity<EditorTabs>, cx: &App) -> String {
-    let tabs = tabs.read(cx);
-    tabs.active()
-        .map_or_else(String::new, |editor| editor.read(cx).file_name())
 }
 
 struct Resize {
@@ -233,11 +132,7 @@ impl WorkspaceView {
     ) -> Self {
         let (model, first) = Workspace::new();
         let dark_appearance = prefs::is_dark(window.appearance());
-        let theme = Theme::get(settings.theme().unwrap_or(if dark_appearance {
-            ThemeName::Dark
-        } else {
-            ThemeName::Light
-        }));
+        let theme = prefs::theme_for(&settings, dark_appearance);
         let explorer = cx.new(|cx| Explorer::new(theme, cx));
         let show_hidden = settings.flag("show-hidden-files");
         explorer.update(cx, |explorer, cx| explorer.set_show_hidden(show_hidden, cx));
@@ -331,112 +226,6 @@ impl WorkspaceView {
         view.watch_config(cx);
         view.sync(window, cx);
         view
-    }
-
-    /// Reopens a saved layout: terminals start fresh shells in their last directory (home
-    /// if it is gone); programs that were running are not restarted.
-    fn restore(&mut self, saved: SavedState, window: &mut Window, cx: &mut Context<Self>) {
-        self.model = saved.workspace;
-        self.sidebar_open = saved.sidebar_open;
-        self.sidebar_width = saved.sidebar_width;
-        self.tools_width = saved.tools_width;
-        self.tools_open = saved.tools_open;
-        self.update_tools(cx);
-        self.review_open = saved.review_open;
-        self.review_width = saved.review_width;
-        let kinds: HashMap<PaneId, SavedPane> = saved.panes.into_iter().collect();
-        let panes: Vec<PaneId> = self.model.panes().collect();
-        for id in panes {
-            match kinds.get(&id) {
-                Some(SavedPane::Settings) => self.insert_settings_pane(id, window, cx),
-                Some(SavedPane::Markdown { path }) if path.is_file() => {
-                    self.insert_markdown_pane(id, path.clone(), window, cx)
-                }
-                Some(SavedPane::Editor { paths, active })
-                    if paths.iter().any(|path| path.is_file()) =>
-                {
-                    let files: Vec<_> = paths
-                        .iter()
-                        .filter(|path| path.is_file())
-                        .cloned()
-                        .collect();
-                    // Found by path: a deleted file before it would shift the index.
-                    let shown = paths
-                        .get(*active)
-                        .and_then(|path| files.iter().position(|file| file == path))
-                        .unwrap_or(0);
-                    self.insert_editor_pane(id, files, shown, window, cx)
-                }
-                kind => {
-                    let cwd = match kind {
-                        Some(SavedPane::Terminal { cwd }) if cwd.is_dir() => cwd.clone(),
-                        _ => self.config.cwd.clone(),
-                    };
-                    self.open_pane(id, cwd, window, cx);
-                }
-            }
-        }
-    }
-
-    fn state(&self, cx: &App) -> SavedState {
-        let panes = self
-            .panes
-            .iter()
-            .map(|(id, (pane, _))| {
-                let saved = match pane {
-                    PaneView::Terminal(pane) => SavedPane::Terminal {
-                        cwd: pane.read(cx).cwd().to_path_buf(),
-                    },
-                    PaneView::Settings(_) => SavedPane::Settings,
-                    PaneView::Markdown(pane) => SavedPane::Markdown {
-                        path: pane.read(cx).path().to_path_buf(),
-                    },
-                    PaneView::Editor(tabs) => {
-                        let tabs = tabs.read(cx);
-                        SavedPane::Editor {
-                            paths: tabs
-                                .editors()
-                                .map(|editor| editor.read(cx).path().to_path_buf())
-                                .collect(),
-                            active: tabs.active_index(),
-                        }
-                    }
-                };
-                (*id, saved)
-            })
-            .collect();
-        SavedState {
-            workspace: self.model.clone(),
-            panes,
-            sidebar_open: self.sidebar_open,
-            sidebar_width: self.sidebar_width,
-            tools_open: self.tools_open,
-            tools_width: self.tools_width,
-            review_open: self.review_open,
-            review_width: self.review_width,
-            window: self.window_bounds,
-        }
-    }
-
-    /// Writes the layout if it changed.
-    fn save_state(&mut self, cx: &App) {
-        let mut state = self.state(cx);
-        state.panes.sort_by_key(|(id, _)| *id);
-        let text = state::encode(&state);
-        if text == self.saved {
-            return;
-        }
-        let Some(path) = files::state_file() else {
-            return;
-        };
-        match files::write_atomically(&path, &text) {
-            Ok(()) => self.saved = text,
-            Err(error) => eprintln!("bareframe: saving {}: {error}", path.display()),
-        }
-    }
-
-    fn terminal_theme(&self) -> TerminalTheme {
-        self.theme().terminal(&self.settings)
     }
 
     fn open_pane(
@@ -660,61 +449,6 @@ impl WorkspaceView {
         }
     }
 
-    fn apply_settings(&mut self, cx: &mut Context<Self>) {
-        self.update_tools(cx);
-        let theme = self.terminal_theme();
-        let ui = self.theme();
-        for (pane, _) in self.panes.values() {
-            match pane {
-                PaneView::Terminal(pane) => {
-                    pane.update(cx, |pane, cx| pane.apply_theme(&theme, cx))
-                }
-                PaneView::Settings(pane) => pane.update(cx, |pane, cx| {
-                    pane.set_theme(ui, cx);
-                    pane.set_settings(self.settings.clone(), cx);
-                }),
-                PaneView::Markdown(pane) => {
-                    let mono = self.mono_font();
-                    pane.update(cx, |pane, cx| pane.set_theme(ui, mono, cx))
-                }
-                PaneView::Editor(tabs) => {
-                    tabs.update(cx, |tabs, cx| tabs.set_theme(ui, cx));
-                    let editors: Vec<_> = tabs.read(cx).editors().cloned().collect();
-                    for editor in editors {
-                        let (mono, size) = (self.mono_font(), self.settings.font_size());
-                        editor.update(cx, |editor, cx| editor.set_style(ui, mono, size, cx));
-                        self.apply_editor_options(&editor, cx);
-                    }
-                }
-            }
-        }
-        let show_hidden = self.settings.flag("show-hidden-files");
-        self.explorer.update(cx, |explorer, cx| {
-            explorer.set_theme(ui, cx);
-            explorer.set_show_hidden(show_hidden, cx);
-        });
-        self.global_search
-            .update(cx, |search, cx| search.set_theme(ui, cx));
-        let mono = self.mono_font();
-        self.review
-            .update(cx, |review, cx| review.set_theme(ui, mono, cx));
-        bind_keys(&self.settings, cx);
-        cx.notify();
-    }
-
-    fn set_theme(&mut self, name: ThemeName, cx: &mut Context<Self>) {
-        let value = match name {
-            ThemeName::Dark => "dark",
-            ThemeName::Light => "light",
-        };
-        self.set_setting("theme", value, cx);
-    }
-
-    fn step_font_size(&mut self, steps: f32, cx: &mut Context<Self>) {
-        self.settings.step_font_size(steps);
-        self.apply_settings(cx);
-    }
-
     fn drag_divider(&mut self, event: &MouseMoveEvent, window: &Window, cx: &mut Context<Self>) {
         if self.drag_column_edge(event, window) {
             cx.notify();
@@ -750,115 +484,6 @@ impl WorkspaceView {
                 pane.update(cx, |pane, cx| pane.shutdown(cx));
             }
         }
-    }
-
-    /// Full-width bar under the traffic lights. The middle is reserved for a search box.
-    /// It stands in for the hidden system title bar: drag moves the window, double-click zooms.
-    fn render_top_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = self.theme();
-        let open = self.sidebar_open;
-        div()
-            .id("top-bar")
-            .window_control_area(WindowControlArea::Drag)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|view, _, _, _| view.should_move_window = true),
-            )
-            .on_mouse_up(
-                MouseButton::Left,
-                cx.listener(|view, _, _, _| view.should_move_window = false),
-            )
-            .on_mouse_move(cx.listener(|view, _, window, _| {
-                if view.should_move_window {
-                    view.should_move_window = false;
-                    window.start_window_move();
-                }
-            }))
-            .on_click(|event, window, _| {
-                if event.click_count() == 2 {
-                    window.titlebar_double_click();
-                }
-            })
-            .flex()
-            .flex_shrink_0()
-            .items_center()
-            .h(px(app::TITLE_BAR_HEIGHT))
-            // Leaves room for the traffic lights drawn over the transparent title bar.
-            .pl(px(80.0))
-            .pr_2()
-            .bg(hsla(theme.chrome))
-            .border_b_1()
-            .border_color(hsla(theme.border))
-            .child(
-                div()
-                    .id("toggle-sidebar")
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .size(px(26.0))
-                    .rounded_md()
-                    .when(open, |this| this.bg(hsla(theme.tab_active)))
-                    .hover(|style| style.bg(hsla(theme.tab_hover)))
-                    .on_click(cx.listener(|view, _, _, cx| {
-                        cx.stop_propagation();
-                        view.toggle_sidebar(cx)
-                    }))
-                    .child(sidebar_icon(if open {
-                        theme.text
-                    } else {
-                        theme.text_muted
-                    })),
-            )
-            .child(
-                div()
-                    .id("toggle-tools")
-                    // Hidden when Settings has switched every tool off.
-                    .when(self.shown_tool().is_none(), |this| this.invisible())
-                    .ml_1()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .size(px(26.0))
-                    .rounded_md()
-                    .when(self.tools_open, |this| this.bg(hsla(theme.tab_active)))
-                    .hover(|style| style.bg(hsla(theme.tab_hover)))
-                    .on_click(cx.listener(|view, _, window, cx| {
-                        cx.stop_propagation();
-                        view.toggle_tools(window, cx)
-                    }))
-                    .child(
-                        gpui::svg()
-                            .path("icons/wrench.svg")
-                            .size(px(14.0))
-                            .text_color(hsla(if self.tools_open {
-                                theme.text
-                            } else {
-                                theme.text_muted
-                            })),
-                    ),
-            )
-            .child(div().flex_1())
-            .children(self.render_diff_button(cx))
-            .child(
-                div()
-                    .id("open-settings")
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .size(px(26.0))
-                    .rounded_md()
-                    .hover(|style| style.bg(hsla(theme.tab_hover)))
-                    .on_click(cx.listener(|view, _, window, cx| {
-                        cx.stop_propagation();
-                        view.open_settings(window, cx)
-                    }))
-                    .child(
-                        gpui::svg()
-                            .path("icons/gear.svg")
-                            .size(px(15.0))
-                            .text_color(hsla(theme.text_muted)),
-                    ),
-            )
     }
 
     /// The window's size in points, as recorded on the last render.
@@ -952,169 +577,7 @@ impl Render for WorkspaceView {
                     }
                 }),
             )
-            .on_action(cx.listener(|view, _: &ToggleSidebar, _, cx| view.toggle_sidebar(cx)))
-            .on_action(
-                cx.listener(|view, _: &ToggleCodeReview, window, cx| {
-                    view.toggle_review(window, cx)
-                }),
-            )
-            .on_action(cx.listener(|view, _: &ToggleCommandPalette, window, cx| {
-                view.toggle_palette(window, cx)
-            }))
-            .on_action(
-                cx.listener(|view, _: &OpenSettings, window, cx| view.open_settings(window, cx)),
-            )
-            .on_action(
-                cx.listener(|view, _: &ToggleToolsPanel, window, cx| view.toggle_tools(window, cx)),
-            )
-            .on_action(cx.listener(|view, _: &ShowProjectExplorer, window, cx| {
-                view.show_tool(tools::Tool::Explorer, window, cx)
-            }))
-            .on_action(cx.listener(|view, _: &ShowGlobalSearch, window, cx| {
-                view.show_tool(tools::Tool::Search, window, cx)
-            }))
-            .on_action(cx.listener(|view, _: &FindInFiles, window, cx| {
-                view.open_tool(tools::Tool::Search, window, cx)
-            }))
-            .on_action(cx.listener(|view, _: &CloseTab, window, cx| {
-                let tab = view.model.active_tab;
-                view.close_tabs(&[tab], window, cx)
-            }))
-            .on_action(cx.listener(|view, _: &FocusPreviousPane, window, cx| {
-                if view.model.focus_cycle(false) {
-                    view.sync(window, cx)
-                }
-            }))
-            .on_action(cx.listener(|view, _: &FocusNextPane, window, cx| {
-                if view.model.focus_cycle(true) {
-                    view.sync(window, cx)
-                }
-            }))
-            .on_action(cx.listener(|view, _: &EqualizePanes, window, cx| {
-                let tab = view.model.active_tab;
-                view.model.tabs[tab].layout.equalize();
-                view.sync(window, cx)
-            }))
-            .on_action(cx.listener(|_, _: &ToggleFullscreen, window, _| window.toggle_fullscreen()))
-            .on_action(cx.listener(|view, _: &ReloadSettings, _, cx| view.reload_from_disk(cx)))
-            .on_action(cx.listener(|view, _: &CloseWindow, window, cx| {
-                view.exit(Exit::CloseWindow, window, cx)
-            }))
-            .on_action(cx.listener(|view, _: &Quit, window, cx| view.exit(Exit::Quit, window, cx)))
-            .on_action(cx.listener(|view, _: &ClosePane, window, cx| {
-                let pane = view.model.active_pane();
-                // With several files open, Cmd+W closes the shown file, as editors do.
-                if let Some(PaneView::Editor(tabs)) = view.pane(pane).cloned()
-                    && tabs.read(cx).editors().count() > 1
-                {
-                    return tabs.update(cx, |tabs, cx| tabs.close_active(cx));
-                }
-                view.close_pane(pane, window, cx)
-            }))
-            .on_action(cx.listener(|view, _: &RestartSession, window, cx| {
-                let theme = view.terminal_theme();
-                if let Some(pane) = view.terminal(view.model.active_pane()) {
-                    pane.update(cx, |pane, cx| pane.retry(&theme, window, cx));
-                }
-            }))
-            .on_action(cx.listener(|view, _: &NewTab, window, cx| view.new_tab(window, cx)))
-            .on_action(cx.listener(|_, _: &Minimize, window, _| window.minimize_window()))
-            .on_action(cx.listener(|_, _: &ZoomWindow, window, _| window.zoom_window()))
-            .on_action(cx.listener(|view, _: &RenameTab, window, cx| {
-                // The name is edited in place on the tab's card.
-                view.sidebar_open = true;
-                let id = view.model.active().id;
-                view.start_rename(RenameTarget::Tab(id), window, cx)
-            }))
-            .on_action(cx.listener(|view, _: &MoveTabUp, window, cx| {
-                let index = view.model.active_tab;
-                view.run_menu_action(MenuAction::MoveTab(index, true), window, cx)
-            }))
-            .on_action(cx.listener(|view, _: &MoveTabDown, window, cx| {
-                let index = view.model.active_tab;
-                view.run_menu_action(MenuAction::MoveTab(index, false), window, cx)
-            }))
-            .on_action(cx.listener(|view, _: &CloseOtherTabs, window, cx| {
-                let active = view.model.active_tab;
-                let others = (0..view.model.tabs.len())
-                    .filter(|&i| i != active)
-                    .collect();
-                view.run_menu_action(MenuAction::CloseTabs(others), window, cx)
-            }))
-            .on_action(cx.listener(|view, _: &NextTab, window, cx| {
-                view.model.cycle_tab(true);
-                view.sync(window, cx)
-            }))
-            .on_action(cx.listener(|view, _: &PreviousTab, window, cx| {
-                view.model.cycle_tab(false);
-                view.sync(window, cx)
-            }))
-            .on_action(cx.listener(|view, _: &SelectTab1, w, cx| view.select_tab(0, w, cx)))
-            .on_action(cx.listener(|view, _: &SelectTab2, w, cx| view.select_tab(1, w, cx)))
-            .on_action(cx.listener(|view, _: &SelectTab3, w, cx| view.select_tab(2, w, cx)))
-            .on_action(cx.listener(|view, _: &SelectTab4, w, cx| view.select_tab(3, w, cx)))
-            .on_action(cx.listener(|view, _: &SelectTab5, w, cx| view.select_tab(4, w, cx)))
-            .on_action(cx.listener(|view, _: &SelectTab6, w, cx| view.select_tab(5, w, cx)))
-            .on_action(cx.listener(|view, _: &SelectTab7, w, cx| view.select_tab(6, w, cx)))
-            .on_action(cx.listener(|view, _: &SelectTab8, w, cx| view.select_tab(7, w, cx)))
-            .on_action(cx.listener(|view, _: &SelectLastTab, window, cx| {
-                let last = view.model.tabs.len() - 1;
-                view.select_tab(last, window, cx)
-            }))
-            .on_action(cx.listener(|view, _: &SplitRight, window, cx| {
-                view.split(Axis::Horizontal, window, cx)
-            }))
-            .on_action(
-                cx.listener(|view, _: &SplitDown, window, cx| {
-                    view.split(Axis::Vertical, window, cx)
-                }),
-            )
-            .on_action(cx.listener(|view, _: &ToggleMaximizePane, window, cx| {
-                view.model.toggle_maximized();
-                view.sync(window, cx)
-            }))
-            .on_action(cx.listener(|view, _: &FocusLeft, w, cx| {
-                view.focus_direction(Direction::Left, w, cx)
-            }))
-            .on_action(cx.listener(|view, _: &FocusRight, w, cx| {
-                view.focus_direction(Direction::Right, w, cx)
-            }))
-            .on_action(
-                cx.listener(|view, _: &FocusUp, w, cx| view.focus_direction(Direction::Up, w, cx)),
-            )
-            .on_action(cx.listener(|view, _: &FocusDown, w, cx| {
-                view.focus_direction(Direction::Down, w, cx)
-            }))
-            .on_action(
-                cx.listener(|view, _: &IncreaseFontSize, _, cx| view.step_font_size(1.0, cx)),
-            )
-            .on_action(
-                cx.listener(|view, _: &DecreaseFontSize, _, cx| view.step_font_size(-1.0, cx)),
-            )
-            .on_action(cx.listener(|view, _: &ResetFontSize, _, cx| {
-                let base = view.base_font_size.to_string();
-                if let Err(error) = view.settings.set("font-size", &base) {
-                    eprintln!("bareframe: {error}");
-                }
-                view.apply_settings(cx)
-            }))
-            .on_action(
-                cx.listener(|view, _: &UseDarkTheme, _, cx| view.set_theme(ThemeName::Dark, cx)),
-            )
-            .on_action(
-                cx.listener(|view, _: &UseLightTheme, _, cx| view.set_theme(ThemeName::Light, cx)),
-            )
-            // Both reorder tabs, so `sync` also closes any menu holding tab indices.
-            .on_action(cx.listener(|view, _: &GroupTab, window, cx| {
-                let tabs = view.model.target_tabs();
-                view.model.new_group(&tabs);
-                view.sync(window, cx)
-            }))
-            .on_action(cx.listener(|view, _: &UngroupTab, window, cx| {
-                let tabs = view.model.target_tabs();
-                view.model.remove_from_group(&tabs);
-                view.sync(window, cx)
-            }))
+            .map(|this| self.with_actions(this, cx))
             // The terminal keeps focus under a menu, so Esc is caught on the way down.
             // Opening a menu from the sidebar moves focus off the terminal; `sync` closes
             // the menu and gives focus back.
@@ -1153,34 +616,4 @@ impl Render for WorkspaceView {
                     }),
             )
     }
-}
-
-pub(crate) fn icon_button(
-    id: impl Into<gpui::ElementId>,
-    label: &'static str,
-    theme: &Theme,
-) -> gpui::Stateful<gpui::Div> {
-    div()
-        .id(id)
-        .flex()
-        .flex_shrink_0()
-        .items_center()
-        .justify_center()
-        .size(px(20.0))
-        .rounded_sm()
-        .text_color(hsla(theme.text_muted))
-        .hover(|style| style.bg(hsla(theme.border)).text_color(hsla(theme.text)))
-        .child(label)
-}
-
-/// Outline of a window with its left panel filled, drawn so no icon font is needed.
-fn sidebar_icon(color: u32) -> impl IntoElement {
-    div()
-        .flex()
-        .w(px(15.0))
-        .h(px(12.0))
-        .rounded(px(2.5))
-        .border_1()
-        .border_color(hsla(color))
-        .child(div().w(px(4.5)).h_full().bg(hsla(color)))
 }

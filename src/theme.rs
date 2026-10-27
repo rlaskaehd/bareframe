@@ -3,7 +3,7 @@ use bareframe_core::{
     settings::{Settings, ThemeName},
     workspace::GROUP_COLORS,
 };
-use gpui::{Div, ElementId, Hsla, Stateful, div, prelude::*, rgb};
+use gpui::{Div, ElementId, Hsla, Stateful, div, prelude::*, px, rgb};
 use gpui_libghostty::{TerminalColor, TerminalTheme};
 
 pub const UI_FONT: &str = ".SystemUIFont";
@@ -110,6 +110,21 @@ pub fn ghost_button(theme: &Theme, id: impl Into<ElementId>, label: &'static str
         .id(id)
         .text_color(hsla(theme.text_muted))
         .hover(|style| style.bg(hsla(theme.tab_hover)).text_color(hsla(theme.text)))
+        .child(label)
+}
+
+/// A small square button holding a glyph, as the × and ⋮ on tabs and pane headers.
+pub fn icon_button(theme: &Theme, id: impl Into<ElementId>, label: &'static str) -> Stateful<Div> {
+    div()
+        .id(id)
+        .flex()
+        .flex_shrink_0()
+        .items_center()
+        .justify_center()
+        .size(px(20.0))
+        .rounded_sm()
+        .text_color(hsla(theme.text_muted))
+        .hover(|style| style.bg(hsla(theme.border)).text_color(hsla(theme.text)))
         .child(label)
 }
 
