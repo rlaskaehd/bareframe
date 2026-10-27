@@ -233,10 +233,12 @@ impl WorkspaceView {
                         .when(!chosen, |this| this.text_color(hsla(theme.text_muted)))
                         .children(item.detail),
                 )
-                .children(
-                    item.triggers
-                        .iter()
-                        .map(|trigger| settings_pane::caps(theme, trigger, false)),
+                .child(
+                    div().flex().gap_4().children(
+                        item.triggers
+                            .iter()
+                            .map(|trigger| settings_pane::caps(theme, trigger, false)),
+                    ),
                 )
         });
         let rows: Vec<_> = rows.collect();

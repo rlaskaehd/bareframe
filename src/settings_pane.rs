@@ -487,7 +487,8 @@ impl SettingsPane {
             .child(
                 div()
                     .flex()
-                    .gap_2()
+                    // Wider than the gap between caps, so each shortcut reads as one group.
+                    .gap_4()
                     .children(triggers.iter().map(|trigger| caps(theme, trigger, false))),
             );
         let Some(recording) = editing else {
