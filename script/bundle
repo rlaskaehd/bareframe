@@ -36,6 +36,21 @@ cat > "$bundle_dir/Info.plist" <<'PLIST'
 <key>NSHighResolutionCapable</key><true/>
 </dict></plist>
 PLIST
+# The icon is drawn from the brand artwork, which stays out of the repository; without it
+# the bundle simply has no icon.
+icon_source=docs/brand/icon/bareframe-icon-1024.png
+if [[ -f "$icon_source" ]]; then
+    iconset="$CARGO_TARGET_DIR/AppIcon.iconset"
+    rm -rf "$iconset"
+    mkdir -p "$iconset"
+    for size in 16 32 128 256 512; do
+        sips -z "$size" "$size" "$icon_source" --out "$iconset/icon_${size}x${size}.png" >/dev/null
+        sips -z $((size * 2)) $((size * 2)) "$icon_source" \
+            --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
+    done
+    iconutil -c icns "$iconset" -o "$bundle_dir/Resources/AppIcon.icns"
+    /usr/libexec/PlistBuddy -c 'Add :CFBundleIconFile string AppIcon' "$bundle_dir/Info.plist"
+fi
 if [[ "$bundle_name" == bareframe-validation ]]; then
     /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier dev.bareframe.validation' \
         -c 'Set :CFBundleName bareframe-validation' \
