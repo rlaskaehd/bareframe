@@ -347,6 +347,7 @@ impl MarkdownPane {
                         pane.update(cx, |pane, cx| match target {
                             // A linked document replaces this one, as in a browser.
                             Target::Markdown(path) => pane.navigate(path, cx),
+                            Target::Anchor(anchor) => pane.go_to_anchor(&anchor),
                             target => cx.emit(MarkdownEvent::Open(target)),
                         })
                         .ok();

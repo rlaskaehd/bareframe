@@ -67,7 +67,7 @@ MVP 1의 셸 실행 모드는 zsh를 기준으로 한다. 다른 셸을 지정�
 ### Tools panel과 Project explorer
 
 - 탭 사이드바와 Pane 사이에 열린다. 오른쪽 가장자리를 끌어 너비를 바꾼다. 열림 상태와 너비는 레이아웃과 함께 저장된다.
-- Project explorer와 Global search의 루트는 활성 Pane 터미널의 작업 디렉터리다(활성 Pane이 파일이면 그 탭의 첫 터미널). 다른 Pane이나 탭으로 옮기거나 `cd`하면 루트가 따라간다.
+- Project explorer와 Global search의 루트는 활성 Pane을 따른다: 터미널이면 그 작업 디렉터리, Markdown·편집기 같은 파일 Pane이면 그 파일이 든 git 저장소(없으면 파일의 폴더). 그래서 Markdown을 보면서 탐색기로 다른 문서를 오갈 수 있다. 다른 Pane이나 탭으로 옮기거나 `cd`하면 루트가 따라간다.
 - 파일은 Warp처럼 종류별 아이콘으로 보인다: Rust, Python, Markdown, JavaScript/TypeScript, React(JSX/TSX), Go, JSON, TOML, YAML, HTML, CSS, C/C++, Ruby, Swift, Lua, 셸 스크립트, Dockerfile, `.gitignore` 등은 언어 로고(Simple Icons, CC0)를 그 언어의 색으로, 나머지는 기본 파일 아이콘으로. Global search 결과와 사이드바 탭 카드도 같다.
 - 폴더는 펼칠 때 한 단계씩 읽는다. gitignore 대상은 숨기지 않고 기울임체로 흐리게 표시한다(`.git` 포함). 패널이 열린 동안 파일 변경을 감시해 반영한다.
 - 클릭: 폴더는 펼치기·접기, 파일은 기본 앱으로 연다(MVP 3b에서 내장 Markdown·편집기로 바뀐다). 실행 권한이 없는 문서 형식만 연다. 텍스트·코드는 기본 텍스트 편집기로(`.py` 등의 기본 앱이 실행기일 수 있어서), 이미지·PDF는 기본 뷰어로 열고, 심볼릭 링크는 가리키는 파일 기준으로 판단한다. 그 밖의 파일(스크립트, `.command`, `.app` 등)은 Finder에서 위치만 보여 준다. 키보드: 위/아래 선택, 오른쪽/왼쪽 펼치기·접기(왼쪽은 상위 폴더로), `Enter` 열기.
@@ -99,7 +99,7 @@ MVP 1의 셸 실행 모드는 zsh를 기준으로 한다. 다른 셸을 지정�
 - 한글 등 입력기 조합을 지원하고, 조합 중인 글자는 밑줄로 보인다. 한 음절 조합은 실행 취소 한 번으로 돌아간다. 타이핑은 단어 단위로, 지우기는 이어진 만큼 묶어서 되돌린다.
 - 저장하지 않은 변경은 탭·Pane 제목에 `●`로 보인다. 저장하지 않은 채 Pane을 닫거나(`×`, `Cmd+W`) 창을 닫거나 `Cmd+Q`로 끝내면 편집기 위에 `Save` / `Don't Save` / `Cancel`을 묻는다. 끝내기·창 닫기는 저장하지 않은 편집기마다 차례로 물은 뒤 이어서 진행되고, `Cancel`을 누르면 멈춘다. 자동 저장은 디스크 변경 확인이 떠 있는 동안 저장하지 않는다.
 - 다른 프로그램이 파일을 바꾸면 변경이 없을 때는 다시 읽고, 있으면 `Reload` / `Keep my changes`를 묻는다. 저장은 파일을 그 자리에서 덮어써 권한과 링크가 유지된다. 5MB가 넘는 파일과 한 줄이 64KB를 넘는 파일(압축된 JSON 등)은 읽기 전용으로 열고, 긴 줄은 64KB까지만 그린다. 64MB가 넘는 파일은 편집기로 열지 않고 기본 앱으로 넘긴다. 줄 끝이 섞인 파일은 더 많은 쪽(LF 또는 CRLF)으로 저장한다.
-- 구문 강조: Rust, Markdown, TOML, JSON, YAML, Shell, Python, JavaScript/TypeScript/TSX, C/C++, Go, HTML, CSS, Swift, Java, Ruby, Lua, SQL, Dockerfile. 색은 터미널 테마 팔레트를 쓴다. 입력이 멈추고 잠시 뒤 백그라운드에서 다시 파싱하며, 그 사이 고친 줄만 잠깐 색이 빠진다. 2MB가 넘는 파일은 강조하지 않는다.
+- 구문 강조: Rust, Markdown, TOML, JSON, YAML, Shell, Python, JavaScript/TypeScript/TSX, C/C++, Go, HTML, CSS, Swift, Java, Ruby, Lua, SQL, Dockerfile. 색은 터미널 테마 팔레트를 쓴다. 입력이 멈추고 잠시 뒤 백그라운드에서 다시 파싱하며, 그 사이 고친 줄만 잠깐 색이 빠진다. 2MB가 넘는 파일은 강조하지 않는다. Markdown은 제목 외에 굵게(굵은 글꼴), 기울임(기울임 글꼴), 인라인 코드, 링크도 색으로 구분한다.
 - 찾기 `Cmd+F`, 바꾸기 `Cmd+Option+F`: 편집기 위에 찾기 줄이 열리고, 한 줄 안의 선택은 그대로 찾을 말이 된다. 입력하는 동안 찾기를 시작한 곳 다음의 첫 결과로 간다. `Enter`·`↓` 다음, `Shift+Enter`·`↑` 이전(`Cmd+G`는 탭 그룹 키로 남겨 두었다), `Esc`·`×` 닫기. 대문자가 있으면 대소문자를 가리고 없으면 가리지 않는다. 결과 수와 현재 위치(`2 of 41`)를 보이고, 화면의 모든 결과를 칠한다. 바꾸기 칸의 `Enter`나 `Replace`는 현재 결과를 바꾸고 다음으로, `All`은 모두 바꾼다(실행 취소 한 번).
 - 줄로 이동 `Ctrl+G`: 줄 번호를 넣고 `Enter`.
 - Settings › Features › Editor: 줄 번호(절대·상대·끔), 자동 저장(기본 끔, 켜면 마지막 변경 1초 뒤 저장).

@@ -16,10 +16,12 @@ pub enum Target {
     Markdown(PathBuf),
     /// Any other local file, opened as the explorer would.
     File(PathBuf),
+    /// A heading in this document (`#slug`), scrolled to.
+    Anchor(String),
 }
 
-/// `None` for links bareframe won't follow: in-page anchors, and schemes other than
-/// web pages and mail, which could start other programs.
+/// `None` for links bareframe won't follow: schemes other than web pages and mail, which
+/// could start other programs.
 pub fn resolve(link: &str, base: &Path) -> Option<Target> {
     let lower = link.to_ascii_lowercase();
     if ["https://", "http://", "mailto:"]
@@ -28,7 +30,10 @@ pub fn resolve(link: &str, base: &Path) -> Option<Target> {
     {
         return Some(Target::Web(link.to_owned()));
     }
-    if link.starts_with('#') || link.contains("://") || lower.starts_with("javascript:") {
+    if let Some(anchor) = link.strip_prefix('#') {
+        return Some(Target::Anchor(percent_decode(anchor)));
+    }
+    if link.contains("://") || lower.starts_with("javascript:") {
         return None;
     }
     let path = link.split('#').next().unwrap_or(link);
@@ -41,6 +46,21 @@ pub fn resolve(link: &str, base: &Path) -> Option<Target> {
     } else {
         Target::File(path)
     })
+}
+
+/// A heading's anchor as GitHub makes it: lowercased, spaces to `-`, other punctuation
+/// dropped; letters of any script stay. Repeats get `-1`, `-2`… from the caller.
+pub fn slug(heading: &str) -> String {
+    heading
+        .trim()
+        .to_lowercase()
+        .chars()
+        .filter_map(|c| match c {
+            ' ' => Some('-'),
+            c if c.is_alphanumeric() || c == '-' || c == '_' => Some(c),
+            _ => None,
+        })
+        .collect()
 }
 
 pub fn is_markdown(path: &Path) -> bool {
@@ -153,10 +173,15 @@ mod tests {
             resolve("Cargo.toml", base),
             Some(Target::File(base.join("Cargo.toml")))
         );
-        assert_eq!(resolve("#anchor", base), None);
+        assert_eq!(
+            resolve("#%EC%84%A4%EC%A0%95", base),
+            Some(Target::Anchor("설정".into()))
+        );
         assert_eq!(resolve("file:///etc/passwd", base), None);
         assert_eq!(resolve("javascript:alert(1)", base), None);
         assert_eq!(resolve("missing.md", base), None);
         assert_eq!(percent_decode("a%20b%zz"), "a b%zz");
+        assert_eq!(slug("1. 전체 다이어그램"), "1-전체-다이어그램");
+        assert_eq!(slug("What's `new` (v2)?"), "whats-new-v2");
     }
 }

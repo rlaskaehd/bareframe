@@ -228,6 +228,31 @@ impl MarkdownPane {
         cx.notify();
     }
 
+    /// An in-page link: scrolls to the heading whose anchor it names.
+    pub(super) fn go_to_anchor(&mut self, anchor: &str) {
+        let anchor = anchor.to_lowercase();
+        let mut seen: std::collections::HashMap<String, usize> = Default::default();
+        let found = self.blocks.iter().position(|block| {
+            let Block::Heading(_, inline) = block else {
+                return false;
+            };
+            let base = files::slug(&inline.text);
+            let repeats = seen.entry(base.clone()).or_default();
+            let slug = match *repeats {
+                0 => base,
+                n => format!("{base}-{n}"),
+            };
+            *repeats += 1;
+            slug == anchor
+        });
+        if let Some(index) = found {
+            self.list.scroll_to(gpui::ListOffset {
+                item_ix: index,
+                offset_in_item: gpui::px(0.0),
+            });
+        }
+    }
+
     fn load(&mut self) {
         match read_document(&self.path) {
             Ok(text) => {

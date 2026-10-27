@@ -305,12 +305,23 @@ impl EditorPane {
             range.start.min(range.end).line,
             range.start.max(range.end).line,
         );
+        let old_end = self.buffer.line(first).len();
         let end = self.buffer.replace(range, text, Instant::now());
-        // The edited lines lose their colors until the next parse; the others keep theirs.
+        // Until the next parse (a moment later) the edited line keeps its old colors, a
+        // stretch that reached its end following it to the new end, so a heading being
+        // typed doesn't blink plain. Lines the edit added have none yet.
         if last < self.syntax.len() {
-            let fresh = end.line - first + 1;
+            let new_end = self.buffer.line(first).len();
+            let mut kept = std::mem::take(&mut self.syntax[first]);
+            for (range, _) in &mut kept {
+                if range.end == old_end {
+                    range.end = new_end;
+                }
+            }
+            kept.retain(|(range, _)| range.start < range.end);
+            let added = std::iter::repeat_n(Vec::new(), end.line - first);
             self.syntax
-                .splice(first..=last, std::iter::repeat_n(Vec::new(), fresh));
+                .splice(first..=last, std::iter::once(kept).chain(added));
         }
         self.text_changed(cx);
         if self.autosave {

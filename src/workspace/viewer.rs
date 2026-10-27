@@ -220,6 +220,8 @@ impl WorkspaceView {
                 // Through the same door as the explorer: text opens in the editor, and only
                 // plain documents ever reach the system's apps.
                 MarkdownEvent::Open(Target::File(path)) => view.open_file(path, window, cx),
+                // Followed inside the viewer; it never asks the workspace.
+                MarkdownEvent::Open(Target::Anchor(_)) => {}
                 MarkdownEvent::Insert(text) => view.insert_into_terminal(id, text, window, cx),
                 MarkdownEvent::ShowRaw => view.swap_view(id, true, window, cx),
             },

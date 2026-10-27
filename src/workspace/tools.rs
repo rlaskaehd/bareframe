@@ -105,8 +105,7 @@ impl WorkspaceView {
         }
     }
 
-    /// The root follows the focused pane's working directory, as Warp's explorer follows
-    /// the focused session; a file pane falls back to the first terminal in the tab.
+    /// The root follows the focused pane, as Warp's explorer follows the focused session.
     pub(super) fn refresh_explorer_roots(&mut self, cx: &mut Context<Self>) {
         if !self.tools_open {
             return;
@@ -114,12 +113,16 @@ impl WorkspaceView {
         let tab = self.model.active();
         let mut panes = tab.layout.panes();
         panes.sort_by_key(|pane| *pane != tab.active_pane);
+        // A terminal roots it at its working directory; a file pane (Markdown, the editor)
+        // at the file's project, so the documents around it can be browsed.
         let roots: Vec<PathBuf> = panes
             .into_iter()
-            .find_map(|pane| {
-                self.terminal(pane)
-                    .and_then(|pane| pane.read(cx).cwd().canonicalize().ok())
-                    .filter(|cwd| cwd.is_dir())
+            .find_map(|id| {
+                let dir = match self.pane(id)?.file(cx) {
+                    Some(file) => bareframe_core::lsp::project_root(&file),
+                    None => self.terminal(id)?.read(cx).cwd().to_path_buf(),
+                };
+                dir.canonicalize().ok().filter(|dir| dir.is_dir())
             })
             .into_iter()
             .collect();

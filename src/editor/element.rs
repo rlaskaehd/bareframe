@@ -1,7 +1,10 @@
 //! Laying out and painting the text: syntax colors, the gutter, the selection, find
 //! matches, the cursor and the text being composed.
 use super::{EditorPane, LINE_HEIGHT, LineNumbers, MAX_LINE};
-use crate::{syntax, theme::hsla};
+use crate::{
+    syntax::{self, Syntax},
+    theme::hsla,
+};
 use bareframe_core::text::Position;
 use gpui::{
     App, Bounds, Context, ElementId, ElementInputHandler, Entity, GlobalElementId, LayoutId,
@@ -45,7 +48,7 @@ impl EditorPane {
             strikethrough: None,
         };
         // Colors from a parse of older text may no longer fit; those are dropped.
-        let colors: Vec<(Range<usize>, gpui::Hsla)> = self
+        let colors: Vec<(Range<usize>, gpui::Hsla, Syntax)> = self
             .syntax
             .get(line)
             .into_iter()
@@ -55,7 +58,10 @@ impl EditorPane {
                     && text.is_char_boundary(range.start)
                     && text.is_char_boundary(range.end)
             })
-            .map(|(range, syntax)| (range.clone(), hsla(syntax::color(self.theme, *syntax))))
+            .map(|(range, syntax)| {
+                let color = hsla(syntax::color(self.theme, *syntax));
+                (range.clone(), color, *syntax)
+            })
             .collect();
         let marked = self
             .marked
@@ -78,7 +84,7 @@ impl EditorPane {
         cuts.extend(
             colors
                 .iter()
-                .flat_map(|(range, _)| [range.start, range.end]),
+                .flat_map(|(range, ..)| [range.start, range.end]),
         );
         cuts.extend(marked.iter().flat_map(|range| [range.start, range.end]));
         cuts.sort_unstable();
@@ -87,10 +93,14 @@ impl EditorPane {
             .windows(2)
             .map(|pair| {
                 let (at, len) = (pair[0], pair[1] - pair[0]);
-                let color = colors
-                    .iter()
-                    .find(|(range, _)| range.contains(&at))
-                    .map_or(base.color, |(_, color)| *color);
+                let class = colors.iter().find(|(range, ..)| range.contains(&at));
+                let color = class.map_or(base.color, |(_, color, _)| *color);
+                let mut font = base.font.clone();
+                match class.map(|(.., syntax)| *syntax) {
+                    Some(Syntax::Strong) => font.weight = gpui::FontWeight::BOLD,
+                    Some(Syntax::Emphasis) => font.style = gpui::FontStyle::Italic,
+                    _ => {}
+                }
                 let underline = marked
                     .as_ref()
                     .filter(|range| range.contains(&at))
@@ -101,6 +111,7 @@ impl EditorPane {
                     });
                 TextRun {
                     len,
+                    font,
                     color,
                     underline,
                     ..base.clone()

@@ -20,6 +20,10 @@ pub enum Syntax {
     Type,
     Tag,
     Builtin,
+    /// Markdown `**bold**`, drawn bold.
+    Strong,
+    /// Markdown `*italics*`, drawn slanted.
+    Emphasis,
 }
 
 /// A line's colored stretches: byte ranges into the line, in order, not overlapping.
@@ -35,6 +39,8 @@ pub fn color(theme: &crate::theme::Theme, syntax: Syntax) -> u32 {
         Syntax::Function => theme.palette[4],
         Syntax::Type => theme.palette[6],
         Syntax::Tag | Syntax::Builtin => theme.palette[1],
+        Syntax::Strong => theme.palette[3],
+        Syntax::Emphasis => theme.palette[6],
     }
 }
 
@@ -74,6 +80,32 @@ fn class(capture: &str) -> Option<Syntax> {
     })
 }
 
+/// Bold, italics, inline code and links: the bundled Markdown grammar marks only blocks and
+/// leaves these to an inline grammar it lacks, so the viewer's Markdown parser finds them.
+fn markdown_inline(text: &str, classes: &mut [Option<Syntax>]) {
+    use pulldown_cmark::{Event, Options, Parser, Tag};
+    let mut spans: Vec<(Range<usize>, Syntax)> = Parser::new_ext(text, Options::all())
+        .into_offset_iter()
+        .filter_map(|(event, range)| {
+            let syntax = match event {
+                Event::Start(Tag::Link { .. }) => Syntax::Function,
+                Event::Start(Tag::Emphasis) => Syntax::Emphasis,
+                Event::Start(Tag::Strong) => Syntax::Strong,
+                Event::Code(_) => Syntax::String,
+                _ => return None,
+            };
+            Some((range, syntax))
+        })
+        .collect();
+    // Wider first, so bold inside a link still shows bold.
+    spans.sort_by_key(|(range, _)| std::cmp::Reverse(range.len()));
+    for (range, syntax) in spans {
+        for slot in &mut classes[range.start.min(text.len())..range.end.min(text.len())] {
+            *slot = Some(syntax);
+        }
+    }
+}
+
 /// Colors for every line of `text`, or `None` if the language has no grammar here.
 pub fn highlight(language: &str, text: &str) -> Option<Vec<LineSyntax>> {
     let mut highlighter = Highlighter::with_store(store());
@@ -89,6 +121,9 @@ pub fn highlight(language: &str, text: &str) -> Option<Vec<LineSyntax>> {
         for slot in &mut classes[range] {
             *slot = Some(syntax);
         }
+    }
+    if language == "markdown" {
+        markdown_inline(text, &mut classes);
     }
     let mut lines = Vec::new();
     let mut offset = 0;
@@ -194,6 +229,25 @@ mod tests {
         );
         assert_eq!(colors[2], [(4..10, Syntax::Comment)]);
         assert!(colors[3].is_empty());
+    }
+
+    #[test]
+    fn markdown_marks_bold_italics_code_and_links() {
+        let lines = highlight(
+            "markdown",
+            "# Title\n\nSome **HI**, *it*, `x` and [a](#b).\n",
+        )
+        .expect("markdown grammar");
+        assert!(
+            lines[0]
+                .iter()
+                .any(|(_, syntax)| *syntax == Syntax::Keyword)
+        );
+        let line = &lines[2];
+        assert!(line.contains(&(5..11, Syntax::Strong)), "{line:?}");
+        assert!(line.contains(&(13..17, Syntax::Emphasis)), "{line:?}");
+        assert!(line.contains(&(19..22, Syntax::String)), "{line:?}");
+        assert!(line.contains(&(27..34, Syntax::Function)), "{line:?}");
     }
 
     #[test]
