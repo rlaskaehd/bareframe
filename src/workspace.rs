@@ -939,7 +939,7 @@ impl Render for WorkspaceView {
         }
         let bounds = window.bounds();
         self.tools_left = if self.sidebar_open {
-            self.sidebar_shown_width(window) + 5.0
+            self.sidebar_shown_width(window) + 1.0
         } else {
             0.0
         };
@@ -1169,25 +1169,14 @@ impl Render for WorkspaceView {
                     .flex_row()
                     .when(self.sidebar_open, |this| {
                         let width = self.sidebar_shown_width(window);
-                        this.child(self.render_sidebar(width, cx)).child(
-                            // Drag handle on the sidebar's right edge. The line sits flush with
-                            // the sidebar so cards keep equal left and right margins.
-                            div()
-                                .flex_none()
-                                .w(px(5.0))
-                                .h_full()
-                                .flex()
-                                .bg(hsla(theme.terminal_background))
-                                .cursor(CursorStyle::ResizeLeftRight)
-                                .child(div().w(px(1.0)).h_full().bg(hsla(theme.border)))
-                                .on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener(|view, _, _, cx| {
-                                        cx.stop_propagation();
-                                        view.resizing_sidebar = true;
-                                    }),
-                                ),
-                        )
+                        this.child(self.render_sidebar(width, cx))
+                            .child(edge_line(theme).child(edge_grip().right_0().on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|view, _, _, cx| {
+                                    cx.stop_propagation();
+                                    view.resizing_sidebar = true;
+                                }),
+                            )))
                     })
                     .when(self.tools_open, |this| {
                         let width = self.tools_shown_width(window);
@@ -1201,6 +1190,27 @@ impl Render for WorkspaceView {
                     }),
             )
     }
+}
+
+/// A side column's border: one line that the pane header lines meet with no gap.
+pub(crate) fn edge_line(theme: &Theme) -> gpui::Div {
+    div()
+        .relative()
+        .flex_none()
+        .w(px(1.0))
+        .h_full()
+        .bg(hsla(theme.border))
+}
+
+/// The 5px grab area for resizing a column, laid over the column's own edge. Its parent
+/// places it with `left_0`/`right_0`; it must be painted after the column to catch the mouse.
+pub(crate) fn edge_grip() -> gpui::Div {
+    div()
+        .absolute()
+        .top_0()
+        .h_full()
+        .w(px(5.0))
+        .cursor(CursorStyle::ResizeLeftRight)
 }
 
 /// A side column's width: at most `share` of the window, never under `min`.

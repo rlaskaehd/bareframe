@@ -289,23 +289,32 @@ impl WorkspaceView {
                 let weak = cx.entity().downgrade();
                 let recorded = here.clone();
                 let tab = self.model.active_tab;
-                let divider = div()
+                // A 1px line, so the pane header lines meet across it; the grip is laid over
+                // it last, 2px into each pane.
+                let line = div()
                     .flex_none()
-                    .flex()
-                    .justify_center()
-                    .items_center()
-                    .bg(hsla(theme.terminal_background))
+                    .bg(hsla(theme.border))
+                    .map(|this| match axis {
+                        Axis::Horizontal => this.w(px(1.0)).h_full(),
+                        Axis::Vertical => this.h(px(1.0)).w_full(),
+                    });
+                let grip = div()
+                    .absolute()
                     .map(|this| match axis {
                         Axis::Horizontal => this
-                            .w(px(5.0))
+                            .top_0()
                             .h_full()
-                            .cursor(CursorStyle::ResizeLeftRight)
-                            .child(div().w(px(1.0)).h_full().bg(hsla(theme.border))),
+                            .w(px(5.0))
+                            .left(relative(*ratio))
+                            .ml(px(-2.0))
+                            .cursor(CursorStyle::ResizeLeftRight),
                         Axis::Vertical => this
-                            .h(px(5.0))
+                            .left_0()
                             .w_full()
-                            .cursor(CursorStyle::ResizeUpDown)
-                            .child(div().h(px(1.0)).w_full().bg(hsla(theme.border))),
+                            .h(px(5.0))
+                            .top(relative(*ratio))
+                            .mt(px(-2.0))
+                            .cursor(CursorStyle::ResizeUpDown),
                     })
                     .on_mouse_down(
                         MouseButton::Left,
@@ -353,8 +362,9 @@ impl WorkspaceView {
                             })
                             .child(first),
                     )
-                    .child(divider)
+                    .child(line)
                     .child(div().flex_1().min_w_0().min_h_0().child(second))
+                    .child(grip)
                     .into_any_element()
             }
         }

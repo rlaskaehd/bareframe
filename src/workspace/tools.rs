@@ -7,9 +7,7 @@ use crate::{
     theme::{Theme, hsla},
 };
 use bareframe_core::config::quote;
-use gpui::{
-    Context, CursorStyle, MouseButton, MouseMoveEvent, Pixels, Point, Window, div, prelude::*, px,
-};
+use gpui::{Context, MouseButton, MouseMoveEvent, Pixels, Point, Window, div, prelude::*, px};
 use std::path::{Path, PathBuf};
 
 pub(super) const TOOLS_DEFAULT_WIDTH: f32 = 260.0;
@@ -309,22 +307,13 @@ impl WorkspaceView {
     }
 
     pub(super) fn render_tools_edge(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = self.theme();
-        div()
-            .flex_none()
-            .w(px(5.0))
-            .h_full()
-            .flex()
-            .bg(hsla(theme.terminal_background))
-            .cursor(CursorStyle::ResizeLeftRight)
-            .child(div().w(px(1.0)).h_full().bg(hsla(theme.border)))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|view, _, _, cx| {
-                    cx.stop_propagation();
-                    view.resizing_tools = true;
-                }),
-            )
+        super::edge_line(self.theme()).child(super::edge_grip().right_0().on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|view, _, _, cx| {
+                cx.stop_propagation();
+                view.resizing_tools = true;
+            }),
+        ))
     }
 }
 

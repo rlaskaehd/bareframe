@@ -7,7 +7,7 @@ use crate::{
     theme::hsla,
     watch::{Watch, watch},
 };
-use gpui::{Context, CursorStyle, MouseButton, MouseMoveEvent, Window, div, prelude::*, px};
+use gpui::{Context, MouseButton, MouseMoveEvent, Window, div, prelude::*, px};
 use notify::RecursiveMode;
 use std::{path::PathBuf, time::Duration};
 
@@ -163,29 +163,20 @@ impl WorkspaceView {
     pub(super) fn render_review(&self, width: f32, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = self.theme();
         div()
+            .relative()
             .flex()
             .flex_none()
             .h_full()
-            .child(
-                // Drag handle on the panel's left edge.
-                div()
-                    .flex_none()
-                    .w(px(5.0))
-                    .h_full()
-                    .flex()
-                    .justify_end()
-                    .bg(hsla(theme.terminal_background))
-                    .cursor(CursorStyle::ResizeLeftRight)
-                    .child(div().w(px(1.0)).h_full().bg(hsla(theme.border)))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(|view, _, _, cx| {
-                            cx.stop_propagation();
-                            view.resizing_review = true;
-                        }),
-                    ),
-            )
+            .child(super::edge_line(theme))
             .child(div().w(px(width)).h_full().child(self.review.clone()))
+            // Last, so it lies over the panel's own left edge.
+            .child(super::edge_grip().left_0().on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|view, _, _, cx| {
+                    cx.stop_propagation();
+                    view.resizing_review = true;
+                }),
+            ))
     }
 
     pub(super) fn drag_review_edge(&mut self, event: &MouseMoveEvent, window: &Window) -> bool {
