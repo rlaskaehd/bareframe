@@ -244,16 +244,42 @@ pub fn home_dir() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
 }
 
-/// The settings file; the validation instance keeps its own so results are reproducible.
-pub fn config_file() -> Option<PathBuf> {
+/// A file beside the settings; the validation instance keeps its own under `target/` so
+/// results are reproducible.
+fn app_file(name: &str, path: fn(Option<&Path>, &Path) -> PathBuf) -> Option<PathBuf> {
     if is_validation_instance() {
-        return Some(PathBuf::from(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/target/validation/config"
-        )));
+        return Some(
+            Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/target/validation")).join(name),
+        );
     }
     let xdg = std::env::var_os("XDG_CONFIG_HOME");
-    Some(config_path(xdg.as_deref().map(Path::new), &home_dir()?))
+    Some(path(xdg.as_deref().map(Path::new), &home_dir()?))
+}
+
+pub fn config_file() -> Option<PathBuf> {
+    app_file("config", config_path)
+}
+
+/// Where the window layout is saved.
+pub fn state_file() -> Option<PathBuf> {
+    app_file("state", state_path)
+}
+
+/// The file's text, or `None` if it does not exist.
+fn read_optional(path: &Path) -> std::io::Result<Option<String>> {
+    match std::fs::read_to_string(path) {
+        Ok(text) => Ok(Some(text)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+/// Writes through a temporary file, so a crash mid-write leaves the previous file intact.
+pub fn write_atomically(path: &Path, text: &str) -> std::io::Result<()> {
+    let temporary = path.with_extension("tmp");
+    path.parent().map_or(Ok(()), std::fs::create_dir_all)?;
+    std::fs::write(&temporary, text)?;
+    std::fs::rename(&temporary, path)
 }
 
 /// The file's text and the settings it holds; a missing file gives the defaults.
@@ -261,14 +287,12 @@ pub fn load_settings() -> (Settings, String) {
     let Some(path) = config_file() else {
         return (Settings::default(), String::new());
     };
-    let text = match std::fs::read_to_string(&path) {
-        Ok(text) => text,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(error) => {
+    let text = read_optional(&path)
+        .unwrap_or_else(|error| {
             eprintln!("bareframe: {}: {error}", path.display());
-            String::new()
-        }
-    };
+            None
+        })
+        .unwrap_or_default();
     let (settings, warnings) = Settings::parse(&text);
     for warning in warnings {
         eprintln!("bareframe: {}: {warning}", path.display());
@@ -286,44 +310,18 @@ pub fn save_setting(key: &str, value: &str, default: &str) -> Result<String, Str
 /// through a temporary file. Returns the new text.
 pub fn edit_config(change: impl FnOnce(&str) -> String) -> Result<String, String> {
     let path = config_file().ok_or("no home directory")?;
-    let text = match std::fs::read_to_string(&path) {
-        Ok(text) => text,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(error) => return Err(format!("{}: {error}", path.display())),
-    };
-    let text = change(&text);
-    let temporary = path.with_extension("tmp");
-    path.parent()
-        .map_or(Ok(()), std::fs::create_dir_all)
-        .and_then(|()| std::fs::write(&temporary, &text))
-        .and_then(|()| std::fs::rename(&temporary, &path))
-        .map_err(|error| format!("{}: {error}", path.display()))?;
+    let failed = |error: std::io::Error| format!("{}: {error}", path.display());
+    let text = change(&read_optional(&path).map_err(failed)?.unwrap_or_default());
+    write_atomically(&path, &text).map_err(failed)?;
     Ok(text)
-}
-
-/// Where the window layout is saved; the validation instance keeps its own.
-pub fn state_file() -> Option<PathBuf> {
-    if is_validation_instance() {
-        return Some(PathBuf::from(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/target/validation/state"
-        )));
-    }
-    let xdg = std::env::var_os("XDG_CONFIG_HOME");
-    Some(state_path(xdg.as_deref().map(Path::new), &home_dir()?))
 }
 
 /// A missing file is a first launch; a broken one is reported and left for inspection.
 fn load_state() -> Option<SavedState> {
     let path = state_file()?;
-    let text = match std::fs::read_to_string(&path) {
-        Ok(text) => text,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
-        Err(error) => {
-            eprintln!("bareframe: {}: {error}", path.display());
-            return None;
-        }
-    };
+    let text = read_optional(&path)
+        .inspect_err(|error| eprintln!("bareframe: {}: {error}", path.display()))
+        .ok()??;
     state::decode(&text)
         .inspect_err(|error| eprintln!("bareframe: {}: {error}", path.display()))
         .ok()

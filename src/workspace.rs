@@ -206,8 +206,6 @@ impl WorkspaceView {
                 view.shutdown(cx);
                 async {}
             }),
-            // ponytail: compares the encoded layout every 2s instead of tracking each
-            // change; switch to change notifications if the layout ever gets large.
             config_text,
             dark_appearance,
             _appearance: cx.observe_window_appearance(window, |view, window, cx| {
@@ -215,6 +213,8 @@ impl WorkspaceView {
                 view.apply_settings(cx);
             }),
             _config_watch: None,
+            // ponytail: compares the encoded layout every 2s instead of tracking each
+            // change; switch to change notifications if the layout ever gets large.
             _autosave: cx.spawn(async move |view, cx| {
                 loop {
                     cx.background_executor()
@@ -291,8 +291,7 @@ impl WorkspaceView {
         }
     }
 
-    /// Writes the layout if it changed, through a temporary file so a crash mid-write
-    /// leaves the previous state intact.
+    /// Writes the layout if it changed.
     fn save_state(&mut self, cx: &App) {
         let mut state = self.state(cx);
         state.panes.sort_by_key(|(id, _)| *id);
@@ -303,13 +302,7 @@ impl WorkspaceView {
         let Some(path) = app::state_file() else {
             return;
         };
-        let temporary = path.with_extension("tmp");
-        let written = path
-            .parent()
-            .map_or(Ok(()), std::fs::create_dir_all)
-            .and_then(|()| std::fs::write(&temporary, &text))
-            .and_then(|()| std::fs::rename(&temporary, &path));
-        match written {
+        match app::write_atomically(&path, &text) {
             Ok(()) => self.saved = text,
             Err(error) => eprintln!("bareframe: saving {}: {error}", path.display()),
         }
