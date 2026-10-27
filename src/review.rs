@@ -604,101 +604,8 @@ impl CodeReview {
         let theme = self.theme;
         match row {
             Row::File(index) => self.render_file(index, cx),
-            Row::Hunk(index, hunk) => {
-                let header = self.files[index]
-                    .diff
-                    .as_ref()
-                    .map(|diff| diff.hunks[hunk].header.clone())
-                    .unwrap_or_default();
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .w_full()
-                    .mt_1()
-                    .px_2()
-                    .h(px(22.0))
-                    .bg(hsla(theme.tab_active))
-                    .text_size(px(11.0))
-                    .text_color(hsla(theme.text_muted))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .truncate()
-                            .font_family(self.mono.clone())
-                            .child(header),
-                    )
-                    .when(self.uncommitted(), |this| {
-                        this.child(
-                            small_text_button(
-                                theme,
-                                ("review-hunk-revert", index * 10_000 + hunk),
-                                "Revert",
-                            )
-                            .on_click(cx.listener(
-                                move |this, _, _, cx| {
-                                    this.commit = None;
-                                    this.pending = Some(Pending::Hunk(index, hunk));
-                                    cx.notify();
-                                },
-                            )),
-                        )
-                    })
-                    .into_any_element()
-            }
-            Row::Line(index, hunk, line) => {
-                let Some(line) = self.files[index]
-                    .diff
-                    .as_ref()
-                    .map(|diff| &diff.hunks[hunk].lines[line])
-                else {
-                    return div().into_any_element();
-                };
-                let (sign, tint) = match line.kind {
-                    LineKind::Added => ("+", Some(theme.palette[2])),
-                    LineKind::Removed => ("-", Some(theme.palette[1])),
-                    LineKind::Context => (" ", None),
-                    LineKind::NoNewline => ("", None),
-                };
-                let number = |number: Option<u32>| {
-                    div()
-                        .flex_none()
-                        .w(px(36.0))
-                        .pr_1()
-                        .flex()
-                        .justify_end()
-                        .text_color(hsla(theme.text_muted))
-                        .children(number.map(|number| number.to_string()))
-                };
-                div()
-                    .flex()
-                    .w_full()
-                    .min_h(px(18.0))
-                    .font_family(self.mono.clone())
-                    .text_size(px(12.0))
-                    .when_some(tint, |this, tint| this.bg(hsla(tint).opacity(0.14)))
-                    .child(number(line.old))
-                    .child(number(line.new))
-                    .child(
-                        div()
-                            .flex_none()
-                            .w(px(14.0))
-                            .text_color(tint.map_or(hsla(theme.text_muted), hsla))
-                            .child(sign),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .truncate()
-                            .when(line.kind == LineKind::NoNewline, |this| {
-                                this.text_color(hsla(theme.text_muted))
-                            })
-                            .child(line.text.clone()),
-                    )
-                    .into_any_element()
-            }
+            Row::Hunk(index, hunk) => self.render_hunk(index, hunk, cx),
+            Row::Line(index, hunk, line) => self.render_line(index, hunk, line),
             Row::Note(index) => div()
                 .w_full()
                 .px_2()
@@ -710,6 +617,102 @@ impl CodeReview {
         }
     }
 
+    fn render_hunk(&self, index: usize, hunk: usize, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.theme;
+        let header = self.files[index]
+            .diff
+            .as_ref()
+            .map(|diff| diff.hunks[hunk].header.clone())
+            .unwrap_or_default();
+        div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .w_full()
+            .mt_1()
+            .px_2()
+            .h(px(22.0))
+            .bg(hsla(theme.tab_active))
+            .text_size(px(11.0))
+            .text_color(hsla(theme.text_muted))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .font_family(self.mono.clone())
+                    .child(header),
+            )
+            .when(self.uncommitted(), |this| {
+                this.child(
+                    small_text_button(
+                        theme,
+                        ("review-hunk-revert", index * 10_000 + hunk),
+                        "Revert",
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.commit = None;
+                        this.pending = Some(Pending::Hunk(index, hunk));
+                        cx.notify();
+                    })),
+                )
+            })
+            .into_any_element()
+    }
+
+    fn render_line(&self, index: usize, hunk: usize, line: usize) -> AnyElement {
+        let theme = self.theme;
+        let Some(line) = self.files[index]
+            .diff
+            .as_ref()
+            .map(|diff| &diff.hunks[hunk].lines[line])
+        else {
+            return div().into_any_element();
+        };
+        let (sign, tint) = match line.kind {
+            LineKind::Added => ("+", Some(theme.palette[2])),
+            LineKind::Removed => ("-", Some(theme.palette[1])),
+            LineKind::Context => (" ", None),
+            LineKind::NoNewline => ("", None),
+        };
+        let number = |number: Option<u32>| {
+            div()
+                .flex_none()
+                .w(px(36.0))
+                .pr_1()
+                .flex()
+                .justify_end()
+                .text_color(hsla(theme.text_muted))
+                .children(number.map(|number| number.to_string()))
+        };
+        div()
+            .flex()
+            .w_full()
+            .min_h(px(18.0))
+            .font_family(self.mono.clone())
+            .text_size(px(12.0))
+            .when_some(tint, |this, tint| this.bg(hsla(tint).opacity(0.14)))
+            .child(number(line.old))
+            .child(number(line.new))
+            .child(
+                div()
+                    .flex_none()
+                    .w(px(14.0))
+                    .text_color(tint.map_or(hsla(theme.text_muted), hsla))
+                    .child(sign),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .when(line.kind == LineKind::NoNewline, |this| {
+                        this.text_color(hsla(theme.text_muted))
+                    })
+                    .child(line.text.clone()),
+            )
+            .into_any_element()
+    }
     fn render_file(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.theme;
         let file = &self.files[index];
