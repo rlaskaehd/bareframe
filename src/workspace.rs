@@ -127,6 +127,7 @@ pub struct WorkspaceView {
     palette: Option<palette::Palette>,
     /// The shown surfaces are swapped for snapshots while a pane menu covers them.
     frozen: bool,
+    frozen_panes: Vec<PaneId>,
     renaming: Option<(RenameTarget, Entity<RenameInput>, Subscription)>,
     /// The sidebar's tab filter: the field plus its event and change subscriptions.
     search: Option<(Entity<RenameInput>, [Subscription; 2])>,
@@ -163,6 +164,8 @@ impl WorkspaceView {
             ThemeName::Light
         }));
         let explorer = cx.new(|cx| Explorer::new(theme, cx));
+        let show_hidden = settings.flag("show-hidden-files");
+        explorer.update(cx, |explorer, cx| explorer.set_show_hidden(show_hidden, cx));
         let explorer_events = cx.subscribe(&explorer, |view, _, event, cx| {
             view.on_explorer_event(event, cx)
         });
@@ -197,6 +200,7 @@ impl WorkspaceView {
             clipboard_prompt: None,
             palette: None,
             frozen: false,
+            frozen_panes: Vec::new(),
             renaming: None,
             search: None,
             window_title: String::new(),
@@ -246,11 +250,8 @@ impl WorkspaceView {
         self.sidebar_open = saved.sidebar_open;
         self.sidebar_width = saved.sidebar_width;
         self.tools_width = saved.tools_width;
-        if saved.tools_open {
-            self.tools_open = true;
-            self.explorer
-                .update(cx, |explorer, cx| explorer.set_active(true, cx));
-        }
+        self.tools_open = saved.tools_open;
+        self.update_tools(cx);
         let kinds: HashMap<PaneId, SavedPane> = saved.panes.into_iter().collect();
         let panes: Vec<PaneId> = self.model.panes().collect();
         for id in panes {
@@ -390,10 +391,19 @@ impl WorkspaceView {
 
     fn set_frozen(&mut self, frozen: bool, cx: &mut Context<Self>) {
         self.frozen = frozen;
-        for id in self.shown_panes() {
-            if let Some(pane) = self.terminal(id) {
+        // Thaw exactly the panes that were frozen: the active tab may have changed since.
+        let panes = if frozen {
+            self.shown_panes()
+        } else {
+            std::mem::take(&mut self.frozen_panes)
+        };
+        for id in &panes {
+            if let Some(pane) = self.terminal(*id) {
                 pane.update(cx, |pane, cx| pane.set_frozen(frozen, cx));
             }
+        }
+        if frozen {
+            self.frozen_panes = panes;
         }
     }
 
@@ -411,7 +421,10 @@ impl WorkspaceView {
                 pane.update(cx, |pane, cx| pane.set_visible(shown, cx));
             }
         }
-        if let Some(pane) = self.pane(self.model.active_pane()).cloned() {
+        // A clipboard prompt keeps the keyboard until it is answered.
+        if let Some(prompt) = &self.clipboard_prompt {
+            prompt.focus.focus(window, cx);
+        } else if let Some(pane) = self.pane(self.model.active_pane()).cloned() {
             pane.focus(window, cx);
         }
         self.split_bounds.clear();
@@ -453,6 +466,7 @@ impl WorkspaceView {
     }
 
     fn close_pane(&mut self, id: PaneId, window: &mut Window, cx: &mut Context<Self>) {
+        self.drop_clipboard_prompt_for(id, cx);
         if let Some((PaneView::Terminal(pane), _)) = self.panes.remove(&id) {
             pane.update(cx, |pane, cx| pane.shutdown(cx));
         }
@@ -503,6 +517,7 @@ impl WorkspaceView {
     }
 
     fn apply_settings(&mut self, cx: &mut Context<Self>) {
+        self.update_tools(cx);
         let theme = self.terminal_theme();
         let ui = self.theme();
         for (pane, _) in self.panes.values() {
@@ -516,8 +531,11 @@ impl WorkspaceView {
                 }),
             }
         }
-        self.explorer
-            .update(cx, |explorer, cx| explorer.set_theme(ui, cx));
+        let show_hidden = self.settings.flag("show-hidden-files");
+        self.explorer.update(cx, |explorer, cx| {
+            explorer.set_theme(ui, cx);
+            explorer.set_show_hidden(show_hidden, cx);
+        });
         self.global_search
             .update(cx, |search, cx| search.set_theme(ui, cx));
         app::bind_keys(&self.settings, cx);

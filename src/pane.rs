@@ -123,6 +123,12 @@ impl TerminalPane {
         }
     }
 
+    /// Whether the shell is waiting at its prompt: the shell integration titles the prompt
+    /// with its location. Without the integration this is never known, so it is false.
+    pub fn at_prompt(&self) -> bool {
+        matches!(self.session.status, SessionStatus::Running) && is_location(&self.session.title)
+    }
+
     /// The sidebar name, as Warp picks it: the running or last command, else "New session".
     pub fn name(&self) -> String {
         match &self.session.status {

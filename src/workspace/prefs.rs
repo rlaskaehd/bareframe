@@ -130,7 +130,7 @@ impl WorkspaceView {
     }
 
     /// Reloads the settings when the file changes on disk, unless the change is our own
-    /// write. A font size set with Cmd+= survives reloads of other keys.
+    /// write. A font size set with Cmd+= is not saved, so a reload returns to the file's.
     pub(super) fn watch_config(&mut self, cx: &mut Context<Self>) {
         let Some(path) = app::config_file() else {
             return;
@@ -142,8 +142,18 @@ impl WorkspaceView {
             return;
         }
         let (sender, mut receiver) = futures::channel::mpsc::unbounded::<()>();
-        let watcher = notify::recommended_watcher(move |_: notify::Result<notify::Event>| {
-            let _ = sender.unbounded_send(());
+        // The folder also holds the layout state, rewritten every few seconds; only the
+        // settings file (or its temporary copy, renamed over it) matters here.
+        let name = path.file_name().map(std::ffi::OsStr::to_owned);
+        let watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
+            let ours = event.is_ok_and(|event| {
+                event.paths.iter().any(|changed| {
+                    changed.file_name() == name.as_deref() || changed.file_stem() == name.as_deref()
+                })
+            });
+            if ours {
+                let _ = sender.unbounded_send(());
+            }
         });
         let mut watcher = match watcher {
             Ok(watcher) => watcher,
@@ -158,7 +168,15 @@ impl WorkspaceView {
                     .timer(Duration::from_millis(200))
                     .await;
                 while receiver.try_recv().is_ok() {}
-                let text = std::fs::read_to_string(&path).unwrap_or_default();
+                // A file caught mid-save or unreadable for a moment keeps the settings as
+                // they are; a deleted one means the defaults.
+                let text = match app::read_optional(&path) {
+                    Ok(text) => text.unwrap_or_default(),
+                    Err(error) => {
+                        eprintln!("bareframe: {}: {error}", path.display());
+                        continue;
+                    }
+                };
                 if view
                     .update(cx, |view, cx| view.reload_settings(text, cx))
                     .is_err()
@@ -172,9 +190,13 @@ impl WorkspaceView {
 
     /// Settings › Reload settings file (Ghostty's `reload_config`).
     pub(super) fn reload_from_disk(&mut self, cx: &mut Context<Self>) {
-        let text = app::config_file()
-            .and_then(|path| std::fs::read_to_string(path).ok())
-            .unwrap_or_default();
+        let Some(path) = app::config_file() else {
+            return;
+        };
+        let text = match app::read_optional(&path) {
+            Ok(text) => text.unwrap_or_default(),
+            Err(error) => return eprintln!("bareframe: {}: {error}", path.display()),
+        };
         self.config_text.clear();
         self.reload_settings(text, cx);
     }

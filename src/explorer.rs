@@ -70,6 +70,12 @@ pub struct Explorer {
     expanded: HashSet<PathBuf>,
     /// Directory listings read so far; a watcher event drops the stale ones.
     listings: HashMap<PathBuf, Vec<Child>>,
+    /// Directories the rows needed that aren't read yet; render starts reading them.
+    wanted: HashSet<PathBuf>,
+    /// Reads in flight off the UI thread (a network mount can take seconds), each with a
+    /// token so a read made stale by a change on disk is dropped.
+    loading: HashMap<PathBuf, u64>,
+    next_load: u64,
     selected: Option<PathBuf>,
     show_hidden: bool,
     theme: &'static Theme,
@@ -87,6 +93,9 @@ impl Explorer {
             roots: Vec::new(),
             expanded: HashSet::new(),
             listings: HashMap::new(),
+            wanted: HashSet::new(),
+            loading: HashMap::new(),
+            next_load: 0,
             selected: None,
             show_hidden: true,
             theme,
@@ -103,6 +112,14 @@ impl Explorer {
     pub fn set_theme(&mut self, theme: &'static Theme, cx: &mut Context<Self>) {
         self.theme = theme;
         cx.notify();
+    }
+
+    pub fn set_show_hidden(&mut self, show: bool, cx: &mut Context<Self>) {
+        if show != self.show_hidden {
+            self.show_hidden = show;
+            self.forget_listings();
+            cx.notify();
+        }
     }
 
     /// Roots come from the active tab's terminals; a new root starts expanded.
@@ -125,8 +142,11 @@ impl Explorer {
     /// Watches the roots while the panel is shown; hidden, it drops the watcher and the
     /// cached listings so reopening shows the current disk state.
     pub fn set_active(&mut self, active: bool, cx: &mut Context<Self>) {
+        if active && self.watcher.is_some() {
+            return;
+        }
         if active {
-            self.listings.clear();
+            self.forget_listings();
             self.watch(cx);
         } else {
             self.watcher = None;
@@ -175,23 +195,63 @@ impl Explorer {
     }
 
     fn invalidate(&mut self, changed: &[PathBuf], cx: &mut Context<Self>) {
-        let before = self.listings.len();
+        // A read still in flight is redone too, so it can't bring back what just changed.
+        let before = self.listings.len() + self.loading.len();
         for path in changed {
             self.listings.remove(path);
+            self.loading.remove(path);
             if let Some(parent) = path.parent() {
                 self.listings.remove(parent);
+                self.loading.remove(parent);
             }
         }
-        if self.listings.len() != before {
+        if self.listings.len() + self.loading.len() != before {
             cx.notify();
         }
     }
 
-    fn listing(&mut self, dir: &Path) -> &[Child] {
-        let show_hidden = self.show_hidden;
-        self.listings
-            .entry(dir.to_path_buf())
-            .or_insert_with(|| list_dir(dir, show_hidden))
+    fn forget_listings(&mut self) {
+        self.listings.clear();
+        self.loading.clear();
+    }
+
+    /// The directory's entries, or none yet while it is being read.
+    fn listing(&mut self, dir: &Path) -> Vec<Child> {
+        match self.listings.get(dir) {
+            Some(children) => children.clone(),
+            None => {
+                self.wanted.insert(dir.to_path_buf());
+                Vec::new()
+            }
+        }
+    }
+
+    fn load_wanted(&mut self, cx: &mut Context<Self>) {
+        for dir in std::mem::take(&mut self.wanted) {
+            if self.loading.contains_key(&dir) {
+                continue;
+            }
+            self.next_load += 1;
+            let token = self.next_load;
+            self.loading.insert(dir.clone(), token);
+            let show_hidden = self.show_hidden;
+            cx.spawn(async move |this, cx| {
+                let read = dir.clone();
+                let children = cx
+                    .background_executor()
+                    .spawn(async move { list_dir(&read, show_hidden) })
+                    .await;
+                this.update(cx, |this, cx| {
+                    if this.loading.get(&dir) == Some(&token) {
+                        this.loading.remove(&dir);
+                        this.listings.insert(dir, children);
+                        cx.notify();
+                    }
+                })
+                .ok();
+            })
+            .detach();
+        }
     }
 
     fn rows(&mut self) -> Vec<Row> {
@@ -219,7 +279,7 @@ impl Explorer {
     }
 
     fn push_children(&mut self, root: &Path, dir: &Path, depth: usize, rows: &mut Vec<Row>) {
-        for child in self.listing(dir).to_vec() {
+        for child in self.listing(dir) {
             let expanded = child.dir && self.expanded.contains(&child.path);
             rows.push(Row {
                 path: child.path.clone(),
@@ -351,6 +411,7 @@ impl Render for Explorer {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = self.theme;
         let count = self.rows().len();
+        self.load_wanted(cx);
         div()
             .key_context(KEY_CONTEXT)
             .track_focus(&self.focus)

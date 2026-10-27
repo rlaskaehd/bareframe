@@ -67,7 +67,7 @@ MVP 1의 셸 실행 모드는 zsh를 기준으로 한다. 다른 셸을 지정�
 - Project explorer의 루트는 활성 탭 터미널들의 작업 디렉터리다(활성 Pane 먼저, 다른 루트 안에 있는 디렉터리는 합침). `cd`하면 루트가 따라간다.
 - 폴더는 펼칠 때 한 단계씩 읽는다. gitignore 대상은 숨기지 않고 기울임체로 흐리게 표시한다(`.git` 포함). 패널이 열린 동안 파일 변경을 감시해 반영한다.
 - 클릭: 폴더는 펼치기·접기, 파일은 기본 앱으로 연다(MVP 3b에서 내장 Markdown·편집기로 바뀐다). 실행 권한이 없는 문서 형식만 연다. 텍스트·코드는 기본 텍스트 편집기로(`.py` 등의 기본 앱이 실행기일 수 있어서), 이미지·PDF는 기본 뷰어로 열고, 심볼릭 링크는 가리키는 파일 기준으로 판단한다. 그 밖의 파일(스크립트, `.command`, `.app` 등)은 Finder에서 위치만 보여 준다. 키보드: 위/아래 선택, 오른쪽/왼쪽 펼치기·접기(왼쪽은 상위 폴더로), `Enter` 열기.
-- 우클릭 메뉴: 폴더는 `cd to directory`(활성 터미널에 입력 중이던 줄을 지우고 `cd` 실행. 경로에 제어 문자가 있으면 입력하지 않는다), `Open in new tab`. 파일은 `Open`. 공통으로 `Reveal in Finder`, `Copy path`, `Copy relative path`.
+- 우클릭 메뉴: 폴더는 `cd to directory`(활성 터미널이 프롬프트에서 기다리는 중이면 입력 중이던 줄을 지우고 `cd` 실행. 프로그램(vim, less, ssh 등)이 실행 중이거나 셸 통합이 없어 알 수 없으면 그 폴더에서 새 탭을 연다. 경로에 제어 문자가 있으면 입력하지 않는다), `Open in new tab`. 파일은 `Open`. 공통으로 `Reveal in Finder`, `Copy path`, `Copy relative path`.
 
 ### Global search
 
@@ -109,11 +109,11 @@ MVP 1의 셸 실행 모드는 zsh를 기준으로 한다. 다른 셸을 지정�
 | Appearance — Cursor | 커서 모양(Block / Bar / Underline), 깜박임 |
 | Appearance — Panes | 터미널 안쪽 여백(px) |
 | Appearance — Tabs | 새 탭에 현재 탭 색 유지 |
-| Appearance — Tools panel | Project explorer, Global search 표시(둘 다 끄면 렌치 버튼도 숨김) |
+| Appearance — Tools panel | Project explorer, Global search 표시(하나만 켜면 도구 탭 줄을 숨기고, 둘 다 끄면 렌치 버튼도 숨김), Show hidden files(Project explorer의 `.` 파일·폴더, 기본 켬) |
 | Features — General | 시작 시 창·탭·Pane 복원, 마우스 휠 스크롤 배율 |
 | Features — Session | 새 세션의 셸(존재하는 절대 경로일 때), 새 세션의 작업 디렉터리(이전 세션 / 홈), 새 탭 위치(현재 탭 뒤 / 맨 끝) |
 | Features — Keys | 왼쪽·오른쪽 Option을 Meta로 |
-| Features — Terminal | 마우스 리포팅, 선택 시 복사, 더블클릭 단어 경계 문자, 클립보드 접근(OSC 52: Deny / Ask / Allow, 기본 Deny. Ask는 확인 창이 생길 때까지 거부) |
+| Features — Terminal | 마우스 리포팅, 선택 시 복사, 더블클릭 단어 경계 문자, 클립보드 접근(OSC 52: Deny / Ask / Allow, 기본 Deny. Ask는 확인 창에서 묻는다) |
 | Keyboard shortcuts | 모든 동작의 단축키 목록과 검색(이름 또는 키, 예: `cmd d`). 줄을 누르면 새 단축키를 녹화하고 `Clear`(단축키 없음)·`Default`(기본값)·`Cancel`·`Save`. 다른 동작이 쓰던 키면 알려 주고, 저장하면 그 키를 이 동작으로 옮긴다. `Esc`는 녹화 취소 |
 | About | 버전과 라이선스 |
 
@@ -141,7 +141,7 @@ cursor-style = bar    # block | bar | underline
 | 키 | 동작 |
 | --- | --- |
 | `Cmd+C` | 선택 영역을 클립보드로 복사 |
-| `Cmd+V` | Ghostty의 붙여넣기 경로로 클립보드 입력. 위험한 붙여넣기(bracketed paste가 꺼진 프로그램에 여러 줄, 또는 bracketed paste를 빠져나가는 글자)는 확인 창(`Warning: Potentially Unsafe Paste`)에 붙여넣을 내용을 보여 주고 `Paste`를 눌러야 들어간다. `Esc`나 `Cancel`은 아무것도 넣지 않는다. 터미널 안 프로그램의 OSC 52 클립보드 읽기·쓰기는 Settings › Features의 `Clipboard access (OSC 52)`를 따른다: `Deny`(기본)는 거부, `Ask`는 같은 확인 창에서 `Allow`를 눌러야 허용, `Allow`는 묻지 않는다 |
+| `Cmd+V` | Ghostty의 붙여넣기 경로로 클립보드 입력. 위험한 붙여넣기(bracketed paste가 꺼진 프로그램에 여러 줄, 또는 bracketed paste를 빠져나가는 글자)는 확인 창(`Warning: Potentially Unsafe Paste`)에 붙여넣을 내용을 보여 주고 `Paste`를 눌러야 들어간다. `Esc`나 `Cancel`은 아무것도 넣지 않는다. 확인 창이 떠 있는 동안에는 다른 단축키와 창의 다른 곳 클릭이 막히고, 요청한 탭 번호와 이름·위치가 함께 보인다. 터미널 안 프로그램의 OSC 52 클립보드 읽기·쓰기는 Settings › Features의 `Clipboard access (OSC 52)`를 따른다: `Deny`(기본)는 거부, `Ask`는 같은 확인 창에서 `Allow`를 눌러야 허용, `Allow`는 묻지 않는다 |
 | `Cmd+Q` | 앱 종료 |
 | `Cmd+Shift+R` | 시작에 실패한 Pane을 다시 시작 |
 | `Ctrl+C`, `Ctrl+D`, `Ctrl+Z` | 터미널과 셸에 전달 |

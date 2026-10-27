@@ -319,8 +319,10 @@ impl Workspace {
         unique.dedup();
         let consistent = !tabs.is_empty()
             && unique.len() == panes.len()
+            && groups.iter().all(|group| group.color < GROUP_COLORS)
             && tabs.iter().all(|tab| {
                 tab.layout.contains(tab.active_pane)
+                    && tab.color.is_none_or(|color| color < GROUP_COLORS)
                     && tab
                         .group
                         .is_none_or(|id| groups.iter().any(|group| group.id == id))

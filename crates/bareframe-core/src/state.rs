@@ -108,17 +108,17 @@ pub fn decode(input: &str) -> Result<SavedState, String> {
             "window" => {
                 let mut values = [0.0; 4];
                 for value in &mut values {
-                    *value = number_of(next()?).ok_or_else(|| fail("bad window"))?;
+                    *value = size_of(next()?).ok_or_else(|| fail("bad window"))?;
                 }
                 window = Some(values);
             }
             "sidebar" => {
                 sidebar_open = flag_of(next()?).ok_or_else(|| fail("bad sidebar"))?;
-                sidebar_width = number_of(next()?).ok_or_else(|| fail("bad width"))?;
+                sidebar_width = size_of(next()?).ok_or_else(|| fail("bad width"))?;
             }
             "tools" => {
                 tools_open = flag_of(next()?).ok_or_else(|| fail("bad tools"))?;
-                tools_width = number_of(next()?).ok_or_else(|| fail("bad width"))?;
+                tools_width = size_of(next()?).ok_or_else(|| fail("bad width"))?;
             }
             "active" => active = number_of(next()?).ok_or_else(|| fail("bad active tab"))?,
             "group" => groups.push(Group {
@@ -245,6 +245,11 @@ fn number_of<T: std::str::FromStr>(word: &str) -> Option<T> {
     word.parse().ok()
 }
 
+/// A position or size: `NaN` and infinities parse as `f32` but can't place a window.
+fn size_of(word: &str) -> Option<f32> {
+    number_of(word).filter(|value: &f32| value.is_finite())
+}
+
 fn optional<T: std::str::FromStr>(word: &str) -> Option<Option<T>> {
     if word == "-" {
         Some(None)
@@ -363,5 +368,23 @@ mod tests {
         // A tab in a group that does not exist.
         assert!(decode(&format!("{HEADER}\ntab 1 7 0 - 0 1 - p1\n")).is_err());
         assert!(decode(&format!("{HEADER}\nbogus\n")).is_err());
+        // Colors index the theme's palette, so one past the end would crash the first render.
+        assert!(decode(&format!("{HEADER}\ntab 1 - 0 6 0 1 - p1\n")).is_err());
+        let group = format!("{HEADER}\ngroup 1 9 0 0 -\ntab 1 1 0 - 0 1 - p1\n");
+        assert!(decode(&group).is_err());
+        assert!(decode(&format!("{HEADER}\nsidebar 1 NaN\ntab 1 - 0 - 0 1 - p1\n")).is_err());
+        assert!(
+            decode(&format!(
+                "{HEADER}\nwindow 0 0 inf 720\ntab 1 - 0 - 0 1 - p1\n"
+            ))
+            .is_err()
+        );
+        // The same lines with good values load.
+        assert!(
+            decode(&format!(
+                "{HEADER}\ngroup 1 5 0 0 -\ntab 1 1 0 5 0 1 - p1\n"
+            ))
+            .is_ok()
+        );
     }
 }

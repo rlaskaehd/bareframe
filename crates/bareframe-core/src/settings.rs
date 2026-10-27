@@ -274,6 +274,16 @@ pub const DEFS: &[Def] = &[
         App,
     ),
     def(
+        Appearance,
+        "Tools panel",
+        "show-hidden-files",
+        "Show hidden files",
+        "Show files and folders whose names start with a dot in the project explorer.",
+        Toggle,
+        "true",
+        App,
+    ),
+    def(
         Features,
         "General",
         "restore-state",

@@ -266,7 +266,7 @@ pub fn state_file() -> Option<PathBuf> {
 }
 
 /// The file's text, or `None` if it does not exist.
-fn read_optional(path: &Path) -> std::io::Result<Option<String>> {
+pub fn read_optional(path: &Path) -> std::io::Result<Option<String>> {
     match std::fs::read_to_string(path) {
         Ok(text) => Ok(Some(text)),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -275,7 +275,10 @@ fn read_optional(path: &Path) -> std::io::Result<Option<String>> {
 }
 
 /// Writes through a temporary file, so a crash mid-write leaves the previous file intact.
+/// A symbolic link (a settings file kept in a dotfiles repository) is followed, so the
+/// rename replaces the file it points to rather than the link.
 pub fn write_atomically(path: &Path, text: &str) -> std::io::Result<()> {
+    let path = &std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let temporary = path.with_extension("tmp");
     path.parent().map_or(Ok(()), std::fs::create_dir_all)?;
     std::fs::write(&temporary, text)?;
@@ -387,12 +390,26 @@ pub fn run(config: LaunchConfig, restore: bool) {
                 }
             })
             .detach();
-            let bounds = match saved.as_ref().and_then(|saved| saved.window) {
-                Some([x, y, width, height]) => {
+            // A saved place on a display that is gone, or too small to use, opens centered.
+            let bounds = saved
+                .as_ref()
+                .and_then(|saved| saved.window)
+                .map(|[x, y, width, height]| {
                     Bounds::new(point(px(x), px(y)), size(px(width), px(height)))
-                }
-                None => Bounds::centered(None, size(px(1040.0), px(720.0)), cx),
-            };
+                })
+                .filter(|bounds| {
+                    let title = point(
+                        bounds.origin.x + bounds.size.width / 2.0,
+                        bounds.origin.y + px(TITLE_BAR_HEIGHT / 2.0),
+                    );
+                    bounds.size.width >= px(300.0)
+                        && bounds.size.height >= px(200.0)
+                        && cx
+                            .displays()
+                            .iter()
+                            .any(|display| display.bounds().contains(&title))
+                })
+                .unwrap_or_else(|| Bounds::centered(None, size(px(1040.0), px(720.0)), cx));
             if let Err(error) = cx.open_window(
                 WindowOptions {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),

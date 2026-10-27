@@ -270,7 +270,7 @@ impl WorkspaceView {
             MenuAction::MoveTab(index, up) => self.model.move_tab(index, up),
             MenuAction::OpenPath(path) => super::tools::open_externally(&path),
             MenuAction::Reveal(path) => super::tools::reveal_in_finder(&path),
-            MenuAction::CdTo(path) => self.cd_to(&path, cx),
+            MenuAction::CdTo(path) => return self.cd_to(&path, window, cx),
             MenuAction::NewTabAt(path) => return self.new_tab_at(path, window, cx),
             MenuAction::SetTabColor(index, color) => self.model.set_tab_color(index, color),
             MenuAction::Separator | MenuAction::TabColors(_) => {}

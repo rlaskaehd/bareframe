@@ -61,6 +61,8 @@ fn matcher(query: &str, case_sensitive: bool, regex: bool) -> Result<RegexMatche
 /// Searches every non-ignored file under `roots`, sending each file with matches as soon as
 /// it is done. Stops when `cancel` is set or after [`MAX_MATCHES`].
 // ponytail: walks one thread; use `WalkBuilder::build_parallel` if huge trees feel slow.
+// Cancel is seen between files and at each matching line, so a huge file with no matches
+// is still read to the end; wrap the reader to check it if that shows up.
 fn search(
     roots: &[PathBuf],
     matcher: &RegexMatcher,
@@ -99,7 +101,7 @@ fn search(
                         ranges,
                     });
                 }
-                Ok(total < MAX_MATCHES)
+                Ok(total < MAX_MATCHES && !cancel.load(Ordering::Relaxed))
             });
             // Unreadable files are skipped, as ripgrep does by default.
             if searcher.search_path(matcher, entry.path(), sink).is_ok() && !lines.is_empty() {
@@ -148,7 +150,9 @@ pub enum SearchEvent {
 enum Row {
     Root(PathBuf, usize),
     File(PathBuf, PathBuf, usize, bool),
-    Line(PathBuf, LineMatch),
+    /// Indices into `results` and that file's lines; rows are rebuilt every frame, so they
+    /// don't copy the line text.
+    Line(usize, usize),
 }
 
 pub struct SearchPanel {
@@ -170,6 +174,15 @@ pub struct SearchPanel {
 }
 
 impl EventEmitter<SearchEvent> for SearchPanel {}
+
+/// The search thread only stops when told to; the panel going away is such a time.
+impl Drop for SearchPanel {
+    fn drop(&mut self) {
+        if let Some((cancel, _)) = &self.search {
+            cancel.store(true, Ordering::Relaxed);
+        }
+    }
+}
 
 impl SearchPanel {
     pub fn new(theme: &'static Theme, window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -284,20 +297,21 @@ impl SearchPanel {
     fn rows(&self) -> Vec<Row> {
         let mut rows = Vec::new();
         for root in &self.roots {
-            let files: Vec<&FileMatches> = self
+            let files: Vec<(usize, &FileMatches)> = self
                 .results
                 .iter()
-                .filter(|file| &file.root == root)
+                .enumerate()
+                .filter(|(_, file)| &file.root == root)
                 .collect();
             if files.is_empty() {
                 continue;
             }
-            let count = files.iter().map(|file| file.lines.len()).sum();
+            let count = files.iter().map(|(_, file)| file.lines.len()).sum();
             rows.push(Row::Root(root.clone(), count));
             if self.collapsed.contains(root) {
                 continue;
             }
-            for file in files {
+            for (index, file) in files {
                 let collapsed = self.collapsed.contains(&file.path);
                 rows.push(Row::File(
                     file.path.clone(),
@@ -306,11 +320,7 @@ impl SearchPanel {
                     collapsed,
                 ));
                 if !collapsed {
-                    rows.extend(
-                        file.lines
-                            .iter()
-                            .map(|line| Row::Line(file.path.clone(), line.clone())),
-                    );
+                    rows.extend((0..file.lines.len()).map(|line| Row::Line(index, line)));
                 }
             }
         }
@@ -380,7 +390,9 @@ impl SearchPanel {
                     .child(badge(theme, count))
                     .into_any_element()
             }
-            Row::Line(path, line) => {
+            Row::Line(file, line) => {
+                let file = &self.results[file];
+                let (path, line) = (file.path.clone(), &file.lines[line]);
                 let (text, ranges) = snippet(&line.text, &line.ranges);
                 let highlight = HighlightStyle {
                     background_color: Some(hsla(theme.accent).opacity(0.35)),

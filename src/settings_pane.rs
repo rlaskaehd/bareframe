@@ -348,7 +348,7 @@ impl SettingsPane {
     /// binding runs, so pressing an existing shortcut records it instead of running it.
     fn record(&mut self, action: &'static str, cx: &mut Context<Self>) {
         let pane = cx.entity().downgrade();
-        let keys = cx.intercept_keystrokes(move |event, _, cx| {
+        let keys = cx.intercept_keystrokes(move |event, window, cx| {
             let stroke = &event.keystroke;
             let modifiers = stroke.modifiers;
             let trigger = Trigger::from_keystroke(
@@ -359,18 +359,18 @@ impl SettingsPane {
                 &stroke.key,
             );
             let escape = stroke.key == "escape" && !modifiers.modified();
-            if pane
-                .update(cx, |pane, cx| {
-                    if escape {
-                        pane.recording = None;
-                    } else if let (Some(recording), Some(trigger)) = (&mut pane.recording, trigger)
-                    {
-                        recording.trigger = Some(trigger);
-                    }
-                    cx.notify();
-                })
-                .is_ok()
-            {
+            let recorded = pane.update(cx, |pane, cx| {
+                // Leaving Settings (another tab, a click in a terminal) ends recording, so
+                // keys reach wherever focus went.
+                if escape || !pane.focus.contains_focused(window, cx) {
+                    pane.recording = None;
+                } else if let (Some(recording), Some(trigger)) = (&mut pane.recording, trigger) {
+                    recording.trigger = Some(trigger);
+                }
+                cx.notify();
+                escape || pane.recording.is_some()
+            });
+            if recorded.unwrap_or(false) {
                 cx.stop_propagation();
             }
         });

@@ -38,13 +38,23 @@ impl WorkspaceView {
             .find(|tool| self.tool_enabled(*tool))
     }
 
+    /// Closes the panel once Settings has switched every tool off, and lets the explorer
+    /// watch its folders only while it is on screen.
+    pub(super) fn update_tools(&mut self, cx: &mut Context<Self>) {
+        if self.shown_tool().is_none() {
+            self.tools_open = false;
+        }
+        let active = self.tools_open && self.shown_tool() == Some(Tool::Explorer);
+        self.explorer
+            .update(cx, |explorer, cx| explorer.set_active(active, cx));
+    }
+
     pub(super) fn toggle_tools(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.tools_open && self.shown_tool().is_none() {
             return;
         }
         self.tools_open = !self.tools_open;
-        self.explorer
-            .update(cx, |explorer, cx| explorer.set_active(self.tools_open, cx));
+        self.update_tools(cx);
         if self.tools_open {
             self.refresh_explorer_roots(cx);
             self.focus_tool(window, cx);
@@ -69,6 +79,7 @@ impl WorkspaceView {
         }
         self.tool = tool;
         if self.tools_open {
+            self.update_tools(cx);
             self.focus_tool(window, cx);
             cx.notify();
         } else {
@@ -191,20 +202,25 @@ impl WorkspaceView {
     }
 
     /// Types `cd` into the focused terminal of the active tab, clearing any half-typed line
-    /// first, as Warp's explorer does.
-    pub(super) fn cd_to(&mut self, dir: &Path, cx: &mut Context<Self>) {
+    /// first, as Warp's explorer does. A terminal running a program (an editor, a pager, an
+    /// ssh session) would take the line as keys, so the directory opens in a new tab instead.
+    pub(super) fn cd_to(&mut self, dir: &Path, window: &mut Window, cx: &mut Context<Self>) {
         let pane = self.model.active_pane();
-        let Some(terminal) = self.terminal(pane) else {
-            return;
+        let Some(terminal) = self
+            .terminal(pane)
+            .filter(|terminal| terminal.read(cx).at_prompt())
+        else {
+            return self.new_tab_at(dir.to_path_buf(), window, cx);
         };
         let dir = dir.to_string_lossy();
         // Quotes don't stop a typed newline from submitting the line early.
         if dir.chars().any(char::is_control) {
             eprintln!("bareframe: not typing a path with control characters: {dir:?}");
-            return;
+            return self.sync(window, cx);
         }
         let line = format!("\u{15}cd {}\r", quote(&dir));
         terminal.update(cx, |terminal, cx| terminal.type_text(&line, cx));
+        self.sync(window, cx);
     }
 
     pub(super) fn drag_tools_edge(&mut self, event: &MouseMoveEvent, window: &Window) -> bool {
@@ -230,6 +246,9 @@ impl WorkspaceView {
 
     pub(super) fn render_tools(&self, width: f32, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = self.theme();
+        let shown = self.shown_tool().unwrap_or(self.tool);
+        // With one tool left in Settings there is nothing to switch between.
+        let switch = self.tool_enabled(Tool::Explorer) && self.tool_enabled(Tool::Search);
         div()
             .w(px(width))
             .flex_shrink_0()
@@ -247,28 +266,30 @@ impl WorkspaceView {
                     .px_2()
                     .border_b_1()
                     .border_color(hsla(theme.border))
-                    .child(
-                        tool_tab(
-                            theme,
-                            "tool-explorer",
-                            "icons/file.svg",
-                            self.tool == Tool::Explorer,
+                    .when(switch, |this| {
+                        this.child(
+                            tool_tab(
+                                theme,
+                                "tool-explorer",
+                                "icons/file.svg",
+                                shown == Tool::Explorer,
+                            )
+                            .on_click(cx.listener(
+                                |view, _, window, cx| view.open_tool(Tool::Explorer, window, cx),
+                            )),
                         )
-                        .on_click(cx.listener(|view, _, window, cx| {
-                            view.open_tool(Tool::Explorer, window, cx)
-                        })),
-                    )
-                    .child(
-                        tool_tab(
-                            theme,
-                            "tool-search",
-                            "icons/search.svg",
-                            self.tool == Tool::Search,
+                        .child(
+                            tool_tab(
+                                theme,
+                                "tool-search",
+                                "icons/search.svg",
+                                shown == Tool::Search,
+                            )
+                            .on_click(cx.listener(
+                                |view, _, window, cx| view.open_tool(Tool::Search, window, cx),
+                            )),
                         )
-                        .on_click(cx.listener(|view, _, window, cx| {
-                            view.open_tool(Tool::Search, window, cx)
-                        })),
-                    )
+                    })
                     .child(div().flex_1())
                     .child(icon_button("close-tools", "×", theme).on_click(cx.listener(
                         |view, _, window, cx| {
@@ -277,7 +298,7 @@ impl WorkspaceView {
                         },
                     ))),
             )
-            .child(div().flex_1().min_h_0().pt_1().map(|this| match self.tool {
+            .child(div().flex_1().min_h_0().pt_1().map(|this| match shown {
                 Tool::Explorer => this.child(self.explorer.clone()),
                 Tool::Search => this.child(self.global_search.clone()),
             }))

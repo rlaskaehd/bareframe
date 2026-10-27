@@ -452,7 +452,9 @@ fn key_name(key: &str, shift: &mut bool) -> Option<String> {
     match (chars.next(), chars.next()) {
         (Some(digit @ '0'..='9'), None) => Some(format!("digit_{digit}")),
         (Some('a'..='z'), None) => Some(key.to_owned()),
-        _ if key.starts_with("digit_")
+        _ if key
+            .strip_prefix("digit_")
+            .is_some_and(|digit| digit.len() == 1 && digit.as_bytes()[0].is_ascii_digit())
             || (key.starts_with('f') && key[1..].parse::<u8>().is_ok()) =>
         {
             Some(key.to_owned())
@@ -589,6 +591,9 @@ mod tests {
         assert_eq!(t("cmd+="), t("cmd+equal"));
         assert!(Trigger::parse("hyper+d").is_none());
         assert!(Trigger::parse("cmd+what").is_none());
+        // Would read as cmd+x once the prefix is dropped.
+        assert!(Trigger::parse("cmd+digit_x").is_none());
+        assert!(Trigger::parse("cmd+digit_10").is_none());
         let typed = Trigger::from_keystroke(false, false, true, true, "{").unwrap();
         assert_eq!(typed, t("cmd+shift+bracket_left"));
         assert_eq!(typed.to_string(), "shift+cmd+bracket_left");
