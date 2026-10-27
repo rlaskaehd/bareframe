@@ -25,6 +25,15 @@ Local changes are limited to macOS embedding:
 - `TerminalTheme::extra` carries further Ghostty `key = value` lines (cursor, padding,
   clipboard and other settings from the app's Settings screen), written after the font.
   A key or value with a control character, or a key containing `=`, is dropped.
+- Hidden surfaces give back their memory. Ghostty's renderer kept its three
+  screen-sized frame targets (IOSurfaces, about 15 MB each on a Retina window) for
+  every surface, shown or not. In `src/renderer/generic.zig`, `setVisible(false)` now
+  waits for frames in flight and shrinks each frame's target to 1×1 (the layer keeps
+  showing the last presented one), and `drawFrame` does not draw while hidden, so a
+  background tab's output can't size them again; showing the surface draws the current
+  state. The shim starts each surface occluded, matching its hidden view, so a tab
+  that is never shown never draws. Ten terminal tabs: 740 MB → 355 MB after visiting
+  each, 565 MB → 255 MB right after restoring.
 
 The application implements the GPUI view and text input handler in
 `src/terminal/adapter.rs`. The upstream GPUI macro is retained for provenance but

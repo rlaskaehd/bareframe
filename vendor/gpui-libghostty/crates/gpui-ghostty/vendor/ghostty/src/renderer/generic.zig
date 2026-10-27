@@ -1110,6 +1110,28 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
         pub fn setVisible(self: *Self, visible: bool) void {
             self.visible = visible;
             self.syncDisplayLink(null, null);
+            if (!visible) self.releaseTargets();
+        }
+
+        /// bareframe: a hidden surface gives back its frames' screen-sized targets
+        /// (three of them, tens of MB at Retina sizes). The layer keeps showing the last
+        /// presented one, and the next draw sizes a frame's target again when it is used.
+        fn releaseTargets(self: *Self) void {
+            self.draw_mutex.lockUncancelable(global.io());
+            defer self.draw_mutex.unlock(global.io());
+            // A defunct swap chain has taken every permit for good; nothing to release.
+            if (self.swap_chain.defunct) return;
+            // Wait for the GPU to finish every frame in flight before touching them.
+            for (0..SwapChain.buf_count) |_| self.swap_chain.frame_sema.waitUncancelable(
+                global.io(),
+            );
+            defer for (0..SwapChain.buf_count) |_| self.swap_chain.frame_sema.post(global.io());
+            for (&self.swap_chain.frames) |*frame| {
+                if (frame.target.width <= 1 and frame.target.height <= 1) continue;
+                frame.resize(self.api, 1, 1) catch |err| {
+                    log.warn("could not release a hidden frame's target err={}", .{err});
+                };
+            }
         }
 
         /// Create or update the display link and match it to the current
@@ -1590,6 +1612,11 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
             // If either of our surface dimensions is zero
             // then drawing is absurd, so we just return.
             if (surface_size.width == 0 or surface_size.height == 0) return;
+
+            // bareframe: a hidden surface doesn't draw, which would size its targets
+            // again (see releaseTargets). `cells_rebuilt` stays set, so being shown
+            // draws the current state.
+            if (!self.visible) return;
 
             const size_changed =
                 self.size.screen.width != surface_size.width or

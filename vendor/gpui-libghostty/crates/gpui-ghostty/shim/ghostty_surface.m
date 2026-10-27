@@ -365,6 +365,9 @@ gpui_ghostty_surface *gpui_ghostty_surface_new(
 
     ghostty_app_set_focus(state->app, false);
     ghostty_surface_set_focus(state->surface, false);
+    // The view starts hidden (shown once GPUI places it), so the renderer starts occluded
+    // too: a surface that is never shown never draws or sizes its frames.
+    ghostty_surface_set_occlusion(state->surface, false);
     return state;
 
 fail:
