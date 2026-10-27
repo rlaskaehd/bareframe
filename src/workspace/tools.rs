@@ -108,8 +108,8 @@ impl WorkspaceView {
         }
     }
 
-    /// Warp's roots: the working directories of the active tab's terminals, the focused
-    /// one first, with any directory inside another root folded into it.
+    /// The root follows the focused pane's working directory, as Warp's explorer follows
+    /// the focused session; a file pane falls back to the first terminal in the tab.
     pub(super) fn refresh_explorer_roots(&mut self, cx: &mut Context<Self>) {
         if !self.tools_open {
             return;
@@ -117,29 +117,15 @@ impl WorkspaceView {
         let tab = self.model.active();
         let mut panes = tab.layout.panes();
         panes.sort_by_key(|pane| *pane != tab.active_pane);
-        let mut roots: Vec<PathBuf> = Vec::new();
-        for pane in panes {
-            let Some(cwd) = self
-                .terminal(pane)
-                .and_then(|pane| pane.read(cx).cwd().canonicalize().ok())
-                .filter(|cwd| cwd.is_dir())
-            else {
-                continue;
-            };
-            if !roots.contains(&cwd) {
-                roots.push(cwd);
-            }
-        }
-        let nested: Vec<PathBuf> = roots
-            .iter()
-            .filter(|root| {
-                roots
-                    .iter()
-                    .any(|other| other != *root && root.starts_with(other))
+        let roots: Vec<PathBuf> = panes
+            .into_iter()
+            .find_map(|pane| {
+                self.terminal(pane)
+                    .and_then(|pane| pane.read(cx).cwd().canonicalize().ok())
+                    .filter(|cwd| cwd.is_dir())
             })
-            .cloned()
+            .into_iter()
             .collect();
-        roots.retain(|root| !nested.contains(root));
         self.global_search
             .update(cx, |search, cx| search.set_roots(roots.clone(), cx));
         self.explorer
