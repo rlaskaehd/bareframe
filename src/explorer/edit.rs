@@ -236,10 +236,25 @@ fn create(dir: &Path, name: &str, folder: bool) -> Result<PathBuf, String> {
 
 fn rename(path: &Path, name: &str) -> Result<PathBuf, String> {
     let dir = path.parent().ok_or("Can't rename this folder")?;
-    let target = free(dir.join(valid_name(name)?))?;
+    let target = dir.join(valid_name(name)?);
+    // On a disk that ignores case (macOS's default), `a.txt` → `A.txt` finds the file
+    // itself under the new name; that is a rename, not a clash.
+    let target = if same_file(path, &target) {
+        target
+    } else {
+        free(target)?
+    };
     std::fs::rename(path, &target)
         .map(|_| target)
         .map_err(|error| format!("Could not rename {}: {error}", file_name(path)))
+}
+
+fn same_file(a: &Path, b: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    match (a.symlink_metadata(), b.symlink_metadata()) {
+        (Ok(a), Ok(b)) => a.dev() == b.dev() && a.ino() == b.ino(),
+        _ => false,
+    }
 }
 
 /// Moves `path` into the folder `into`, keeping its name.
@@ -278,6 +293,14 @@ mod tests {
         let renamed = rename(&file, "b.txt").unwrap();
         assert_eq!(renamed, dir.join("b.txt"));
         assert!(!file.exists());
+        // Only the case changes, on a disk that may ignore case.
+        let upper = rename(&renamed, "B.txt").unwrap();
+        let names: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert!(names.contains(&"B.txt".into()), "{names:?}");
+        let renamed = rename(&upper, "b.txt").unwrap();
         assert!(rename(&renamed, "sub").is_err(), "the name is taken");
         let moved = move_into(&renamed, &folder).unwrap();
         assert_eq!(moved, folder.join("b.txt"));
