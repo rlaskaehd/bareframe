@@ -121,14 +121,8 @@ fn search(
 fn snippet(text: &str, ranges: &[Range<usize>]) -> (String, Vec<Range<usize>>) {
     let trimmed = text.len() - text.trim_start().len();
     let first = ranges.first().map_or(trimmed, |range| range.start);
-    let mut start = trimmed.max(first.saturating_sub(CONTEXT)).min(text.len());
-    while !text.is_char_boundary(start) {
-        start -= 1;
-    }
-    let mut end = (start + SNIPPET).min(text.len());
-    while !text.is_char_boundary(end) {
-        end -= 1;
-    }
+    let start = text.floor_char_boundary(trimmed.max(first.saturating_sub(CONTEXT)));
+    let end = text.floor_char_boundary(start + SNIPPET);
     let prefix = if start > trimmed { "…" } else { "" };
     let shown = format!("{prefix}{}", &text[start..end]);
     let shift = |offset: usize| offset - start + prefix.len();

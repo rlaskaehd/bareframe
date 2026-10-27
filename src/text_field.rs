@@ -1,6 +1,7 @@
 //! The single-line text field (renaming tabs and groups, search, find, the commit message),
 //! adapted from GPUI's input example. It is an IME client like the terminal, so Korean
 //! composition works while typing.
+use bareframe_core::text::{byte_column, utf16_column};
 use gpui::{
     App, Bounds, ClipboardItem, Context, CursorStyle, ElementId, ElementInputHandler, Entity,
     EntityInputHandler, EventEmitter, FocusHandle, GlobalElementId, LayoutId, MouseButton,
@@ -155,32 +156,12 @@ impl TextField {
             .map_or(offset, |ch| offset + ch.len_utf8())
     }
 
-    fn offset_from_utf16(&self, offset: usize) -> usize {
-        let mut utf8 = 0;
-        let mut utf16 = 0;
-        for ch in self.content.chars() {
-            if utf16 >= offset {
-                break;
-            }
-            utf16 += ch.len_utf16();
-            utf8 += ch.len_utf8();
-        }
-        utf8
-    }
-
-    fn offset_to_utf16(&self, offset: usize) -> usize {
-        self.content[..offset.min(self.content.len())]
-            .chars()
-            .map(char::len_utf16)
-            .sum()
-    }
-
     fn range_to_utf16(&self, range: &Range<usize>) -> Range<usize> {
-        self.offset_to_utf16(range.start)..self.offset_to_utf16(range.end)
+        utf16_column(&self.content, range.start)..utf16_column(&self.content, range.end)
     }
 
     fn range_from_utf16(&self, range: &Range<usize>) -> Range<usize> {
-        self.offset_from_utf16(range.start)..self.offset_from_utf16(range.end)
+        byte_column(&self.content, range.start)..byte_column(&self.content, range.end)
     }
 
     fn backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
@@ -385,7 +366,7 @@ impl EntityInputHandler for TextField {
             .last_layout
             .as_ref()?
             .index_for_x(point.x - bounds.left() + self.scroll)?;
-        Some(self.offset_to_utf16(index))
+        Some(utf16_column(&self.content, index))
     }
 }
 

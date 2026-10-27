@@ -34,11 +34,7 @@ impl EditorPane {
 
     pub(super) fn shape(&self, line: usize, window: &mut Window) -> ShapedLine {
         let full = self.buffer.line(line);
-        let mut cut = full.len().min(MAX_LINE);
-        while !full.is_char_boundary(cut) {
-            cut -= 1;
-        }
-        let text = full[..cut].to_owned();
+        let text = full[..full.floor_char_boundary(MAX_LINE)].to_owned();
         let base = TextRun {
             len: 0,
             font: self.base_font(),

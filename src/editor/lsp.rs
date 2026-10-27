@@ -7,8 +7,8 @@ use crate::{
     theme::hsla,
 };
 use bareframe_core::{
-    lsp::{byte_column, path_to_uri, server_for, uri_to_path, utf16_column},
-    text::Position,
+    lsp::{path_to_uri, server_for, uri_to_path},
+    text::{Position, byte_column, utf16_column},
 };
 use gpui::{Context, Entity, Pixels, Point, Subscription, Task, deferred, div, prelude::*, px};
 use serde_json::{Value, json};
@@ -142,7 +142,7 @@ impl EditorPane {
         let line = (line as usize).min(self.buffer.line_count() - 1);
         let text = self.buffer.line(line);
         let column = match encoding {
-            Encoding::Utf16 => byte_column(text, character),
+            Encoding::Utf16 => byte_column(text, character as usize),
             Encoding::Utf8 => character as usize,
         };
         self.buffer.clamp(Position::new(line, column))
@@ -151,7 +151,7 @@ impl EditorPane {
     fn position_for_server(&self, position: Position, encoding: Encoding) -> Value {
         let character = match encoding {
             Encoding::Utf16 => utf16_column(self.buffer.line(position.line), position.column),
-            Encoding::Utf8 => position.column as u32,
+            Encoding::Utf8 => position.column,
         };
         json!({"line": position.line, "character": character})
     }

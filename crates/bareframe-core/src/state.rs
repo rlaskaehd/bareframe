@@ -328,7 +328,8 @@ fn text_of(word: &str) -> Option<Option<String>> {
         .map(Some)
 }
 
-fn escape(bytes: &[u8]) -> String {
+/// Percent-encodes everything but unreserved characters and `/`; also used for `file://` URIs.
+pub(crate) fn escape(bytes: &[u8]) -> String {
     bytes
         .iter()
         .map(|&byte| {
@@ -341,7 +342,7 @@ fn escape(bytes: &[u8]) -> String {
         .collect()
 }
 
-fn unescape(word: &str) -> Option<Vec<u8>> {
+pub(crate) fn unescape(word: &str) -> Option<Vec<u8>> {
     let mut bytes = Vec::with_capacity(word.len());
     let mut input = word.bytes();
     while let Some(byte) = input.next() {

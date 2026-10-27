@@ -134,53 +134,15 @@ pub fn read_message(reader: &mut impl BufRead) -> io::Result<Option<String>> {
 /// The `file://` URI of an absolute path, with everything but unreserved characters and
 /// `/` percent-encoded.
 pub fn path_to_uri(path: &Path) -> String {
-    let mut uri = String::from("file://");
-    for byte in path.as_os_str().as_encoded_bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
-                uri.push(*byte as char)
-            }
-            _ => uri.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    uri
+    format!(
+        "file://{}",
+        crate::state::escape(path.as_os_str().as_encoded_bytes())
+    )
 }
 
 pub fn uri_to_path(uri: &str) -> Option<PathBuf> {
-    let encoded = uri.strip_prefix("file://")?.as_bytes();
-    let mut bytes = Vec::with_capacity(encoded.len());
-    let mut index = 0;
-    while index < encoded.len() {
-        if encoded[index] == b'%' {
-            let hex = std::str::from_utf8(encoded.get(index + 1..index + 3)?).ok()?;
-            bytes.push(u8::from_str_radix(hex, 16).ok()?);
-            index += 3;
-        } else {
-            bytes.push(encoded[index]);
-            index += 1;
-        }
-    }
+    let bytes = crate::state::unescape(uri.strip_prefix("file://")?)?;
     Some(PathBuf::from(String::from_utf8(bytes).ok()?))
-}
-
-/// A byte column in `line` as UTF-16 code units, LSP's default position encoding.
-pub fn utf16_column(line: &str, byte: usize) -> u32 {
-    line[..byte.min(line.len())]
-        .chars()
-        .map(|c| c.len_utf16() as u32)
-        .sum()
-}
-
-/// A UTF-16 column in `line` as a byte column on a char boundary (clamped to the line).
-pub fn byte_column(line: &str, utf16: u32) -> usize {
-    let mut units = 0;
-    for (byte, c) in line.char_indices() {
-        if units >= utf16 {
-            return byte;
-        }
-        units += c.len_utf16() as u32;
-    }
-    line.len()
 }
 
 #[cfg(test)]
@@ -218,17 +180,6 @@ mod tests {
         );
         assert_eq!(uri_to_path(&uri).unwrap(), path);
         assert!(uri_to_path("https://x").is_none());
-    }
-
-    #[test]
-    fn columns_convert_between_bytes_and_utf16() {
-        let line = "a한😀b";
-        // a=1 byte/1 unit, 한=3/1, 😀=4/2.
-        assert_eq!(utf16_column(line, 4), 2);
-        assert_eq!(utf16_column(line, 8), 4);
-        assert_eq!(byte_column(line, 2), 4);
-        assert_eq!(byte_column(line, 4), 8);
-        assert_eq!(byte_column(line, 99), line.len());
     }
 
     #[test]

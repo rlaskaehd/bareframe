@@ -114,11 +114,7 @@ impl Buffer {
     pub fn clamp(&self, position: Position) -> Position {
         let line = position.line.min(self.lines.len() - 1);
         let text = &self.lines[line];
-        let mut column = position.column.min(text.len());
-        while !text.is_char_boundary(column) {
-            column -= 1;
-        }
-        Position::new(line, column)
+        Position::new(line, text.floor_char_boundary(position.column))
     }
 
     pub fn slice(&self, range: Range<Position>) -> String {
@@ -392,14 +388,7 @@ impl Buffer {
         for (index, line) in self.lines.iter().enumerate() {
             let length = line.encode_utf16().count();
             if offset <= length {
-                let mut units = 0;
-                for (column, ch) in line.char_indices() {
-                    if units >= offset {
-                        return Position::new(index, column);
-                    }
-                    units += ch.len_utf16();
-                }
-                return Position::new(index, line.len());
+                return Position::new(index, byte_column(line, offset));
             }
             offset -= length + 1;
         }
@@ -432,6 +421,27 @@ fn joins(last: &Edit, edit: &Edit) -> bool {
     let deleting = last.new.is_empty() && edit.new.is_empty();
     (typing && end_of(last.start, &last.new) == edit.start && !edit.new.starts_with(' '))
         || (deleting && end_of(edit.start, &edit.old) == last.start)
+}
+
+/// A byte column in `line` as UTF-16 code units, as macOS input methods and LSP's default
+/// position encoding count.
+pub fn utf16_column(line: &str, byte: usize) -> usize {
+    line[..byte.min(line.len())]
+        .chars()
+        .map(char::len_utf16)
+        .sum()
+}
+
+/// A UTF-16 column in `line` as a byte column on a char boundary (clamped to the line).
+pub fn byte_column(line: &str, utf16: usize) -> usize {
+    let mut units = 0;
+    for (byte, c) in line.char_indices() {
+        if units >= utf16 {
+            return byte;
+        }
+        units += c.len_utf16();
+    }
+    line.len()
 }
 
 #[cfg(test)]
@@ -599,5 +609,16 @@ mod tests {
             (buffer.indent(0), buffer.indent(1), buffer.indent(2)),
             ("    ", "\t", "")
         );
+    }
+
+    #[test]
+    fn columns_convert_between_bytes_and_utf16() {
+        let line = "a한😀b";
+        // a=1 byte/1 unit, 한=3/1, 😀=4/2.
+        assert_eq!(utf16_column(line, 4), 2);
+        assert_eq!(utf16_column(line, 8), 4);
+        assert_eq!(byte_column(line, 2), 4);
+        assert_eq!(byte_column(line, 4), 8);
+        assert_eq!(byte_column(line, 99), line.len());
     }
 }
