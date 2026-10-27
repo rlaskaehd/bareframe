@@ -82,6 +82,7 @@ impl WorkspaceView {
             .on_action(cx.listener(|view, _: &RenameTab, window, cx| {
                 // The name is edited in place on the tab's card.
                 view.sidebar_open = true;
+                view.reveal_active_tab(cx);
                 let id = view.model.active().id;
                 view.start_rename(RenameTarget::Tab(id), window, cx)
             }))

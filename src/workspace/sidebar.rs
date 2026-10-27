@@ -90,6 +90,22 @@ impl WorkspaceView {
         )
     }
 
+    /// Brings the active tab's card on screen: its group expanded, a filter hiding it gone.
+    pub(super) fn reveal_active_tab(&mut self, cx: &Context<Self>) {
+        if let Some(id) = self.model.active().group
+            && self.model.group(id).is_some_and(|group| group.collapsed)
+        {
+            self.model.toggle_group(id);
+        }
+        let active = self.model.active_tab;
+        if self
+            .search_matches(cx)
+            .is_some_and(|matches| !matches.contains(&active))
+        {
+            self.search = None;
+        }
+    }
+
     pub(super) fn group_label(&self, id: GroupId) -> String {
         self.model
             .group(id)
