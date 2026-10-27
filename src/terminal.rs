@@ -12,10 +12,10 @@ use bareframe_core::{
     },
 };
 use gpui::{
-    AppContext, Bounds, Context, ElementInputHandler, Entity, EntityInputHandler, EventEmitter,
-    FocusHandle, KeyDownEvent, KeyUpEvent, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels,
-    Point, ScrollDelta, ScrollWheelEvent, Subscription, Task, UTF16Selection, Window, canvas, div,
-    point, prelude::*, px, size,
+    AppContext, Bounds, Context, DispatchPhase, ElementInputHandler, Entity, EntityInputHandler,
+    EventEmitter, FocusHandle, KeyDownEvent, KeyUpEvent, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, Pixels, Point, ScrollDelta, ScrollWheelEvent, Subscription, Task, UTF16Selection,
+    Window, canvas, div, point, prelude::*, px, size,
 };
 use gpui_libghostty::{
     __private::{
@@ -35,6 +35,8 @@ pub struct GhosttyAdapter {
     theme_state: TerminalThemeState,
     focus: FocusHandle,
     bounds: Bounds<Pixels>,
+    /// The mouse button held down on this terminal, followed past its edge until released.
+    pressed: Option<gpui::MouseButton>,
     composition: Composition,
     started: bool,
     exited: bool,
@@ -96,6 +98,7 @@ impl GhosttyAdapter {
                 theme_state,
                 focus,
                 bounds: Bounds::default(),
+                pressed: None,
                 composition: Composition::default(),
                 started: false,
                 exited: false,
@@ -282,6 +285,7 @@ impl GhosttyAdapter {
     }
 
     fn mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        self.pressed = Some(event.button);
         self.focus.focus(window, cx);
         self.sync_focus(window);
         self.mouse_position(event.position, event.modifiers);
@@ -295,6 +299,7 @@ impl GhosttyAdapter {
     }
 
     fn mouse_up(&mut self, event: &MouseUpEvent) {
+        self.pressed = None;
         self.mouse_position(event.position, event.modifiers);
         if let Some(surface) = &mut self.surface {
             surface.mouse_button(
@@ -495,6 +500,7 @@ impl Render for GhosttyAdapter {
         self.sync_focus(window);
         self.start_ticking(cx);
         let weak = cx.entity().downgrade();
+        let outside = weak.clone();
         let input = cx.entity();
         let focus = self.focus.clone();
         let mut element = div()
@@ -526,6 +532,31 @@ impl Render for GhosttyAdapter {
                             ElementInputHandler::new(bounds, input.clone()),
                             cx,
                         );
+                        // The element's own listeners stop at its edge. A selection dragged
+                        // out of the pane keeps following the mouse, and the button let go
+                        // out there still ends it, or Ghostty would keep the button down.
+                        let view = outside.clone();
+                        window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
+                            if phase == DispatchPhase::Bubble && !bounds.contains(&event.position) {
+                                view.update(cx, |view, _| {
+                                    if view.pressed.is_some() {
+                                        view.mouse_position(event.position, event.modifiers)
+                                    }
+                                })
+                                .ok();
+                            }
+                        });
+                        let view = outside.clone();
+                        window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
+                            if phase == DispatchPhase::Bubble && !bounds.contains(&event.position) {
+                                view.update(cx, |view, _| {
+                                    if view.pressed == Some(event.button) {
+                                        view.mouse_up(event)
+                                    }
+                                })
+                                .ok();
+                            }
+                        });
                     },
                 )
                 .absolute()
