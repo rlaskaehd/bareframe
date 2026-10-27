@@ -2,6 +2,7 @@
 //! draws is a piece, numbered in reading order (the ids `render_block` hands out), and a
 //! selection runs from a place in one piece to a place in another.
 use super::MarkdownPane;
+use crate::theme::hsla;
 use gpui::{
     ClipboardItem, Context, Hsla, MouseButton, MouseDownEvent, MouseMoveEvent, StyledText,
     TextLayout, TextRun, div, prelude::*,
@@ -41,19 +42,18 @@ impl MarkdownPane {
     }
 
     /// `text` drawn with `runs` as piece `id`: remembered for copying, its selected part
-    /// shaded, and the mouse on it starts or extends a selection. `wrap` turns the styled
+    /// shaded in the accent color, and the mouse on it starts or extends a selection. `wrap` turns the styled
     /// text into the element to show, so links stay clickable.
     pub(super) fn selectable(
         &self,
         id: usize,
         text: String,
         runs: Vec<TextRun>,
-        shade: Hsla,
         wrap: impl FnOnce(StyledText) -> gpui::AnyElement,
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
         let runs = match self.selected_in(id, text.len()) {
-            Some(range) => shade_runs(runs, range, shade),
+            Some(range) => shade_runs(runs, range, hsla(self.theme.accent).opacity(0.3)),
             None => runs,
         };
         self.pieces.borrow_mut().insert(id, text.clone());

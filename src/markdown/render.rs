@@ -278,7 +278,6 @@ impl MarkdownPane {
                             underline: None,
                             strikethrough: None,
                         }],
-                        hsla(theme.accent).opacity(0.3),
                         IntoElement::into_any_element,
                         cx,
                     )),
@@ -346,7 +345,6 @@ impl MarkdownPane {
                 },
             )
             .collect::<Vec<_>>();
-        let shade = hsla(theme.accent).opacity(0.3);
         let links = move |styled: StyledText| {
             InteractiveText::new(("md-text", id), styled)
                 .on_click(ranges, move |index, _, cx: &mut App| {
@@ -368,7 +366,7 @@ impl MarkdownPane {
             .flex_col()
             .gap_2()
             .when(!text.text.is_empty(), |this| {
-                this.child(self.selectable(id, text.text.clone(), runs, shade, links, cx))
+                this.child(self.selectable(id, text.text.clone(), runs, links, cx))
             })
             .children(images)
             .into_any_element()
