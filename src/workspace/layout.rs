@@ -11,7 +11,7 @@ use gpui::{
 /// A pane lifted by its header: a small card with its title follows the cursor.
 #[derive(Clone)]
 pub(super) struct DraggedPane {
-    pane: PaneId,
+    pub(super) pane: PaneId,
     title: String,
     theme: &'static Theme,
 }

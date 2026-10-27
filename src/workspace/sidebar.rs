@@ -1,5 +1,5 @@
 //! The vertical tabs sidebar: search, groups, tab cards, renaming and drag and drop.
-use super::{PaneView, RenameTarget, WorkspaceView, icon_button};
+use super::{PaneView, RenameTarget, WorkspaceView, icon_button, layout::DraggedPane};
 use crate::{
     rename::{RenameEvent, RenameInput},
     theme::{self, Theme, hsla},
@@ -86,6 +86,20 @@ impl WorkspaceView {
             .collect();
         self.model.move_tabs(&indices, to, group);
         self.dragging.clear();
+        self.sync(window, cx);
+    }
+
+    /// A pane dropped on the sidebar leaves its tab for a new one before `to`, in `group`.
+    fn drop_pane_tab(
+        &mut self,
+        dragged: &DraggedPane,
+        to: usize,
+        group: Option<GroupId>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.end_drag(cx);
+        self.model.detach_pane(dragged.pane, to, group);
         self.sync(window, cx);
     }
 
@@ -396,9 +410,17 @@ impl WorkspaceView {
                             .drag_over::<DraggedTab>(move |style, _, _, _| {
                                 style.bg(hsla(theme.tab_hover))
                             })
+                            .drag_over::<DraggedPane>(move |style, _, _, _| {
+                                style.bg(hsla(theme.tab_hover))
+                            })
                             .on_drop(cx.listener(move |view, dragged: &DraggedTab, window, cx| {
                                 view.drop_tab(dragged, end, None, window, cx)
-                            })),
+                            }))
+                            .on_drop(cx.listener(
+                                move |view, dragged: &DraggedPane, window, cx| {
+                                    view.drop_pane_tab(dragged, end, None, window, cx)
+                                },
+                            )),
                     ),
             )
     }
@@ -429,6 +451,7 @@ impl WorkspaceView {
             .when(holds_active, |this| this.bg(hsla(theme.tab_active)))
             .hover(|style| style.bg(hsla(theme.tab_hover)))
             .drag_over::<DraggedTab>(move |style, _, _, _| style.bg(hsla(theme.tab_active)))
+            .drag_over::<DraggedPane>(move |style, _, _, _| style.bg(hsla(theme.tab_active)))
             .on_click(cx.listener(move |view, _, _, cx| {
                 view.model.toggle_group(id);
                 cx.notify()
@@ -441,6 +464,9 @@ impl WorkspaceView {
             )
             .on_drop(cx.listener(move |view, dragged: &DraggedTab, window, cx| {
                 view.drop_tab(dragged, end, Some(id), window, cx)
+            }))
+            .on_drop(cx.listener(move |view, dragged: &DraggedPane, window, cx| {
+                view.drop_pane_tab(dragged, end, Some(id), window, cx)
             }))
             .child(
                 div()
@@ -627,6 +653,9 @@ impl WorkspaceView {
             .on_drop(cx.listener(move |view, dragged: &DraggedTab, window, cx| {
                 view.drop_tab(dragged, index, group, window, cx)
             }))
+            .on_drop(cx.listener(move |view, dragged: &DraggedPane, window, cx| {
+                view.drop_pane_tab(dragged, index, group, window, cx)
+            }))
             // The lifted card leaves an empty slot behind, as in Warp.
             .map(|this| {
                 if lifted {
@@ -652,6 +681,9 @@ impl WorkspaceView {
                     // group hover gives this one a hitbox.
                     .group_hover(hover.clone(), |style| style)
                     .group_drag_over::<DraggedTab>(hover.clone(), move |style| {
+                        style.bg(hsla(theme.accent))
+                    })
+                    .group_drag_over::<DraggedPane>(hover.clone(), move |style| {
                         style.bg(hsla(theme.accent))
                     }),
             )

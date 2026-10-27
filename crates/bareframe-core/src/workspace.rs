@@ -891,6 +891,34 @@ impl Workspace {
         self.place(target, side, layout, focus)
     }
 
+    /// Drag and drop onto the sidebar: `pane` leaves its tab for a new one placed before
+    /// index `to` (`to == len` appends) in `group`, and takes focus. A pane alone in its
+    /// tab moves with that tab.
+    pub fn detach_pane(&mut self, pane: PaneId, to: usize, group: Option<GroupId>) -> bool {
+        let Some(from) = self.tab_of(pane) else {
+            return false;
+        };
+        if to > self.tabs.len() {
+            return false;
+        }
+        let tab = &mut self.tabs[from];
+        let Some(nearest) = tab.layout.remove(pane) else {
+            self.move_tabs(&[from], to, group);
+            return self.focus(pane);
+        };
+        tab.maximized = false;
+        if tab.active_pane == pane {
+            tab.active_pane = nearest;
+        }
+        let mut tab = self.fresh_tab(pane);
+        tab.group = group.filter(|id| self.group(*id).is_some());
+        self.tabs.insert(to, tab);
+        self.active_tab = to;
+        self.clear_selection();
+        self.normalize();
+        true
+    }
+
     /// Puts `layout` at `side` of `target` and focuses `focus` there.
     fn place(&mut self, target: PaneId, side: Direction, layout: Layout, focus: PaneId) -> bool {
         let Some(index) = self.tab_of(target) else {
@@ -973,6 +1001,26 @@ mod tests {
         assert_eq!(ws.active_pane(), e);
         assert!(ws.tabs.iter().all(|tab| !tab.selected));
         assert!(!ws.merge_tabs(&[ws.tabs[0].id], a, Direction::Right));
+    }
+
+    #[test]
+    fn a_pane_dropped_on_the_sidebar_becomes_its_own_tab() {
+        let (mut ws, a) = Workspace::new();
+        let b = ws.split(Axis::Horizontal);
+        let c = ws.new_tab();
+        // Before the first tab: b leaves a's tab and is focused there.
+        assert!(ws.detach_pane(b, 0, None));
+        assert_eq!(ws.tabs.len(), 3);
+        assert_eq!(ws.tabs[0].layout, Layout::Pane(b));
+        assert_eq!(ws.tabs[1].layout, Layout::Pane(a));
+        assert_eq!(ws.active_pane(), b);
+        // A pane alone in its tab just moves that tab, here to the end.
+        assert!(ws.detach_pane(b, 3, None));
+        assert_eq!(ws.tabs.len(), 3);
+        assert_eq!(ws.tabs[2].layout, Layout::Pane(b));
+        assert_eq!(ws.active_pane(), b);
+        assert!(!ws.detach_pane(c, 9, None));
+        assert!(!ws.detach_pane(PaneId(99), 0, None));
     }
 
     #[test]
