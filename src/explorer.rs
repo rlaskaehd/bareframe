@@ -257,10 +257,7 @@ impl Explorer {
     fn rows(&mut self) -> Vec<Row> {
         let mut rows = Vec::new();
         for root in self.roots.clone() {
-            let name = root.file_name().map_or_else(
-                || root.display().to_string(),
-                |name| name.to_string_lossy().into(),
-            );
+            let name = file_name(&root);
             let expanded = self.expanded.contains(&root);
             rows.push(Row {
                 path: root.clone(),
@@ -453,6 +450,14 @@ impl Render for Explorer {
                 .px_1(),
             )
     }
+}
+
+/// The last part of `path` for display, or the whole path when it has none (`/`).
+pub fn file_name(path: &Path) -> String {
+    path.file_name().map_or_else(
+        || path.display().to_string(),
+        |name| name.to_string_lossy().into(),
+    )
 }
 
 /// A tree row's fold mark: down when `open`.

@@ -510,10 +510,7 @@ impl MarkdownPane {
     }
 
     pub fn file_name(&self) -> String {
-        self.path.file_name().map_or_else(
-            || self.path.display().to_string(),
-            |name| name.to_string_lossy().into(),
-        )
+        crate::explorer::file_name(&self.path)
     }
 
     pub fn focus(&self, window: &mut Window, cx: &mut Context<Self>) {

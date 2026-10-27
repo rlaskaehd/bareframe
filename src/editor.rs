@@ -245,10 +245,7 @@ impl EditorPane {
     }
 
     pub fn file_name(&self) -> String {
-        let name = self.path.file_name().map_or_else(
-            || self.path.display().to_string(),
-            |name| name.to_string_lossy().into(),
-        );
+        let name = crate::explorer::file_name(&self.path);
         if self.buffer.is_dirty() {
             format!("{name} ●")
         } else {

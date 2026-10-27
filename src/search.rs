@@ -1,7 +1,7 @@
 //! Global search: ripgrep's library over the explorer's roots, streamed into a tree of
 //! files and matching lines, as in Warp's tools panel.
 use crate::{
-    explorer::{chevron, icon},
+    explorer::{chevron, file_name, icon},
     rename::{RenameEvent, RenameInput},
     theme::{self, Theme, hsla},
 };
@@ -439,13 +439,6 @@ impl SearchPanel {
 
 fn plural(count: usize) -> &'static str {
     if count == 1 { "" } else { "s" }
-}
-
-fn file_name(path: &Path) -> String {
-    path.file_name().map_or_else(
-        || path.display().to_string(),
-        |name| name.to_string_lossy().into(),
-    )
 }
 
 fn badge(theme: &Theme, count: usize) -> impl IntoElement {
