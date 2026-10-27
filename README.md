@@ -1,4 +1,4 @@
-# bareframe
+# BareFrame
 
 Rust + GPUI + libghostty로 만든 macOS용 개발 워크스페이스 터미널.
 
@@ -9,57 +9,35 @@ Rust + GPUI + libghostty로 만든 macOS용 개발 워크스페이스 터미널.
 
 Apple Silicon Mac(macOS 14 이상)에서 동작한다.
 
-## 개발 실행
+## 설치
 
 ```sh
-./script/bootstrap
-./script/run --clean-shell
-./script/run --cwd ~/my-project
+curl -fsSL https://raw.githubusercontent.com/rlaskaehd/bareframe/main/install.sh | sh
 ```
 
-`bootstrap`은 Zig 0.16.0과 Cargo 의존성을 준비하고 앱을 빌드한다.
-도구는 `.tools/`, Cargo 캐시는 `.cache/`, 빌드 산출물은 `target/`을 기본 경로로 사용한다.
-Rust 1.98.1은 `rust-toolchain.toml`로 선택하며 전역 기본 toolchain을 변경하지 않는다.
+최신 릴리스를 받아 SHA-256을 확인하고 `/Applications`(쓸 수 없으면 `~/Applications`)에 넣는다.
+그 뒤의 새 버전은 앱이 상단 바에서 알려 주고, 누르면 서명을 확인한 뒤 스스로 바꾼다.
 
-## 검증
+Apple 공증을 받지 않은 자체 서명 앱이다. 설치 스크립트로 받으면 그대로 열리지만, 릴리스 페이지에서
+브라우저로 zip을 받았다면 처음 열 때 시스템 설정 › 개인정보 보호 및 보안에서 "그래도 열기"를 눌러야 한다.
+지울 때는 앱을 휴지통에 넣고, 설정과 창 배치는 `~/.config/bareframe`에 있다.
+
+## 소스에서 빌드
 
 ```sh
-./script/check-core  # UI 의존성 없이 모델 테스트와 native shim 검사
-./script/check       # 의존성 준비 후 전체 Rust 검사와 빌드
+./script/bootstrap   # Zig 0.16.0과 Cargo 의존성을 준비하고 빌드
+./script/run         # 바로 실행
+./script/check       # fmt, Clippy, 테스트, 빌드
 ```
 
-## 배포용 번들
-
-```sh
-./script/bundle            # 매일 쓰는 디버그 번들: target/bareframe.app
-./script/bundle --release  # 남에게 줄 최적화 번들: target/dist/bareframe.app
-```
-
-`--release` 번들은 Apple Silicon 전용이고, `LICENSE`와 내장한 모든 크레이트·아이콘의 라이선스를 모은
-`THIRD_PARTY_NOTICES.txt`를 `Resources`에 넣는다. 그대로는 임시 서명(ad-hoc)이라 브라우저로 받은
-사람은 처음 열 때 Finder에서 우클릭 › 열기를 해야 한다. 앱 아이콘은
-`docs/brand/icon/bareframe-icon-1024.png`가 있을 때만 들어간다.
-
-GitHub Release는 이렇게 만든다(업로드는 손으로).
-
-```sh
-./script/make-signing-identity   # 처음 한 번: 자체 서명 코드 서명 인증서를 로그인 키체인에
-./script/release                 # target/dist/v<버전>/에 zip, .sha256, .sig
-```
-
-- 같은 인증서로 서명해야 업데이트 뒤에도 사용자가 준 개인정보 보호 권한이 유지된다.
-- 앱의 업데이트 확인은 태그 `v<Cargo.toml의 version>`인 최신 릴리스에서
-  `bareframe-<버전>-macos-arm64.zip`과 `.sig`를 찾고, 서명을 앱에 들어 있는 공개 키로 확인한다.
-- 서명 키(`update-key`)와 인증서 사본은 `~/.config/bareframe-release`에만 있고 저장소에는
-  넣지 않는다. 잃어버리면 이미 설치된 앱은 더는 자동 업데이트를 받지 못하므로 따로 백업한다.
-- `bareframe-release`는 `cargo build`가 함께 만드는 관리자용 도구다(`keygen`, `sign FILE`, `notices OUT`).
+필요한 도구와 의존성 고정은 [빌드 안내](docs/build.md)에 있다.
 
 ## 문서
 
 - [사용 안내](docs/usage.md): 실행, 화면 구성, Settings, 단축키, 업데이트.
 - [빌드 안내](docs/build.md): 필요한 도구, 의존성 고정, 검사 명령.
 - [구조](docs/architecture.md): 모듈 배치와 설계 원칙.
-- [고치고 넓히기](docs/customizing.md): 설정·동작·색·언어를 더하는 곳, 포크 배포.
+- [Customizing](docs/customizing.md): 설정·동작·색·언어를 더하는 곳, 포크 배포.
 
 ## 라이선스
 

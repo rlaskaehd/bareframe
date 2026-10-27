@@ -186,7 +186,7 @@ cursor-style = bar    # block | bar | underline
 
 ## 업데이트
 
-설치한 릴리스 빌드(`script/release`로 만든 앱)는 시작하고 15초 뒤, 그 뒤로 하루에 한 번 GitHub Releases(`rlaskaehd/bareframe`)의 최신 릴리스를 확인한다. 새 버전이 있으면 상단 바에 `Update to vX.Y.Z`가 뜨고, 누르면 받아서 서명(Ed25519)을 확인한 뒤 앱을 바꾸고 다시 연다. 저장하지 않은 편집기가 있으면 종료 확인을 먼저 묻는다. 메뉴 bareframe › Check for Updates…는 지금 바로 확인하고, 최신이거나 실패했을 때도 상단 바에 알려 준다(누르면 사라짐). 자동 확인은 Settings › Features › General에서 끈다. 디버그 빌드와 검증 인스턴스는 스스로 바뀌지 않는다.
+설치 스크립트나 GitHub Releases로 설치한 앱은 시작하고 15초 뒤, 그 뒤로 하루에 한 번 GitHub Releases(`rlaskaehd/bareframe`)의 최신 릴리스를 확인한다. 새 버전이 있으면 상단 바에 `Update to vX.Y.Z`가 뜨고, 누르면 받아서 서명(Ed25519)을 확인한 뒤 앱을 바꾸고 다시 연다. 저장하지 않은 편집기가 있으면 종료 확인을 먼저 묻는다. 메뉴 bareframe › Check for Updates…는 지금 바로 확인하고, 최신이거나 실패했을 때도 상단 바에 알려 준다(누르면 사라짐). 자동 확인은 Settings › Features › General에서 끈다. 디버그 빌드와 검증 인스턴스는 스스로 바뀌지 않는다.
 
 ## 그 밖의 단축키와 종료
 

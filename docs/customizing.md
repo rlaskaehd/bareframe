@@ -1,4 +1,4 @@
-# 고치고 넓히기
+# Customizing
 
 bareframe을 직접 고치거나 포크해 쓰려는 사람을 위한 안내다. 무엇이 어디에 있는지는
 [구조](architecture.md), 빌드 준비는 [빌드 안내](build.md)를 먼저 본다.
@@ -51,7 +51,7 @@ bareframe을 직접 고치거나 포크해 쓰려는 사람을 위한 안내다.
    `src/file_icons.rs`의 `BY_EXTENSION`에 더한다. 아이콘 출처와 라이선스는 `assets/icons/README.md`에
    적는다.
 
-### 언어 서버 더하기
+### LSP 더하기
 
 core의 `lsp.rs` `SERVERS`에 실행 파일, 인자, 설치 명령, 확장자와 LSP 언어 id를 적는다.
 서버는 사용자의 로그인 셸 PATH에서 찾고, 사용자가 상태 줄에서 켜기 전에는 실행하지 않는다.
@@ -72,8 +72,9 @@ core의 `lsp.rs` `SERVERS`에 실행 파일, 인자, 설치 명령, 확장자와
 | 업데이트 서명 공개 키 | 같은 파일의 `PUBLIC_KEY`(`bareframe-release keygen`이 출력) |
 | 번들 id | `src/update/install.rs`의 `BUNDLE_ID`와 `script/bundle`의 `CFBundleIdentifier` |
 
-키를 만들고 릴리스하는 순서는 [README의 배포용 번들](../README.md#배포용-번들)을 따른다.
-개인 키는 `~/.config/bareframe-release`에만 두고 저장소에 넣지 않는다.
+릴리스 도구는 `script/bundle --release`, `script/release`, `script/make-signing-identity`와
+`bareframe-release`(`keygen`, `sign`, `notices`)다. 개인 키는 `~/.config/bareframe-release`에만 두고
+저장소에 넣지 않는다.
 
 ## 라이선스
 
