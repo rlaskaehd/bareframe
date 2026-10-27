@@ -27,10 +27,12 @@ Rust 1.98.1은 `rust-toolchain.toml`로 선택하며 전역 기본 toolchain을 
 
 ## 구조
 
-- `crates/bareframe-core`: GPUI에 의존하지 않는 세션·Pane 식별자, 상태, 이벤트, 설정, IME 조합 모델.
-- `src/workspace.rs`: Workspace 상태와 터미널 Pane의 수명 관리.
-- `src/workspace/`: 사이드바(`sidebar.rs`), 메뉴(`menu.rs`), 분할 레이아웃(`layout.rs`) 렌더.
-- `src/terminal/adapter.rs`: GPUI 입력과 Ghostty 연결. native 자원은 이 계층이 관리한다.
+- `crates/bareframe-core`: GPUI에 의존하지 않는 모델. 탭·그룹(`workspace.rs`), 분할 레이아웃(`layout.rs`), 상태 저장, 설정·키맵, git 출력 해석, 텍스트 버퍼, IME 조합.
+- `src/app.rs`: 앱 시작과 창. 액션·키 바인딩은 `actions.rs`, 메뉴바는 `menu_bar.rs`, 설정·상태 파일은 `files.rs`.
+- `src/workspace.rs`: 창 하나의 뷰 상태와 Pane 수명. `src/workspace/` 아래에 사이드바, 분할 레이아웃, 드래그 앤 드롭(`drag.rs`), 사이드 열 크기(`columns.rs`), 액션 배선(`commands.rs`), 저장·복원(`persist.rs`), 설정 적용(`prefs.rs`) 등이 기능별로 있다.
+- `src/terminal.rs`: GPUI 입력과 Ghostty 연결. native 자원은 이 계층이 관리한다.
+- `src/editor/`, `src/markdown/`: 코드 편집기와 Markdown 뷰어. 그리기·찾기·파일·파싱을 모듈로 나눴다.
+- `src/widgets.rs`, `src/theme.rs`: 여러 패널이 쓰는 작은 위젯과 색 테마.
 - `vendor/gpui-libghostty`: 고정된 upstream 사본과 macOS 통합 수정.
 - `reference/`: 변경하지 않는 upstream 참조 자료.
 
