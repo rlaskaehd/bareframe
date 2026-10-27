@@ -19,6 +19,18 @@ pub enum Direction {
     Down,
 }
 
+impl Direction {
+    /// The axis of the split that puts a pane on this side, and whether it comes first.
+    pub(crate) fn placement(self) -> (Axis, bool) {
+        match self {
+            Self::Left => (Axis::Horizontal, true),
+            Self::Right => (Axis::Horizontal, false),
+            Self::Up => (Axis::Vertical, true),
+            Self::Down => (Axis::Vertical, false),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Layout {
     Pane(PaneId),
@@ -120,12 +132,7 @@ impl Layout {
     pub(crate) fn insert(&mut self, target: PaneId, side: Direction, new: Layout) -> bool {
         match self {
             Self::Pane(id) if *id == target => {
-                let (axis, before) = match side {
-                    Direction::Left => (Axis::Horizontal, true),
-                    Direction::Right => (Axis::Horizontal, false),
-                    Direction::Up => (Axis::Vertical, true),
-                    Direction::Down => (Axis::Vertical, false),
-                };
+                let (axis, before) = side.placement();
                 let (target, new) = (Box::new(Self::Pane(target)), Box::new(new));
                 let (first, second) = if before { (new, target) } else { (target, new) };
                 *self = Self::Split {

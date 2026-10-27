@@ -674,26 +674,18 @@ impl Workspace {
             .filter_map(|&id| self.tab_index(id))
             .filter(|&index| index != into)
             .collect();
-        let taken = self.take(&indices);
-        let Some(focus) = taken.first().map(|tab| tab.active_pane) else {
+        let mut taken = self.take(&indices).into_iter();
+        let Some(first) = taken.next() else {
             return false;
         };
-        let axis = match side {
-            Direction::Left | Direction::Right => Axis::Horizontal,
-            Direction::Up | Direction::Down => Axis::Vertical,
-        };
-        let Some(layout) = taken
-            .into_iter()
-            .map(|tab| tab.layout)
-            .reduce(|first, second| Layout::Split {
-                axis,
-                ratio: 0.5,
-                first: Box::new(first),
-                second: Box::new(second),
-            })
-        else {
-            return false;
-        };
+        let (axis, _) = side.placement();
+        let focus = first.active_pane;
+        let layout = taken.fold(first.layout, |first, tab| Layout::Split {
+            axis,
+            ratio: 0.5,
+            first: Box::new(first),
+            second: Box::new(tab.layout),
+        });
         self.place(target, side, layout, focus)
     }
 
