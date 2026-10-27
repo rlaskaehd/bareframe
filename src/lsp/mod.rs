@@ -92,12 +92,8 @@ struct Document {
 
 pub struct LanguageServers {
     enabled: HashSet<Key>,
-    /// Per project: rustup's proxies pick a toolchain by directory, and one project's
-    /// toolchain may have rust-analyzer where another's lacks it. Until the user enables a
-    /// project, the server is only tried from the home folder: run inside the project,
-    /// rustup would obey the project's `rust-toolchain.toml`, which can name a program in
-    /// the repository, and merely opening a file would run it.
-    installed: HashMap<Key, Installed>,
+    /// Per server binary: the globally installed one is used for every project.
+    installed: HashMap<&'static str, Installed>,
     running: HashMap<Key, Running>,
     documents: HashMap<PathBuf, Document>,
     /// Looks again for a server being installed in a terminal.
@@ -158,7 +154,7 @@ impl LanguageServers {
             did_open(client, path, &document);
         }
         self.documents.insert(path.to_path_buf(), document);
-        self.check_installed(server, key.clone(), cx);
+        self.check_installed(server, cx);
         if self.enabled.contains(&key) {
             self.start(server, key, cx);
         }
@@ -225,7 +221,7 @@ impl LanguageServers {
                 progress: running.progress.last().map(|(_, text)| text.as_str()),
             });
         }
-        Some(match self.installed.get(&key) {
+        Some(match self.installed.get(server.binary) {
             None | Some(Installed::Checking) => Status::Checking,
             Some(Installed::Missing) => Status::Install(server),
             Some(Installed::Found(_)) => Status::Enable(server, crate::explorer::file_name(&key.1)),
@@ -269,10 +265,7 @@ impl LanguageServers {
         };
         self.enabled.insert(key.clone());
         save_enabled(&self.enabled);
-        // Look again from inside the project, now that the user trusts it; the server
-        // starts once found.
-        self.installed.remove(&key);
-        self.check_installed(server, key, cx);
+        self.start(server, key, cx);
     }
 
     pub fn disable(&mut self, path: &Path, cx: &mut Context<Self>) {
@@ -298,7 +291,7 @@ impl LanguageServers {
     /// The footer's Install runs the server's install command in a terminal; meanwhile the
     /// server is looked for every few seconds, for up to ten minutes.
     pub fn watch_install(&mut self, path: &Path, cx: &mut Context<Self>) {
-        let Some((key, server, _)) = key_for(path) else {
+        let Some((_, server, _)) = key_for(path) else {
             return;
         };
         self._recheck = Some(cx.spawn(async move |servers, cx| {
@@ -306,11 +299,11 @@ impl LanguageServers {
             while started.elapsed() < Duration::from_secs(600) {
                 cx.background_executor().timer(Duration::from_secs(3)).await;
                 let found = servers.update(cx, |servers, cx| {
-                    let installed = servers.installed.get(&key);
+                    let installed = servers.installed.get(server.binary);
                     let found = matches!(installed, Some(Installed::Found(_)));
                     if !found && !matches!(installed, Some(Installed::Checking)) {
-                        servers.installed.remove(&key);
-                        servers.check_installed(server, key.clone(), cx);
+                        servers.installed.remove(server.binary);
+                        servers.check_installed(server, cx);
                     }
                     found
                 });
@@ -329,35 +322,30 @@ impl LanguageServers {
         }
     }
 
-    /// Looks for the server on the login shell's PATH once per project, off the UI thread.
-    fn check_installed(&mut self, server: &'static Server, key: Key, cx: &mut Context<Self>) {
-        if self.installed.contains_key(&key) {
+    /// Looks for the server on the login shell's PATH once, off the UI thread.
+    fn check_installed(&mut self, server: &'static Server, cx: &mut Context<Self>) {
+        if self.installed.contains_key(server.binary) {
             return;
         }
-        self.installed.insert(key.clone(), Installed::Checking);
-        let trusted = self.enabled.contains(&key);
+        self.installed.insert(server.binary, Installed::Checking);
         cx.spawn(async move |servers, cx| {
-            let root = match trusted {
-                true => key.1.clone(),
-                false => crate::files::home_dir().unwrap_or_else(std::env::temp_dir),
-            };
             let found = cx
                 .background_executor()
-                .spawn(async move { find_server(server, &root) })
+                .spawn(async move { find_server(server) })
                 .await;
             servers
                 .update(cx, |servers, cx| {
-                    let installed = match found {
-                        Some(binary) => Installed::Found(binary),
-                        None => Installed::Missing,
-                    };
-                    let found = matches!(installed, Installed::Found(_));
-                    servers.installed.insert(key.clone(), installed);
-                    let open = servers
+                    servers.installed.insert(
+                        server.binary,
+                        found.map_or(Installed::Missing, Installed::Found),
+                    );
+                    let keys: Vec<Key> = servers
                         .documents
                         .values()
-                        .any(|document| document.key == key);
-                    if found && open && servers.enabled.contains(&key) {
+                        .map(|document| document.key.clone())
+                        .filter(|key| key.0 == server.binary && servers.enabled.contains(key))
+                        .collect();
+                    for key in keys {
                         servers.start(server, key, cx);
                     }
                     cx.emit(LspEvent::Updated);
@@ -371,7 +359,7 @@ impl LanguageServers {
         if self.running.contains_key(&key) {
             return;
         }
-        let Some(Installed::Found(binary)) = self.installed.get(&key) else {
+        let Some(Installed::Found(binary)) = self.installed.get(server.binary) else {
             return;
         };
         let log = std::env::temp_dir().join(format!("bareframe-{}.log", server.binary));
@@ -602,29 +590,44 @@ fn diagnostic(value: &Value) -> Option<Diagnostic> {
     })
 }
 
-/// The server's executable on the login shell's PATH, if it works when run from `dir`.
-fn find_server(server: &Server, dir: &Path) -> Option<PathBuf> {
+/// The globally installed server: found on the login shell's PATH and tried from the home
+/// folder. rustup's proxy in `~/.cargo/bin` is swapped for the binary of the default
+/// toolchain, which `rustup which` names: run as the proxy inside a project, the server
+/// would follow that project's `rust-toolchain.toml`, which may lack it or, in an untrusted
+/// repository, name a program of its own.
+fn find_server(server: &Server) -> Option<PathBuf> {
     use std::os::unix::fs::PermissionsExt;
     let path = login_path()?;
-    let binary = std::env::split_paths(path)
+    let home = crate::files::home_dir()?;
+    let run = |program: &Path, args: &[&str]| {
+        Command::new(program)
+            .args(args)
+            .current_dir(&home)
+            .env("PATH", path)
+            // Set when bareframe itself was started through cargo; it would pin the
+            // toolchain to bareframe's own.
+            .env_remove("RUSTUP_TOOLCHAIN")
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+    };
+    let mut binary = std::env::split_paths(path)
         .map(|dir| dir.join(server.binary))
         .find(|file| {
             file.metadata()
                 .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
         })?;
-    let Some(probe) = server.probe else {
-        return Some(binary);
-    };
-    Command::new(&binary)
-        .args(probe)
-        .current_dir(dir)
-        .env("PATH", path)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success())
-        .then_some(binary)
+    let rustup = binary.with_file_name("rustup");
+    if rustup.is_file() {
+        let output = run(&rustup, &["which", server.binary])?;
+        binary = PathBuf::from(String::from_utf8(output.stdout).ok()?.trim());
+    }
+    match server.probe {
+        Some(probe) => run(&binary, probe).map(|_| binary),
+        None => Some(binary),
+    }
 }
 
 /// PATH as the user's login shell sets it, so servers in `~/.cargo/bin` or npm's global

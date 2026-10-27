@@ -8,10 +8,7 @@ use crate::{
     widgets,
 };
 use bareframe_core::{
-    lsp::{
-        byte_column, install_command, path_to_uri, project_root, server_for, uri_to_path,
-        utf16_column,
-    },
+    lsp::{byte_column, path_to_uri, server_for, uri_to_path, utf16_column},
     text::Position,
 };
 use gpui::{Context, Entity, Pixels, Point, Subscription, Task, deferred, div, prelude::*, px};
@@ -347,7 +344,6 @@ impl EditorPane {
                 .rounded_sm()
                 .text_color(hsla(theme.text))
         };
-        let root = project_root(&self.path);
         Some(match status {
             Status::Checking => row.child("Looking for a language server…"),
             Status::Install(server) => row
@@ -355,7 +351,7 @@ impl EditorPane {
                 .child(
                     action("lsp-install", format!("Install {}", server.binary)).on_click(
                         cx.listener(move |editor, _, _, cx| {
-                            editor.install_language_server(install_command(server, &root), cx)
+                            editor.install_language_server(server.install, cx)
                         }),
                     ),
                 ),
@@ -429,14 +425,15 @@ impl EditorPane {
         }
     }
 
-    /// Runs the install command in a terminal, where its output shows, from the home folder
-    /// rather than the project (see `install_command`), and keeps looking for the server.
-    fn install_language_server(&mut self, command: String, cx: &mut Context<Self>) {
+    /// Runs the install command in a terminal, where its output shows. It runs from the
+    /// home folder: servers are installed globally, and tools like npm take settings from
+    /// the directory they run in. Meanwhile the server is looked for again.
+    fn install_language_server(&mut self, command: &str, cx: &mut Context<Self>) {
         let Some(home) = crate::files::home_dir() else {
             return;
         };
         self.with_servers(cx, |servers, path, cx| servers.watch_install(path, cx));
-        cx.emit(EditorEvent::RunInTerminal(command, home));
+        cx.emit(EditorEvent::RunInTerminal(command.to_owned(), home));
     }
 }
 

@@ -30,6 +30,8 @@ impl Client {
         command
             .args(args)
             .current_dir(root)
+            // The project's toolchain, not the one bareframe may have been started with.
+            .env_remove("RUSTUP_TOOLCHAIN")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(std::fs::File::create(log).map_or_else(|_| Stdio::null(), Stdio::from));
