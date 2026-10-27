@@ -136,6 +136,7 @@ pub fn bind_keys(settings: &Settings, cx: &mut App) {
     cx.bind_keys(crate::rename::key_bindings());
     cx.bind_keys(crate::explorer::key_bindings());
     cx.bind_keys(crate::editor::key_bindings());
+    cx.bind_keys(crate::markdown::key_bindings());
     let (bindings, warnings) = keymap::resolve(&settings.keybinds);
     for warning in warnings {
         eprintln!("bareframe: settings: {warning}");

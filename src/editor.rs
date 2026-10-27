@@ -73,6 +73,7 @@ actions!(
 const KEY_CONTEXT: &str = "Editor";
 /// Find, go to line and save apply anywhere in the editor pane, find field included.
 const FILE_CONTEXT: &str = "EditorFile";
+const MARKDOWN_FILE_CONTEXT: &str = "EditorFile Markdown";
 /// Files larger than this open read-only: every edit copies a line vector this long.
 const MAX_EDITABLE: u64 = 5 << 20;
 const LINE_HEIGHT: f32 = 1.45;
@@ -82,6 +83,8 @@ pub enum EditorEvent {
     Changed,
     /// The user chose Save or Don't Save when asked; the pane may go.
     Close,
+    /// A Markdown file's `Rendered` view was asked for, and nothing unsaved is in the way.
+    ShowRendered,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -150,6 +153,8 @@ pub struct EditorPane {
     disk: String,
     /// "Don't Save" was chosen: closing no longer asks.
     discarded: bool,
+    /// The question about unsaved changes was asked to switch to `Rendered`, not to close.
+    to_rendered: bool,
     layout: Option<Layout>,
     /// The grammar for this file's colors, if one is bundled.
     language: Option<&'static str>,
@@ -218,6 +223,7 @@ impl EditorPane {
             read_only: size > MAX_EDITABLE || error.is_some(),
             notice: error.map(Notice::Error),
             discarded: false,
+            to_rendered: false,
             layout: None,
             language: None,
             find: None,
@@ -284,9 +290,33 @@ impl EditorPane {
         if !self.buffer.is_dirty() || self.discarded {
             return true;
         }
+        self.to_rendered = false;
         self.notice = Some(Notice::ConfirmClose);
         cx.notify();
         false
+    }
+
+    /// `Rendered` for a Markdown file: straight away, or once unsaved changes are settled.
+    fn show_rendered(&mut self, cx: &mut Context<Self>) {
+        if !crate::markdown::is_markdown(&self.path) {
+            return;
+        }
+        if self.buffer.is_dirty() && !self.discarded {
+            self.to_rendered = true;
+            self.notice = Some(Notice::ConfirmClose);
+            cx.notify();
+        } else {
+            cx.emit(EditorEvent::ShowRendered);
+        }
+    }
+
+    /// After Save or Don't Save: on to what the question was asked for.
+    fn settled(&mut self, cx: &mut Context<Self>) {
+        cx.emit(if std::mem::take(&mut self.to_rendered) {
+            EditorEvent::ShowRendered
+        } else {
+            EditorEvent::Close
+        });
     }
 
     /// Moves the cursor to a 1-based line, as a search result asks.
@@ -1047,11 +1077,16 @@ impl EditorPane {
         };
         let (message, buttons): (String, Vec<gpui::Stateful<gpui::Div>>) = match notice {
             Notice::ConfirmClose => (
-                format!("Save changes to {name} before closing?"),
+                if self.to_rendered {
+                    format!("Save changes to {name} before showing it rendered?")
+                } else {
+                    format!("Save changes to {name} before closing?")
+                },
                 vec![
                     button("editor-close-cancel", "Cancel", false).on_click(cx.listener(
                         |editor, _, _, cx| {
                             editor.notice = None;
+                            editor.to_rendered = false;
                             cx.notify();
                         },
                     )),
@@ -1059,13 +1094,13 @@ impl EditorPane {
                         |editor, _, _, cx| {
                             editor.discarded = true;
                             editor.notice = None;
-                            cx.emit(EditorEvent::Close);
+                            editor.settled(cx);
                         },
                     )),
                     button("editor-close-save", "Save", true).on_click(cx.listener(
                         |editor, _, _, cx| {
                             if editor.save(cx) {
-                                cx.emit(EditorEvent::Close);
+                                editor.settled(cx);
                             }
                         },
                     )),
@@ -1548,6 +1583,7 @@ impl Element for EditorElement {
 impl Render for EditorPane {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = self.theme;
+        let markdown = crate::markdown::is_markdown(&self.path);
         let editing = div()
             .flex_1()
             .min_h_0()
@@ -1704,7 +1740,25 @@ impl Render for EditorPane {
             .flex()
             .flex_col()
             .bg(hsla(theme.terminal_background))
-            .key_context(FILE_CONTEXT)
+            // A Markdown file's raw view answers both the file's keys and Cmd+E.
+            .key_context(if markdown {
+                MARKDOWN_FILE_CONTEXT
+            } else {
+                FILE_CONTEXT
+            })
+            .when(markdown, |this| {
+                this.on_action(
+                    cx.listener(|e, _: &crate::markdown::ToggleRaw, _, cx| e.show_rendered(cx)),
+                )
+                .child(crate::markdown::view_switch(theme, true, {
+                    let editor = cx.entity().downgrade();
+                    move |_, cx| {
+                        editor
+                            .update(cx, |editor, cx| editor.show_rendered(cx))
+                            .ok();
+                    }
+                }))
+            })
             .on_action(cx.listener(|e, _: &Save, _, cx| {
                 e.save(cx);
             }))

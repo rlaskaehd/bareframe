@@ -9,6 +9,62 @@ use gpui::{
 };
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+
+gpui::actions!(markdown, [ToggleRaw]);
+
+/// Keys of a Markdown file's pane, rendered or raw.
+pub const KEY_CONTEXT: &str = "Markdown";
+
+pub fn key_bindings() -> Vec<gpui::KeyBinding> {
+    vec![gpui::KeyBinding::new("cmd-e", ToggleRaw, Some(KEY_CONTEXT))]
+}
+
+/// Warp's `Rendered | Raw` switch above a Markdown file, in both of its views.
+pub fn view_switch(
+    theme: &'static Theme,
+    raw: bool,
+    on_switch: impl Fn(&mut Window, &mut App) + 'static,
+) -> impl IntoElement {
+    let on_switch = std::rc::Rc::new(on_switch);
+    let segment = |id: &'static str, label: &'static str, chosen: bool| {
+        let on_switch = on_switch.clone();
+        div()
+            .id(id)
+            .px_2()
+            .py(px(1.0))
+            .rounded_sm()
+            .when(chosen, |this| {
+                this.bg(hsla(theme.tab_active)).text_color(hsla(theme.text))
+            })
+            .when(!chosen, |this| {
+                this.text_color(hsla(theme.text_muted))
+                    .hover(|style| style.text_color(hsla(theme.text)))
+                    .on_click(move |_, window, cx| on_switch(window, cx))
+            })
+            .child(label)
+    };
+    div()
+        .flex()
+        .flex_none()
+        .justify_end()
+        .px_3()
+        .py_1()
+        .border_b_1()
+        .border_color(hsla(theme.border))
+        .font_family(theme::UI_FONT)
+        .text_size(px(12.0))
+        .child(
+            div()
+                .flex()
+                .gap_1()
+                .p(px(2.0))
+                .rounded_md()
+                .border_1()
+                .border_color(hsla(theme.border))
+                .child(segment("view-rendered", "Rendered", !raw))
+                .child(segment("view-raw", "Raw", raw)),
+        )
+}
 use std::{
     ops::Range,
     path::{Path, PathBuf},
@@ -415,6 +471,8 @@ pub enum MarkdownEvent {
     Open(Target),
     /// A shell code block's text, for the terminal next to the viewer.
     Insert(String),
+    /// Show the file's text in the editor instead (`Raw`, Cmd+E).
+    ShowRaw,
 }
 
 pub struct MarkdownPane {
@@ -852,10 +910,17 @@ impl Render for MarkdownPane {
                 .map(|block| self.render_block(block, &mut ids, cx))
                 .collect(),
         };
-        div()
+        let switch = view_switch(self.theme, false, {
+            let pane = cx.entity().downgrade();
+            move |_, cx| {
+                pane.update(cx, |_, cx| cx.emit(MarkdownEvent::ShowRaw))
+                    .ok();
+            }
+        });
+        let content = div()
             .id("markdown")
-            .track_focus(&self.focus)
-            .size_full()
+            .flex_1()
+            .min_h_0()
             .overflow_y_scroll()
             .track_scroll(&self.scroll)
             .bg(hsla(theme.terminal_background))
@@ -875,7 +940,17 @@ impl Render for MarkdownPane {
                         .gap_3()
                         .children(blocks),
                 ),
-            )
+            );
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .key_context(KEY_CONTEXT)
+            .track_focus(&self.focus)
+            .bg(hsla(theme.terminal_background))
+            .on_action(cx.listener(|_, _: &ToggleRaw, _, cx| cx.emit(MarkdownEvent::ShowRaw)))
+            .child(switch)
+            .child(content)
     }
 }
 

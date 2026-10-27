@@ -87,10 +87,28 @@ impl WorkspaceView {
             move |view, _, event, window, cx| match event {
                 EditorEvent::Changed => cx.notify(),
                 EditorEvent::Close => view.close_pane(id, window, cx),
+                EditorEvent::ShowRendered => view.swap_view(id, false, window, cx),
             },
         );
         self.panes
             .insert(id, (PaneView::Editor(pane), Some(events)));
+    }
+
+    /// A Markdown file's two views trade places in the same pane.
+    fn swap_view(&mut self, id: PaneId, raw: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let path = match self.pane(id) {
+            Some(PaneView::Markdown(pane)) if raw => pane.read(cx).path().to_path_buf(),
+            Some(PaneView::Editor(pane)) if !raw => pane.read(cx).path().to_path_buf(),
+            _ => return,
+        };
+        self.panes.remove(&id);
+        if raw {
+            self.insert_editor_pane(id, path, window, cx);
+        } else {
+            self.insert_markdown_pane(id, path, window, cx);
+        }
+        self.model.focus(id);
+        self.sync(window, cx);
     }
 
     pub(super) fn apply_editor_options(
@@ -166,6 +184,7 @@ impl WorkspaceView {
                 }
                 MarkdownEvent::Open(Target::File(path)) => open_externally(path),
                 MarkdownEvent::Insert(text) => view.insert_into_terminal(id, text, window, cx),
+                MarkdownEvent::ShowRaw => view.swap_view(id, true, window, cx),
             },
         );
         self.panes
