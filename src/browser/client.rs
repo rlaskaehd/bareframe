@@ -93,12 +93,13 @@ wrap_focus_handler! {
     impl FocusHandler {
         fn on_set_focus(
             &self,
-            _browser: Option<&mut Browser>,
+            browser: Option<&mut Browser>,
             _source: FocusSource,
         ) -> ::std::os::raw::c_int {
             // The page gets the keyboard when its pane is focused or the user clicks it, never
             // by itself (a load, or a script): keys typed in the terminal beside it stay there.
-            (!self.keyboard.load(Ordering::Relaxed) && !mac::clicking()).into()
+            let view = browser.and_then(|browser| browser.host()).map(|host| host.window_handle());
+            (!self.keyboard.load(Ordering::Relaxed) && !view.is_some_and(mac::clicking)).into()
         }
 
         fn on_got_focus(&self, _browser: Option<&mut Browser>) {

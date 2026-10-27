@@ -135,12 +135,6 @@ pub fn in_run_loop() -> bool {
 pub fn between_events(work: impl FnOnce() + 'static) -> Result<(), String> {
     teach_application()?;
     WAITING.with_borrow_mut(|waiting| waiting.push(Box::new(work)));
-    #[repr(C)]
-    struct CGPoint(f64, f64);
-    // SAFETY: matches CoreGraphics' `CGPoint`.
-    unsafe impl Encode for CGPoint {
-        const ENCODING: Encoding = Encoding::Struct("CGPoint", &[f64::ENCODING, f64::ENCODING]);
-    }
     // SAFETY: makes and posts an application-defined NSEvent on the main thread.
     unsafe {
         let event: *mut AnyObject = objc2::msg_send![
@@ -161,8 +155,12 @@ pub fn between_events(work: impl FnOnce() + 'static) -> Result<(), String> {
     Ok(())
 }
 
-/// Whether the event being handled is a mouse button going down: the user clicking.
-pub fn clicking() -> bool {
+/// Whether the user is clicking in `view`: the last event is a mouse button going down at a
+/// point inside it. Any click elsewhere (on the terminal beside it, say) doesn't count.
+pub fn clicking(view: *mut c_void) -> bool {
+    let Some(view) = object(view) else {
+        return false;
+    };
     // SAFETY: plain AppKit getters on the main thread, where Chromium's callbacks run.
     unsafe {
         let app: *mut AnyObject = objc2::msg_send![class!(NSApplication), sharedApplication];
@@ -172,7 +170,24 @@ pub fn clicking() -> bool {
         }
         let kind: u64 = event.send_message(Sel::register(c"type"), ());
         // NSEventTypeLeftMouseDown, RightMouseDown, OtherMouseDown.
-        matches!(kind, 1 | 3 | 25)
+        if !matches!(kind, 1 | 3 | 25) {
+            return false;
+        }
+        let window: *mut AnyObject = objc2::msg_send![view, window];
+        let clicked: *mut AnyObject = objc2::msg_send![event, window];
+        if window.is_null() || window != clicked {
+            return false;
+        }
+        let point: CGPoint = objc2::msg_send![event, locationInWindow];
+        let content: *mut AnyObject = objc2::msg_send![window, contentView];
+        let parent: *mut AnyObject = objc2::msg_send![content, superview];
+        let root = if parent.is_null() { content } else { parent };
+        let hit: *mut AnyObject = objc2::msg_send![root, hitTest: point];
+        if hit.is_null() {
+            return false;
+        }
+        let inside: Bool = objc2::msg_send![hit, isDescendantOf: view];
+        inside.as_bool()
     }
 }
 
@@ -183,6 +198,14 @@ pub fn gpui_view(window: &Window) -> Option<*mut c_void> {
         RawWindowHandle::AppKit(handle) => Some(handle.ns_view.as_ptr()),
         _ => None,
     }
+}
+
+#[repr(C)]
+struct CGPoint(f64, f64);
+
+// SAFETY: matches CoreGraphics' `CGPoint` layout and encoding.
+unsafe impl Encode for CGPoint {
+    const ENCODING: Encoding = Encoding::Struct("CGPoint", &[f64::ENCODING, f64::ENCODING]);
 }
 
 #[repr(C)]
