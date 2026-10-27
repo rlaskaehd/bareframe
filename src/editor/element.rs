@@ -1,10 +1,7 @@
 //! Laying out and painting the text: syntax colors, the gutter, the selection, find
 //! matches, the cursor and the text being composed.
 use super::{EditorPane, LINE_HEIGHT, LineNumbers, MAX_LINE};
-use crate::{
-    syntax::{self, Syntax},
-    theme::{Theme, hsla},
-};
+use crate::{syntax, theme::hsla};
 use bareframe_core::text::Position;
 use gpui::{
     App, Bounds, Context, ElementId, ElementInputHandler, Entity, GlobalElementId, LayoutId,
@@ -58,7 +55,7 @@ impl EditorPane {
                     && text.is_char_boundary(range.start)
                     && text.is_char_boundary(range.end)
             })
-            .map(|(range, syntax)| (range.clone(), hsla(syntax_color(self.theme, *syntax))))
+            .map(|(range, syntax)| (range.clone(), hsla(syntax::color(self.theme, *syntax))))
             .collect();
         let marked = self
             .marked
@@ -491,17 +488,4 @@ fn selected_span(
         shaped.width + px(6.0)
     };
     Some((start, end))
-}
-
-/// The terminal palette's colors, so code looks like the rest of the theme.
-fn syntax_color(theme: &Theme, syntax: Syntax) -> u32 {
-    match syntax {
-        Syntax::Keyword => theme.palette[5],
-        Syntax::String => theme.palette[2],
-        Syntax::Comment => theme.text_muted,
-        Syntax::Number => theme.palette[3],
-        Syntax::Function => theme.palette[4],
-        Syntax::Type => theme.palette[6],
-        Syntax::Tag | Syntax::Builtin => theme.palette[1],
-    }
 }

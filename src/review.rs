@@ -3,14 +3,16 @@
 //! hunk and committing. Git runs off the UI thread (see `repo`).
 use crate::{
     repo::{self, Base, FileReview},
+    syntax::{self, LineSyntax},
     text_field::{TextField, TextFieldEvent},
     theme::{self, Theme, hsla},
     widgets,
 };
 use bareframe_core::git::{Change, Entry, LineKind, Status};
 use gpui::{
-    AnyElement, ClipboardItem, Context, Entity, EventEmitter, FontWeight, ListAlignment,
-    ListOffset, ListState, Subscription, Task, Window, div, list, prelude::*, px,
+    AnyElement, ClipboardItem, Context, Entity, EventEmitter, FontWeight, HighlightStyle,
+    ListAlignment, ListOffset, ListState, StyledText, Subscription, Task, Window, div, list,
+    prelude::*, px,
 };
 use std::{
     collections::HashSet,
@@ -51,6 +53,8 @@ pub struct CodeReview {
     base: Base,
     status: Status,
     files: Vec<FileReview>,
+    /// Syntax colors per file, hunk and line, worked out with the diff.
+    colors: Vec<Vec<Vec<LineSyntax>>>,
     branches: Vec<String>,
     collapsed: HashSet<String>,
     rows: Vec<Row>,
@@ -84,6 +88,7 @@ impl CodeReview {
             base: Base::Uncommitted,
             status: Status::default(),
             files: Vec::new(),
+            colors: Vec::new(),
             branches: Vec::new(),
             collapsed: HashSet::new(),
             rows: Vec::new(),
@@ -149,14 +154,18 @@ impl CodeReview {
                         .as_ref()
                         .ok()
                         .and_then(|review| repo::commit_blocker(&root, &review.status));
-                    (review, repo::branches(&root), blocker)
+                    let colors = review.as_ref().map_or_else(
+                        |_| Vec::new(),
+                        |review| review.files.iter().map(file_colors).collect(),
+                    );
+                    (review, repo::branches(&root), blocker, colors)
                 })
                 .await;
             this.update(cx, |this, cx| {
                 if this.generation != generation {
                     return;
                 }
-                let (review, branches, blocker) = loaded;
+                let (review, branches, blocker, colors) = loaded;
                 this.loading = false;
                 this.branches = branches;
                 this.blocker = blocker;
@@ -164,6 +173,7 @@ impl CodeReview {
                     Ok(review) => {
                         this.status = review.status;
                         this.files = review.files;
+                        this.colors = colors;
                         this.error = None;
                     }
                     Err(error) => this.error = Some(error),
@@ -681,15 +691,33 @@ impl CodeReview {
             .into_any_element()
     }
 
-    fn render_line(&self, index: usize, hunk: usize, line: usize) -> AnyElement {
+    fn render_line(&self, index: usize, hunk: usize, line_index: usize) -> AnyElement {
         let theme = self.theme;
         let Some(line) = self.files[index]
             .diff
             .as_ref()
-            .map(|diff| &diff.hunks[hunk].lines[line])
+            .map(|diff| &diff.hunks[hunk].lines[line_index])
         else {
             return div().into_any_element();
         };
+        let text = line.text.trim_end_matches('\r').to_owned();
+        let colors: Vec<(std::ops::Range<usize>, HighlightStyle)> = self
+            .colors
+            .get(index)
+            .and_then(|hunks| hunks.get(hunk))
+            .and_then(|lines| lines.get(line_index))
+            .into_iter()
+            .flatten()
+            .filter(|(range, _)| {
+                range.end <= text.len()
+                    && text.is_char_boundary(range.start)
+                    && text.is_char_boundary(range.end)
+            })
+            .map(|(range, syntax)| {
+                let color = hsla(syntax::color(theme, *syntax));
+                (range.clone(), HighlightStyle::color(color))
+            })
+            .collect();
         let (sign, tint) = match line.kind {
             LineKind::Added => ("+", Some(theme.palette[2])),
             LineKind::Removed => ("-", Some(theme.palette[1])),
@@ -730,7 +758,7 @@ impl CodeReview {
                     .when(line.kind == LineKind::NoNewline, |this| {
                         this.text_color(hsla(theme.text_muted))
                     })
-                    .child(line.text.trim_end_matches('\r').to_owned()),
+                    .child(StyledText::new(text).with_highlights(colors)),
             )
             .into_any_element()
     }
@@ -893,6 +921,18 @@ impl Render for CodeReview {
                 .flex_1()
                 .pb_2(),
             )
+    }
+}
+
+/// One file's syntax colors per hunk and line; none for a language without a grammar.
+fn file_colors(file: &FileReview) -> Vec<Vec<LineSyntax>> {
+    let language = syntax::language_for(Path::new(&file.path));
+    let hunks = file.diff.iter().flat_map(|diff| &diff.hunks);
+    match language {
+        Some(language) => hunks
+            .map(|hunk| syntax::highlight_hunk(language, hunk))
+            .collect(),
+        None => Vec::new(),
     }
 }
 

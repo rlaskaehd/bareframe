@@ -1,6 +1,7 @@
 //! Syntax colors for the code editor: tree-sitter grammars (bundled by `arborium`) turn a
 //! file into spans, flattened here into one color class per stretch of each line.
 use arborium::{GrammarStore, Highlighter};
+use bareframe_core::git::{Hunk, LineKind};
 use std::{
     ops::Range,
     sync::{Arc, OnceLock},
@@ -23,6 +24,19 @@ pub enum Syntax {
 
 /// A line's colored stretches: byte ranges into the line, in order, not overlapping.
 pub type LineSyntax = Vec<(Range<usize>, Syntax)>;
+
+/// The terminal palette's colors, so code looks like the rest of the theme.
+pub fn color(theme: &crate::theme::Theme, syntax: Syntax) -> u32 {
+    match syntax {
+        Syntax::Keyword => theme.palette[5],
+        Syntax::String => theme.palette[2],
+        Syntax::Comment => theme.text_muted,
+        Syntax::Number => theme.palette[3],
+        Syntax::Function => theme.palette[4],
+        Syntax::Type => theme.palette[6],
+        Syntax::Tag | Syntax::Builtin => theme.palette[1],
+    }
+}
 
 pub fn language_for(path: &std::path::Path) -> Option<&'static str> {
     let name = path.file_name()?.to_str()?;
@@ -95,6 +109,33 @@ pub fn highlight(language: &str, text: &str) -> Option<Vec<LineSyntax>> {
     Some(lines)
 }
 
+/// Colors for a diff hunk's lines. The old side (context and removed lines) and the new
+/// side (context and added lines) are each parsed as one text, so every line is colored
+/// in the code it belongs to; context lines take the new side's colors.
+pub fn highlight_hunk(language: &str, hunk: &Hunk) -> Vec<LineSyntax> {
+    let mut colors = vec![Vec::new(); hunk.lines.len()];
+    let sides: [fn(LineKind) -> bool; 2] = [
+        |kind| matches!(kind, LineKind::Context | LineKind::Removed),
+        |kind| matches!(kind, LineKind::Context | LineKind::Added),
+    ];
+    for on_side in sides {
+        let picked: Vec<usize> = (0..hunk.lines.len())
+            .filter(|&index| on_side(hunk.lines[index].kind))
+            .collect();
+        let text = picked
+            .iter()
+            .map(|&index| hunk.lines[index].text.trim_end_matches('\r'))
+            .collect::<Vec<_>>()
+            .join("\n");
+        if let Some(lines) = highlight(language, &text) {
+            for (line, index) in lines.into_iter().zip(picked) {
+                colors[index] = line;
+            }
+        }
+    }
+    colors
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -120,6 +161,39 @@ mod tests {
                 .iter()
                 .any(|(range, syntax)| *syntax == Syntax::String && range.start == 12)
         );
+    }
+
+    #[test]
+    fn hunks_are_colored_on_their_own_side() {
+        let line = |kind, text: &str| bareframe_core::git::Line {
+            kind,
+            old: None,
+            new: None,
+            text: text.into(),
+        };
+        let hunk = Hunk {
+            header: "@@ -1,2 +1,2 @@".into(),
+            lines: vec![
+                line(LineKind::Context, "fn main() {"),
+                line(LineKind::Removed, "    let a = \"old\";"),
+                line(LineKind::Added, "    // new\r"),
+                line(LineKind::NoNewline, "\\ No newline at end of file"),
+            ],
+        };
+        let colors = highlight_hunk("rust", &hunk);
+        assert_eq!(colors.len(), 4);
+        assert!(
+            colors[0].contains(&(0..2, Syntax::Keyword)),
+            "{:?}",
+            colors[0]
+        );
+        assert!(
+            colors[1]
+                .iter()
+                .any(|(_, syntax)| *syntax == Syntax::String)
+        );
+        assert_eq!(colors[2], [(4..10, Syntax::Comment)]);
+        assert!(colors[3].is_empty());
     }
 
     #[test]
