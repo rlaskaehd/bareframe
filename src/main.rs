@@ -4,6 +4,12 @@ compile_error!("bareframe currently targets macOS");
 mod actions;
 mod app;
 mod assets;
+// macOS's allocator never gave back what syntax highlighting freed: tree-sitter's C
+// allocations interleaved with Rust's large buffers grew the heap by about the file's
+// size times nine on every edit. mimalloc reuses it.
+#[global_allocator]
+static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 mod browser;
 mod diagram;
 mod editor;

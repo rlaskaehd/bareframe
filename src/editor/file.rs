@@ -86,7 +86,7 @@ impl EditorPane {
         // Written in place, so the file keeps its permissions, owner and hard links.
         match std::fs::write(&self.path, &text) {
             Ok(()) => {
-                self.disk = text;
+                self.disk = super::fingerprint(&text);
                 self.buffer.mark_saved();
                 self.language_saved(cx);
                 self.notice = None;
@@ -107,7 +107,7 @@ impl EditorPane {
             return;
         };
         self.buffer = Buffer::new(&text);
-        self.disk = text;
+        self.disk = super::fingerprint(&text);
         self.anchor = self.buffer.clamp(self.anchor);
         self.head = self.buffer.clamp(self.head);
         self.marked = None;
@@ -121,7 +121,7 @@ impl EditorPane {
         let Ok(text) = std::fs::read_to_string(&self.path) else {
             return;
         };
-        if text == self.disk {
+        if super::fingerprint(&text) == self.disk {
             return;
         }
         if self.buffer.is_dirty() {
@@ -183,7 +183,9 @@ impl EditorPane {
                     button("editor-keep", "Keep my changes", false).on_click(cx.listener(
                         |editor, _, _, cx| {
                             // Saving now would overwrite the outside change, as asked.
-                            editor.disk = std::fs::read_to_string(&editor.path).unwrap_or_default();
+                            editor.disk = super::fingerprint(
+                                &std::fs::read_to_string(&editor.path).unwrap_or_default(),
+                            );
                             editor.notice = None;
                             cx.notify();
                         },

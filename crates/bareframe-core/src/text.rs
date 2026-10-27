@@ -42,6 +42,10 @@ struct Edit {
 
 /// Typing and deleting within this long of the previous key undo together.
 const GROUP: Duration = Duration::from_millis(1000);
+/// Undo reaches back this many edits, and this much text: older ones are forgotten. A
+/// replace-all on a large file is one edit holding the whole file twice.
+const HISTORY_EDITS: usize = 1000;
+const HISTORY_BYTES: usize = 64 << 20;
 
 #[derive(Clone, Debug)]
 pub struct Buffer {
@@ -178,9 +182,31 @@ impl Buffer {
             _ => {
                 self.history.push(edit);
                 self.applied += 1;
+                self.forget_oldest();
             }
         }
         after
+    }
+
+    /// Keeps the history within `HISTORY_EDITS` and `HISTORY_BYTES`, always keeping the
+    /// newest edit. Called right after a push, when every edit is applied.
+    fn forget_oldest(&mut self) {
+        let size = |edit: &Edit| edit.old.len() + edit.new.len();
+        let mut bytes: usize = self.history.iter().map(size).sum();
+        let mut forget = 0;
+        while forget + 1 < self.history.len()
+            && (self.history.len() - forget > HISTORY_EDITS || bytes > HISTORY_BYTES)
+        {
+            bytes -= size(&self.history[forget]);
+            forget += 1;
+        }
+        if forget == 0 {
+            return;
+        }
+        self.history.drain(..forget);
+        self.applied -= forget;
+        // A save among the forgotten edits can't be undone back to any more.
+        self.saved = self.saved.and_then(|saved| saved.checked_sub(forget));
     }
 
     /// The text change itself, without history. Returns where `text` ends.
@@ -485,6 +511,32 @@ mod tests {
         buffer.redo();
         assert_eq!(buffer.text(), "hey\nnew\nwold\n");
         assert_eq!(buffer.slice(p(0, 1)..p(2, 1)), "ey\nnew\nw");
+    }
+
+    #[test]
+    fn history_forgets_the_oldest_edits() {
+        let mut buffer = Buffer::new("");
+        let t = Instant::now();
+        // Each edit a second apart, so none group.
+        for index in 0..HISTORY_EDITS + 5 {
+            let end = buffer.end();
+            buffer.replace(end..end, "\n", t + Duration::from_secs(index as u64 * 2));
+        }
+        assert_eq!(buffer.history.len(), HISTORY_EDITS);
+        assert!(
+            buffer.is_dirty(),
+            "the saved state was forgotten, so it stays dirty"
+        );
+        while buffer.undo().is_some() {}
+        assert_eq!(buffer.line_count(), 6, "undo stops at the oldest edit kept");
+        buffer.mark_saved();
+        assert!(!buffer.is_dirty());
+        let big = "x".repeat(HISTORY_BYTES / 2 + 1);
+        let end = buffer.end();
+        buffer.replace(end..end, &big, t + Duration::from_secs(10_000));
+        let end = buffer.end();
+        buffer.replace(end..end, &big, t + Duration::from_secs(10_002));
+        assert_eq!(buffer.history.len(), 1, "too large to keep both");
     }
 
     #[test]

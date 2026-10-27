@@ -45,9 +45,10 @@ impl WorkspaceView {
         self.repo = found;
         if moved {
             self._repo_watch = root.clone().and_then(|root| self.watch_repo(root, cx));
-            self.review
-                .update(cx, |review, cx| review.set_root(root, cx));
-        } else if changed && self.review_open {
+            self.review.update(cx, |review, _| review.set_root(root));
+        }
+        // Diffs are read only for the open panel.
+        if (moved || changed) && self.review_open {
             self.review.update(cx, |review, cx| review.reload(cx));
         }
         cx.notify();
@@ -100,6 +101,7 @@ impl WorkspaceView {
             self.refresh_repo(true, cx);
             self.review.update(cx, |review, cx| review.reload(cx));
         } else {
+            self.review.update(cx, |review, cx| review.unload(cx));
             self.sync(window, cx);
         }
         cx.notify();

@@ -140,8 +140,9 @@ pub struct EditorPane {
     font_size: f32,
     read_only: bool,
     notice: Option<Notice>,
-    /// The file as last read or written, so our own save isn't taken for an outside edit.
-    disk: String,
+    /// A hash of the file as last read or written, so our own save isn't taken for an
+    /// outside edit; a hash rather than a second copy of the file.
+    disk: u64,
     /// "Don't Save" was chosen: closing no longer asks.
     discarded: bool,
     /// The question about unsaved changes was asked to switch to `Rendered`, not to close.
@@ -178,7 +179,7 @@ impl EditorPane {
         };
         let mut editor = Self {
             buffer: Buffer::new(&text),
-            disk: text,
+            disk: fingerprint(&text),
             path,
             anchor: Position::default(),
             head: Position::default(),
@@ -796,6 +797,14 @@ pub fn key_bindings() -> Vec<gpui::KeyBinding> {
         KeyBinding::new("shift-enter", Newline, context),
         KeyBinding::new("ctrl-g", GoToLine, Some(FILE_CONTEXT)),
     ]
+}
+
+/// A file's contents, hashed to tell an outside edit from our own save.
+fn fingerprint(text: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    text.hash(&mut hasher);
+    hasher.finish()
 }
 
 #[cfg(test)]

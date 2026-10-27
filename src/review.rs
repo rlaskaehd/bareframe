@@ -115,8 +115,9 @@ impl CodeReview {
         cx.notify();
     }
 
-    /// The repository to show; a new one starts again from "Uncommitted changes".
-    pub fn set_root(&mut self, root: Option<PathBuf>, cx: &mut Context<Self>) {
+    /// The repository to show; a new one starts again from "Uncommitted changes". Read by
+    /// the next `reload`, once the panel is open.
+    pub fn set_root(&mut self, root: Option<PathBuf>) {
         if root == self.root {
             return;
         }
@@ -125,7 +126,17 @@ impl CodeReview {
         self.collapsed.clear();
         self.pending = None;
         self.commit = None;
-        self.reload(cx);
+    }
+
+    /// The panel closed: its diffs and their colors are let go until it opens again.
+    pub fn unload(&mut self, cx: &mut Context<Self>) {
+        self.generation += 1;
+        self._load = None;
+        self.loading = false;
+        self.files = Vec::new();
+        self.colors = Vec::new();
+        self.rebuild_rows();
+        cx.notify();
     }
 
     pub fn reload(&mut self, cx: &mut Context<Self>) {
