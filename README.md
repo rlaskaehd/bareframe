@@ -29,9 +29,24 @@ Rust 1.98.1은 `rust-toolchain.toml`로 선택하며 전역 기본 toolchain을 
 ./script/bundle --release  # 남에게 줄 최적화 번들: target/dist/bareframe.app
 ```
 
-`--release` 번들은 Apple Silicon 전용이고 임시 서명(ad-hoc)이라, 받은 사람은 처음 열 때
-Finder에서 우클릭 › 열기를 해야 한다. 앱 아이콘은 `docs/brand/icon/bareframe-icon-1024.png`가
-있을 때만 들어간다.
+`--release` 번들은 Apple Silicon 전용이고, `LICENSE`와 내장한 모든 크레이트·아이콘의 라이선스를 모은
+`THIRD_PARTY_NOTICES.txt`를 `Resources`에 넣는다. 그대로는 임시 서명(ad-hoc)이라 브라우저로 받은
+사람은 처음 열 때 Finder에서 우클릭 › 열기를 해야 한다. 앱 아이콘은
+`docs/brand/icon/bareframe-icon-1024.png`가 있을 때만 들어간다.
+
+GitHub Release는 이렇게 만든다(업로드는 손으로).
+
+```sh
+./script/make-signing-identity   # 처음 한 번: 자체 서명 코드 서명 인증서를 로그인 키체인에
+./script/release                 # target/dist/v<버전>/에 zip, .sha256, .sig
+```
+
+- 같은 인증서로 서명해야 업데이트 뒤에도 사용자가 준 개인정보 보호 권한이 유지된다.
+- 앱의 업데이트 확인은 태그 `v<Cargo.toml의 version>`인 최신 릴리스에서
+  `bareframe-<버전>-macos-arm64.zip`과 `.sig`를 찾고, 서명을 앱에 들어 있는 공개 키로 확인한다.
+- 서명 키(`update-key`)와 인증서 사본은 `~/.config/bareframe-release`에만 있고 저장소에는
+  넣지 않는다. 잃어버리면 이미 설치된 앱은 더는 자동 업데이트를 받지 못하므로 따로 백업한다.
+- `bareframe-release`는 `cargo build`가 함께 만드는 관리자용 도구다(`keygen`, `sign FILE`, `notices OUT`).
 
 현재 실행한 검증과 남은 항목은 [MVP 1 검증 기록](docs/mvp-1-validation.md)에 구분해 기록한다.
 실행 방법은 [사용 안내](docs/usage.md), 의존성은 [빌드 안내](docs/build.md)를 참조한다.

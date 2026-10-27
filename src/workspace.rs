@@ -121,6 +121,7 @@ pub struct WorkspaceView {
     config_text: String,
     dark_appearance: bool,
     _appearance: Subscription,
+    _updates: Subscription,
     _config_watch: Option<crate::watch::Watch>,
 }
 
@@ -205,6 +206,7 @@ impl WorkspaceView {
                 view.dark_appearance = prefs::is_dark(window.appearance());
                 view.apply_settings(cx);
             }),
+            _updates: cx.observe(&crate::update::global(cx), |_, _, cx| cx.notify()),
             _config_watch: None,
             // ponytail: compares the encoded layout every 2s instead of tracking each
             // change; switch to change notifications if the layout ever gets large.
@@ -227,6 +229,7 @@ impl WorkspaceView {
             }
         }
         view.watch_config(cx);
+        view.apply_update_setting(cx);
         view.sync(window, cx);
         view
     }

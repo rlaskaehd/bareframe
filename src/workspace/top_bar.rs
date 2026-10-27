@@ -90,6 +90,7 @@ impl WorkspaceView {
                     ),
             )
             .child(div().flex_1())
+            .children(self.render_update_chip(cx))
             .children(self.render_diff_button(cx))
             .child(
                 div()
@@ -111,6 +112,44 @@ impl WorkspaceView {
                             .text_color(hsla(theme.text_muted)),
                     ),
             )
+    }
+
+    /// A new release on offer, the install under way, or how a check from the menu ended.
+    fn render_update_chip(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+        use crate::update::State;
+        let theme = self.theme();
+        let updates = crate::update::global(cx);
+        let (label, color) = match &updates.read(cx).state {
+            State::Idle | State::Checking => return None,
+            State::Available(release) => (format!("Update to v{}", release.version), theme.accent),
+            State::Installing(version) => (format!("Installing v{version}…"), theme.text_muted),
+            State::UpToDate => ("bareframe is up to date".to_owned(), theme.text_muted),
+            State::Failed(error) => (format!("Update failed: {error}"), theme.text_muted),
+        };
+        Some(
+            div()
+                .id("update-chip")
+                .flex()
+                .items_center()
+                .mr_2()
+                .px_2()
+                .h(px(24.0))
+                .max_w(px(360.0))
+                .overflow_hidden()
+                .rounded_md()
+                .text_size(px(12.0))
+                .font_weight(gpui::FontWeight::SEMIBOLD)
+                .text_color(hsla(color))
+                .hover(|style| style.bg(hsla(theme.tab_hover)))
+                .on_click(move |_, _, cx| {
+                    cx.stop_propagation();
+                    updates.update(cx, |updates, cx| match updates.state {
+                        State::Available(_) => updates.install(cx),
+                        _ => updates.dismiss(cx),
+                    })
+                })
+                .child(div().truncate().child(label)),
+        )
     }
 }
 

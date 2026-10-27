@@ -301,6 +301,16 @@ pub const DEFS: &[Def] = &[
     def(
         Features,
         "General",
+        "check-for-updates",
+        "Check for updates automatically",
+        "Looks for a new release on GitHub at startup and once a day; installing waits for you.",
+        Toggle,
+        "true",
+        App,
+    ),
+    def(
+        Features,
+        "General",
         "mouse-scroll-multiplier",
         "Mouse wheel scroll speed",
         "Multiplies the lines scrolled by each wheel step.",

@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Builds a release to upload to GitHub by hand: the app signed with the release certificate,
+# zipped the way the updater looks for it, with its SHA-256 and Ed25519 signature, all in
+# target/dist/v<version>/. The release tag must be v<version>.
+set -euo pipefail
+source "$(dirname "$0")/env"
+cd "$BAREFRAME_ROOT"
+identity="${BAREFRAME_SIGN_IDENTITY:-bareframe Release}"
+if ! security find-certificate -c "$identity" >/dev/null 2>&1; then
+    echo "no \"$identity\" certificate in the keychain; run script/make-signing-identity first" >&2
+    exit 1
+fi
+if grep -q PUBLIC_KEY_PLACEHOLDER src/update/release.rs; then
+    echo "src/update/release.rs has no release key; run bareframe-release keygen" >&2
+    exit 1
+fi
+version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)
+BAREFRAME_SIGN_IDENTITY="$identity" script/bundle --release
+app="$CARGO_TARGET_DIR/dist/bareframe.app"
+codesign --verify --strict "$app"
+out="$CARGO_TARGET_DIR/dist/v$version"
+mkdir -p "$out"
+name="bareframe-$version-macos-arm64.zip"
+ditto -c -k --keepParent "$app" "$out/$name"
+(cd "$out" && shasum -a 256 "$name" > "$name.sha256")
+"$CARGO_TARGET_DIR/release/bareframe-release" sign "$out/$name" >/dev/null
+echo "$out: $name, $name.sha256, $name.sig — upload them to the v$version release"

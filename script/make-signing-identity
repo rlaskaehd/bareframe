@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Makes the self-signed code-signing certificate releases are signed with, in your login
+# keychain. Signing every release with the same certificate keeps what people granted
+# bareframe in Privacy & Security across updates. Run it once; a copy of the certificate
+# with its key is kept beside the update key in ~/.config/bareframe-release to back up.
+set -euo pipefail
+name="${BAREFRAME_SIGN_IDENTITY:-bareframe Release}"
+if security find-certificate -c "$name" >/dev/null 2>&1; then
+    echo "\"$name\" is already in the keychain"
+    exit 0
+fi
+keep="$HOME/.config/bareframe-release"
+mkdir -p "$keep"
+chmod 700 "$keep"
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+cat > "$work/cert.cnf" <<CNF
+[req]
+distinguished_name = dn
+prompt = no
+x509_extensions = ext
+[dn]
+CN = $name
+[ext]
+basicConstraints = critical, CA:false
+keyUsage = critical, digitalSignature
+extendedKeyUsage = critical, codeSigning
+CNF
+# The system's LibreSSL writes a PKCS#12 file the keychain can read.
+/usr/bin/openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -config "$work/cert.cnf" \
+    -keyout "$work/key.pem" -out "$work/cert.pem" 2>/dev/null
+password=$(/usr/bin/openssl rand -hex 16)
+(umask 077
+    /usr/bin/openssl pkcs12 -export -inkey "$work/key.pem" -in "$work/cert.pem" -name "$name" \
+        -passout "pass:$password" -out "$keep/signing-identity.p12"
+    echo "$password" > "$keep/signing-identity.password")
+security import "$keep/signing-identity.p12" -k "$HOME/Library/Keychains/login.keychain-db" \
+    -P "$password" -T /usr/bin/codesign
+echo "\"$name\" is in the login keychain; back up $keep (it also holds the update key)"

@@ -59,6 +59,7 @@ actions!(
         JumpToNextPrompt,
         ToggleCommandPalette,
         ToggleCodeReview,
+        CheckForUpdates,
         Hide,
         HideOthers,
         ShowAll,

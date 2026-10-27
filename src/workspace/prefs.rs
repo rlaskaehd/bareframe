@@ -87,7 +87,13 @@ impl WorkspaceView {
         self.review
             .update(cx, |review, cx| review.set_theme(ui, mono, cx));
         bind_keys(&self.settings, cx);
+        self.apply_update_setting(cx);
         cx.notify();
+    }
+
+    pub(super) fn apply_update_setting(&self, cx: &mut Context<Self>) {
+        let automatic = self.settings.flag("check-for-updates");
+        crate::update::global(cx).update(cx, |updates, _| updates.set_automatic(automatic));
     }
 
     pub(super) fn set_theme(&mut self, name: ThemeName, cx: &mut Context<Self>) {

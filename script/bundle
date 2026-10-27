@@ -35,7 +35,14 @@ cp resources/shell-integration/README resources/shell-integration/COPYING "$inte
 mkdir -p "$integration/bareframe"
 cp resources/shell-integration/bareframe/.zshenv "$integration/bareframe/"
 cp "$CARGO_TARGET_DIR/$profile/bareframe" "$bundle_dir/MacOS/bareframe"
-cat > "$bundle_dir/Info.plist" <<'PLIST'
+# What is handed out carries its license and every built-in component's.
+if [[ "$profile" == release ]]; then
+    cp LICENSE "$bundle_dir/Resources/LICENSE"
+    "$CARGO_TARGET_DIR/release/bareframe-release" notices "$bundle_dir/Resources/THIRD_PARTY_NOTICES.txt"
+fi
+# The updater compares this with the release tag, so it follows Cargo.toml.
+version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)
+cat > "$bundle_dir/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -44,7 +51,7 @@ cat > "$bundle_dir/Info.plist" <<'PLIST'
 <key>CFBundleDisplayName</key><string>bareframe</string>
 <key>CFBundleExecutable</key><string>bareframe</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.1.0</string>
+<key>CFBundleShortVersionString</key><string>$version</string>
 <key>CFBundleVersion</key><string>1</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>NSHighResolutionCapable</key><true/>
@@ -72,5 +79,6 @@ if [[ "$bundle_name" == bareframe-validation ]]; then
         -c 'Add :LSEnvironment dict' \
         -c 'Add :LSEnvironment:BAREFRAME_VALIDATION string 1' "$bundle_dir/Info.plist"
 fi
-codesign --force --sign - "$bundles/$bundle_name.app"
+# script/release names its own certificate; everything else is signed ad hoc.
+codesign --force --sign "${BAREFRAME_SIGN_IDENTITY:--}" "$bundles/$bundle_name.app"
 echo "$bundles/$bundle_name.app"

@@ -19,6 +19,8 @@ gpui-libghostty = { path = "vendor/gpui-libghostty/crates/gpui-ghostty" }
 ignore = "0.4"
 notify = "8"
 serde_json = "1"
+# Verifies the signature on downloaded updates; the release key lives with the maintainer.
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 futures = "0.3"
 grep = "0.4"
 pulldown-cmark = { version = "0.13", default-features = false }

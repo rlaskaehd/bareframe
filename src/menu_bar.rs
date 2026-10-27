@@ -7,6 +7,7 @@ pub fn menus() -> Vec<Menu> {
     vec![
         Menu::new("bareframe").items([
             MenuItem::action("Settings…", OpenSettings),
+            MenuItem::action("Check for Updates…", CheckForUpdates),
             MenuItem::separator(),
             MenuItem::os_submenu("Services", gpui::SystemMenuType::Services),
             MenuItem::separator(),

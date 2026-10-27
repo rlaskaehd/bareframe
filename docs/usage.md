@@ -157,7 +157,7 @@ MVP 1의 셸 실행 모드는 zsh를 기준으로 한다. 다른 셸을 지정�
 | Appearance — Panes | 터미널 안쪽 여백(px) |
 | Appearance — Tabs | 새 탭에 현재 탭 색 유지 |
 | Appearance — Tools panel | Project explorer, Global search 표시(하나만 켜면 도구 탭 줄을 숨기고, 둘 다 끄면 렌치 버튼도 숨김), Show hidden files(Project explorer의 `.` 파일·폴더, 기본 켬) |
-| Features — General | 시작 시 창·탭·Pane 복원, 마우스 휠 스크롤 배율 |
+| Features — General | 시작 시 창·탭·Pane 복원, 자동 업데이트 확인(기본 켬), 마우스 휠 스크롤 배율 |
 | Features — Session | 새 세션의 셸(존재하는 절대 경로일 때), 새 세션의 작업 디렉터리(이전 세션 / 홈), 새 탭 위치(현재 탭 뒤 / 맨 끝) |
 | Features — Keys | 왼쪽·오른쪽 Option을 Meta로 |
 | Features — Terminal | 프롬프트 위치(Bottom(기본) / Top, 새로 여는 터미널부터), 스크롤백 줄 수(숫자를 입력하고 `Enter`나 바깥 클릭으로 적용. 기본 4096, `-1`은 줄 수 제한 없음. Ghostty는 따로 터미널마다 50MB에서 자르고, 새로 여는 터미널부터 적용), 마우스 리포팅, 선택 시 복사, 더블클릭 단어 경계 문자, 클립보드 접근(OSC 52: Deny / Ask / Allow, 기본 Deny. Ask는 확인 창에서 묻는다) |
@@ -183,6 +183,10 @@ cursor-style = bar    # block | bar | underline
 | 메뉴바 | Warp의 구성(bareframe·File·Edit·View·Tab·Window)을 따르고, bareframe에 없는 Blocks·AI·Drive·Help는 뺐다. `Cmd+H`(숨기기), `Cmd+Alt+H`(다른 앱 숨기기), `Cmd+M`(최소화)도 macOS처럼 동작한다 |
 | View > Dark Theme / Light Theme | 테마를 바꾸고 설정 파일에 저장 |
 | `Cmd+=` / `Cmd+-` / `Cmd+0` | 모든 Pane의 폰트 크기 1pt 키우기 / 줄이기 / 설정 값으로 되돌리기(실행 중에만 유지) |
+
+## 업데이트
+
+설치한 릴리스 빌드(`script/release`로 만든 앱)는 시작하고 15초 뒤, 그 뒤로 하루에 한 번 GitHub Releases(`rlaskaehd/bareframe`)의 최신 릴리스를 확인한다. 새 버전이 있으면 상단 바에 `Update to vX.Y.Z`가 뜨고, 누르면 받아서 서명(Ed25519)을 확인한 뒤 앱을 바꾸고 다시 연다. 저장하지 않은 편집기가 있으면 종료 확인을 먼저 묻는다. 메뉴 bareframe › Check for Updates…는 지금 바로 확인하고, 최신이거나 실패했을 때도 상단 바에 알려 준다(누르면 사라짐). 자동 확인은 Settings › Features › General에서 끈다. 디버그 빌드와 검증 인스턴스는 스스로 바뀌지 않는다.
 
 ## 그 밖의 단축키와 종료
 

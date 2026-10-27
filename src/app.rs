@@ -39,6 +39,10 @@ pub fn run(config: LaunchConfig, restore: bool) {
             cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
             cx.set_menus(crate::menu_bar::menus());
             crate::lsp::init(cx);
+            crate::update::init(cx);
+            cx.on_action(|_: &crate::actions::CheckForUpdates, cx| {
+                crate::update::global(cx).update(cx, |updates, cx| updates.check(true, cx))
+            });
             cx.on_window_closed(|cx, _| {
                 if cx.windows().is_empty() {
                     cx.quit();

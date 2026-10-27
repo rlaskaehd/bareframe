@@ -22,6 +22,7 @@ mod syntax;
 mod terminal;
 mod text_field;
 mod theme;
+mod update;
 mod watch;
 mod widgets;
 mod workspace;
