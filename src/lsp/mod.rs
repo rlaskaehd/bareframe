@@ -93,7 +93,10 @@ struct Document {
 pub struct LanguageServers {
     enabled: HashSet<Key>,
     /// Per project: rustup's proxies pick a toolchain by directory, and one project's
-    /// toolchain may have rust-analyzer where another's lacks it.
+    /// toolchain may have rust-analyzer where another's lacks it. Until the user enables a
+    /// project, the server is only tried from the home folder: run inside the project,
+    /// rustup would obey the project's `rust-toolchain.toml`, which can name a program in
+    /// the repository, and merely opening a file would run it.
     installed: HashMap<Key, Installed>,
     running: HashMap<Key, Running>,
     documents: HashMap<PathBuf, Document>,
@@ -266,7 +269,10 @@ impl LanguageServers {
         };
         self.enabled.insert(key.clone());
         save_enabled(&self.enabled);
-        self.start(server, key, cx);
+        // Look again from inside the project, now that the user trusts it; the server
+        // starts once found.
+        self.installed.remove(&key);
+        self.check_installed(server, key, cx);
     }
 
     pub fn disable(&mut self, path: &Path, cx: &mut Context<Self>) {
@@ -329,8 +335,12 @@ impl LanguageServers {
             return;
         }
         self.installed.insert(key.clone(), Installed::Checking);
+        let trusted = self.enabled.contains(&key);
         cx.spawn(async move |servers, cx| {
-            let root = key.1.clone();
+            let root = match trusted {
+                true => key.1.clone(),
+                false => crate::files::home_dir().unwrap_or_else(std::env::temp_dir),
+            };
             let found = cx
                 .background_executor()
                 .spawn(async move { find_server(server, &root) })
@@ -592,8 +602,8 @@ fn diagnostic(value: &Value) -> Option<Diagnostic> {
     })
 }
 
-/// The server's executable on the login shell's PATH, if it works in `root`.
-fn find_server(server: &Server, root: &Path) -> Option<PathBuf> {
+/// The server's executable on the login shell's PATH, if it works when run from `dir`.
+fn find_server(server: &Server, dir: &Path) -> Option<PathBuf> {
     use std::os::unix::fs::PermissionsExt;
     let path = login_path()?;
     let binary = std::env::split_paths(path)
@@ -607,7 +617,7 @@ fn find_server(server: &Server, root: &Path) -> Option<PathBuf> {
     };
     Command::new(&binary)
         .args(probe)
-        .current_dir(root)
+        .current_dir(dir)
         .env("PATH", path)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -683,8 +693,11 @@ fn save_enabled(enabled: &HashSet<Key>) {
     let Some(file) = enabled_file() else {
         return;
     };
+    // A line break in a folder name would start a line of its own and enable a project
+    // the user never chose; such a project stays enabled for this run only.
     let mut lines: Vec<String> = enabled
         .iter()
+        .filter(|(_, root)| !root.to_string_lossy().chars().any(char::is_control))
         .map(|(binary, root)| format!("{binary}\t{}\n", root.display()))
         .collect();
     lines.sort();

@@ -8,7 +8,10 @@ use crate::{
     widgets,
 };
 use bareframe_core::{
-    lsp::{byte_column, path_to_uri, project_root, server_for, uri_to_path, utf16_column},
+    lsp::{
+        byte_column, install_command, path_to_uri, project_root, server_for, uri_to_path,
+        utf16_column,
+    },
     text::Position,
 };
 use gpui::{Context, Entity, Pixels, Point, Subscription, Task, deferred, div, prelude::*, px};
@@ -352,7 +355,7 @@ impl EditorPane {
                 .child(
                     action("lsp-install", format!("Install {}", server.binary)).on_click(
                         cx.listener(move |editor, _, _, cx| {
-                            editor.install_language_server(server.install, &root, cx)
+                            editor.install_language_server(install_command(server, &root), cx)
                         }),
                     ),
                 ),
@@ -426,14 +429,14 @@ impl EditorPane {
         }
     }
 
-    /// Runs the install command in a terminal at the project, where its output shows, and
-    /// keeps looking for the server meanwhile.
-    fn install_language_server(&mut self, command: &str, root: &Path, cx: &mut Context<Self>) {
+    /// Runs the install command in a terminal, where its output shows, from the home folder
+    /// rather than the project (see `install_command`), and keeps looking for the server.
+    fn install_language_server(&mut self, command: String, cx: &mut Context<Self>) {
+        let Some(home) = crate::files::home_dir() else {
+            return;
+        };
         self.with_servers(cx, |servers, path, cx| servers.watch_install(path, cx));
-        cx.emit(EditorEvent::RunInTerminal(
-            command.to_owned(),
-            root.to_path_buf(),
-        ));
+        cx.emit(EditorEvent::RunInTerminal(command, home));
     }
 }
 

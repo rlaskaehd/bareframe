@@ -97,6 +97,36 @@ pub fn project_root(file: &Path) -> PathBuf {
         .to_path_buf()
 }
 
+/// The command that installs `server` for the project at `root`, meant to run from the home
+/// folder: tools like npm take settings from the directory they run in. rust-analyzer goes
+/// into the toolchain the project pins, read from its toolchain file without running it.
+pub fn install_command(server: &Server, root: &Path) -> String {
+    match pinned_toolchain(root).filter(|_| server.binary == "rust-analyzer") {
+        Some(channel) => format!("{} --toolchain {channel}", server.install),
+        None => server.install.to_owned(),
+    }
+}
+
+/// The channel in `rust-toolchain.toml` (or a plain `rust-toolchain`), if it is a plain name.
+fn pinned_toolchain(root: &Path) -> Option<String> {
+    let channel = if let Ok(text) = std::fs::read_to_string(root.join("rust-toolchain.toml")) {
+        text.lines().find_map(|line| {
+            let (key, value) = line.split_once('=')?;
+            (key.trim() == "channel").then(|| value.trim().trim_matches('"').to_owned())
+        })?
+    } else {
+        std::fs::read_to_string(root.join("rust-toolchain"))
+            .ok()?
+            .trim()
+            .to_owned()
+    };
+    let plain = !channel.is_empty()
+        && channel
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'));
+    plain.then_some(channel)
+}
+
 /// One message in LSP's base protocol: a `Content-Length` header, a blank line, the body.
 pub fn frame(body: &str) -> Vec<u8> {
     let mut message = format!("Content-Length: {}\r\n\r\n", body.len()).into_bytes();
@@ -195,6 +225,38 @@ mod tests {
         assert_eq!(server_for(Path::new("x.h")).unwrap().0.binary, "clangd");
         assert!(server_for(Path::new("notes.md")).is_none());
         assert!(server_for(Path::new("Makefile")).is_none());
+    }
+
+    #[test]
+    fn rust_analyzer_installs_into_the_pinned_toolchain() {
+        let dir = std::env::temp_dir().join(format!("bareframe-pin-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let rust = &SERVERS[0];
+        assert_eq!(
+            install_command(rust, &dir),
+            "rustup component add rust-analyzer"
+        );
+        std::fs::write(
+            dir.join("rust-toolchain.toml"),
+            "[toolchain]\nchannel = \"1.98.1\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            install_command(rust, &dir),
+            "rustup component add rust-analyzer --toolchain 1.98.1"
+        );
+        // Anything that isn't a plain name stays out of the typed command.
+        std::fs::write(
+            dir.join("rust-toolchain.toml"),
+            "channel = \"x; rm -rf ~\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            install_command(rust, &dir),
+            "rustup component add rust-analyzer"
+        );
+        assert_eq!(install_command(&SERVERS[1], &dir), "npm install -g pyright");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
