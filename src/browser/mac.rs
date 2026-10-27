@@ -161,6 +161,21 @@ pub fn between_events(work: impl FnOnce() + 'static) -> Result<(), String> {
     Ok(())
 }
 
+/// Whether the event being handled is a mouse button going down: the user clicking.
+pub fn clicking() -> bool {
+    // SAFETY: plain AppKit getters on the main thread, where Chromium's callbacks run.
+    unsafe {
+        let app: *mut AnyObject = objc2::msg_send![class!(NSApplication), sharedApplication];
+        let event: *mut AnyObject = objc2::msg_send![app, currentEvent];
+        if event.is_null() {
+            return false;
+        }
+        let kind: u64 = event.send_message(Sel::register(c"type"), ());
+        // NSEventTypeLeftMouseDown, RightMouseDown, OtherMouseDown.
+        matches!(kind, 1 | 3 | 25)
+    }
+}
+
 /// GPUI's view in `window`: browsers are added to it as children, and it takes the
 /// keyboard back from them.
 pub fn gpui_view(window: &Window) -> Option<*mut c_void> {

@@ -94,11 +94,11 @@ wrap_focus_handler! {
         fn on_set_focus(
             &self,
             _browser: Option<&mut Browser>,
-            source: FocusSource,
+            _source: FocusSource,
         ) -> ::std::os::raw::c_int {
-            // A page loading doesn't take the keyboard from the terminal or the address bar
-            // being typed in; a click on it does.
-            (source == FocusSource::NAVIGATION && !self.keyboard.load(Ordering::Relaxed)).into()
+            // The page gets the keyboard when its pane is focused or the user clicks it, never
+            // by itself (a load, or a script): keys typed in the terminal beside it stay there.
+            (!self.keyboard.load(Ordering::Relaxed) && !mac::clicking()).into()
         }
 
         fn on_got_focus(&self, _browser: Option<&mut Browser>) {
