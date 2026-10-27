@@ -35,6 +35,11 @@ pub enum Kind {
     },
     /// Free text on one line; empty means "Ghostty's or the system's default".
     Text,
+    /// A whole number typed in, applied on Enter or when the field loses focus.
+    Integer {
+        min: i64,
+        max: i64,
+    },
 }
 
 /// How a setting reaches the terminals.
@@ -85,7 +90,7 @@ const fn def(
 }
 
 use Ghostty::{App, Map, Same};
-use Kind::{Choice, Number, Text, Toggle};
+use Kind::{Choice, Integer, Number, Text, Toggle};
 use Section::{Appearance, Features};
 
 pub const DEFS: &[Def] = &[
@@ -378,17 +383,17 @@ pub const DEFS: &[Def] = &[
         "Terminal",
         "scrollback-limit-lines",
         "Scrollback limit (lines)",
-        "Lines each terminal keeps above the screen. Ghostty also caps it at 50 MB of memory \
-         per terminal. Applies to terminals opened afterwards.",
-        Choice(&[
-            ("unlimited", "No line limit"),
-            ("1000", "1,000"),
-            ("10000", "10,000"),
-            ("100000", "100,000"),
-            ("1000000", "1,000,000"),
-        ]),
-        "unlimited",
-        Same,
+        "Lines each terminal keeps above the screen; -1 for no line limit. Ghostty also caps \
+         it at 50 MB of memory per terminal. Applies to terminals opened afterwards.",
+        Integer {
+            min: -1,
+            max: 100_000_000,
+        },
+        "4096",
+        Map(|value| {
+            let lines = if value == "-1" { "unlimited" } else { value };
+            vec![("scrollback-limit-lines", lines.to_owned())]
+        }),
     ),
     def(
         Features,
@@ -525,6 +530,13 @@ pub fn normalize(def: &Def, value: &str) -> Result<String, String> {
                 let names: Vec<&str> = options.iter().map(|(stored, _)| *stored).collect();
                 format!("{} must be one of {}", def.key, names.join(", "))
             }),
+        Integer { min, max } => match value.parse::<i64>() {
+            Ok(number) if (min..=max).contains(&number) => Ok(number.to_string()),
+            _ => Err(format!(
+                "{} must be a whole number from {min} to {max}",
+                def.key
+            )),
+        },
         Number { min, max, .. } => match value.parse::<f32>() {
             Ok(number) if (min..=max).contains(&number) => Ok(format_number(number)),
             _ => Err(format!("{} must be a number from {min} to {max}", def.key)),
@@ -766,8 +778,17 @@ mod tests {
         settings.set("font-ligatures", "false").unwrap();
         settings.set("terminal-padding", "8").unwrap();
         settings.set("left-option-as-meta", "true").unwrap();
-        assert!(settings.set("scrollback-limit-lines", "5").is_err());
-        settings.set("scrollback-limit-lines", "10000").unwrap();
+        assert!(has_default_scrollback(&Settings::default()));
+        for bad in ["-2", "1.5", "lots", ""] {
+            assert!(
+                settings.set("scrollback-limit-lines", bad).is_err(),
+                "{bad}"
+            );
+        }
+        assert_eq!(
+            settings.set("scrollback-limit-lines", " 10000 "),
+            Ok("10000".into())
+        );
         let lines = settings.ghostty_lines();
         let has = |key: &str, value: &str| lines.iter().any(|(k, v)| *k == key && v == value);
         assert!(has("font-feature", "-calt"));
@@ -783,6 +804,23 @@ mod tests {
         assert!(
             !lines.iter().any(|(key, _)| *key == "restore-state"),
             "app setting"
+        );
+    }
+
+    fn has_default_scrollback(settings: &Settings) -> bool {
+        settings
+            .ghostty_lines()
+            .contains(&("scrollback-limit-lines", "4096".into()))
+    }
+
+    #[test]
+    fn no_line_limit_is_minus_one() {
+        let mut settings = Settings::default();
+        settings.set("scrollback-limit-lines", "-1").unwrap();
+        assert!(
+            settings
+                .ghostty_lines()
+                .contains(&("scrollback-limit-lines", "unlimited".into()))
         );
     }
 

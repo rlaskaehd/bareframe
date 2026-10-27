@@ -234,7 +234,7 @@ impl SettingsPane {
                     .child(stepper("plus", "+", (number + step).min(max), number < max))
                     .into_any_element()
             }
-            Kind::Text => match &self.editing {
+            Kind::Text | Kind::Integer { .. } => match &self.editing {
                 Some((editing, input, _)) if *editing == key => div()
                     .w(px(240.0))
                     .px_2()
