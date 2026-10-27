@@ -254,7 +254,7 @@ impl GhosttyAdapter {
                     KeyAction::Press
                 },
                 &key.key,
-                key.key_char.as_deref(),
+                typed_text(key),
                 modifiers(key.modifiers),
             );
             cx.stop_propagation();
@@ -580,6 +580,16 @@ impl Render for GhosttyAdapter {
     }
 }
 
+/// The text a key types, without the `\n` and `\t` GPUI reports for Enter and Tab: Ghostty
+/// encodes those keys itself, and text with them would count Shift as spent on it, so
+/// Shift+Enter would reach Claude Code or Codex as a plain Enter. Ghostty's own app passes
+/// no text for control characters either.
+fn typed_text(key: &gpui::Keystroke) -> Option<&str> {
+    key.key_char
+        .as_deref()
+        .filter(|text| !text.chars().any(char::is_control))
+}
+
 fn modifiers(value: gpui::Modifiers) -> Modifiers {
     let mut result = Modifiers::empty();
     for (set, flag) in [
@@ -617,5 +627,21 @@ fn trace_input(message: &str) {
         {
             let _ = writeln!(log, "{message}");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn enter_and_tab_type_no_text_so_shift_reaches_ghostty() {
+        let key = |text: &str| gpui::Keystroke::parse(text).unwrap();
+        let mut enter = key("shift-enter");
+        enter.key_char = Some("\n".into());
+        assert_eq!(typed_text(&enter), None);
+        let mut a = key("a");
+        a.key_char = Some("a".into());
+        assert_eq!(typed_text(&a), Some("a"));
     }
 }
