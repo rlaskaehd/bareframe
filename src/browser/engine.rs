@@ -191,9 +191,24 @@ wrap_app! {
             // time an unsigned build changes; a fixed key instead, and no prompt. Without it,
             // the prompt's nested run loop also re-enters Chromium and crashes it. The helper
             // processes add it too.
-            if let Some(command_line) = command_line {
-                command_line.append_switch(Some(&CefString::from("use-mock-keychain")));
+            let Some(command_line) = command_line else {
+                return;
+            };
+            command_line.append_switch(Some(&CefString::from("use-mock-keychain")));
+            // Memory: no renderer started ahead for the next tab,
+            // no pages kept alive for Back, one renderer per site across tabs, and none of
+            // Chrome's background downloads (components, field trials) a pane has no use for.
+            for switch in [
+                "process-per-site",
+                "disable-component-update",
+                "disable-background-networking",
+            ] {
+                command_line.append_switch(Some(&CefString::from(switch)));
             }
+            command_line.append_switch_with_value(
+                Some(&CefString::from("disable-features")),
+                Some(&CefString::from("SpareRendererForSitePerProcess,BackForwardCache")),
+            );
         }
 
         fn browser_process_handler(&self) -> Option<BrowserProcessHandler> {
