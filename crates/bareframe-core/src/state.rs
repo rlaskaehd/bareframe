@@ -22,6 +22,10 @@ pub enum SavedPane {
     Markdown {
         path: PathBuf,
     },
+    /// A file in the code editor. Unsaved changes are not kept.
+    Editor {
+        path: PathBuf,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -98,6 +102,13 @@ pub fn encode(state: &SavedState) -> String {
             SavedPane::Markdown { path } => {
                 format!(
                     "pane {} markdown {}",
+                    id.0,
+                    escape(path.as_os_str().as_bytes())
+                )
+            }
+            SavedPane::Editor { path } => {
+                format!(
+                    "pane {} editor {}",
                     id.0,
                     escape(path.as_os_str().as_bytes())
                 )
@@ -183,6 +194,11 @@ pub fn decode(input: &str) -> Result<SavedState, String> {
                     },
                     "settings" => SavedPane::Settings,
                     "markdown" => SavedPane::Markdown {
+                        path: PathBuf::from(OsString::from_vec(
+                            unescape(next()?).ok_or_else(|| fail("bad path"))?,
+                        )),
+                    },
+                    "editor" => SavedPane::Editor {
                         path: PathBuf::from(OsString::from_vec(
                             unescape(next()?).ok_or_else(|| fail("bad path"))?,
                         )),
@@ -366,6 +382,13 @@ mod tests {
             third,
             SavedPane::Markdown {
                 path: PathBuf::from("/tmp/문서 a.md"),
+            },
+        ));
+        let fourth = ws.new_tab();
+        panes.push((
+            fourth,
+            SavedPane::Editor {
+                path: PathBuf::from("/tmp/src/main.rs"),
             },
         ));
         assert!(ws.tabs.iter().any(|tab| tab.layout.contains(first)));

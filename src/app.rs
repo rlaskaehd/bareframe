@@ -135,6 +135,7 @@ pub fn bind_keys(settings: &Settings, cx: &mut App) {
     cx.clear_key_bindings();
     cx.bind_keys(crate::rename::key_bindings());
     cx.bind_keys(crate::explorer::key_bindings());
+    cx.bind_keys(crate::editor::key_bindings());
     let (bindings, warnings) = keymap::resolve(&settings.keybinds);
     for warning in warnings {
         eprintln!("bareframe: settings: {warning}");
@@ -428,11 +429,19 @@ pub fn run(config: LaunchConfig, restore: bool) {
                         WorkspaceView::new(config, settings, config_text, saved, window, cx)
                     });
                     let weak = view.downgrade();
-                    window.on_window_should_close(cx, move |_, cx| {
-                        if let Err(error) = weak.update(cx, |view, cx| view.shutdown(cx)) {
+                    window.on_window_should_close(cx, move |window, cx| {
+                        // Unsaved editor changes keep the window open until answered.
+                        let closing = weak.update(cx, |view, cx| {
+                            let closing = view.confirm_unsaved(window, cx);
+                            if closing {
+                                view.shutdown(cx);
+                            }
+                            closing
+                        });
+                        closing.unwrap_or_else(|error| {
                             eprintln!("bareframe: closing window: {error}");
-                        }
-                        true
+                            true
+                        })
                     });
                     view
                 },

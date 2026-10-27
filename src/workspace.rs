@@ -1,5 +1,6 @@
 use crate::{
     app::{self, *},
+    editor::EditorPane,
     explorer::Explorer,
     markdown::MarkdownPane,
     pane::{PaneEvent, TerminalPane},
@@ -49,13 +50,14 @@ enum PaneView {
     Terminal(Entity<TerminalPane>),
     Settings(Entity<SettingsPane>),
     Markdown(Entity<MarkdownPane>),
+    Editor(Entity<EditorPane>),
 }
 
 impl PaneView {
     fn terminal(&self) -> Option<&Entity<TerminalPane>> {
         match self {
             Self::Terminal(pane) => Some(pane),
-            Self::Settings(_) | Self::Markdown(_) => None,
+            Self::Settings(_) | Self::Markdown(_) | Self::Editor(_) => None,
         }
     }
 
@@ -65,6 +67,7 @@ impl PaneView {
             Self::Terminal(pane) => pane.read(cx).title(),
             Self::Settings(_) => "Settings".into(),
             Self::Markdown(pane) => pane.read(cx).file_name(),
+            Self::Editor(pane) => pane.read(cx).file_name(),
         }
     }
 
@@ -74,6 +77,7 @@ impl PaneView {
             Self::Terminal(pane) => pane.read(cx).name(),
             Self::Settings(_) => "Settings".into(),
             Self::Markdown(pane) => pane.read(cx).file_name(),
+            Self::Editor(pane) => pane.read(cx).file_name(),
         }
     }
 
@@ -82,8 +86,13 @@ impl PaneView {
         match self {
             Self::Terminal(pane) => Some(pane.read(cx).display_cwd()),
             Self::Settings(_) => None,
-            Self::Markdown(pane) => {
-                let dir = pane.read(cx).path().parent()?;
+            Self::Markdown(_) | Self::Editor(_) => {
+                let path = match self {
+                    Self::Markdown(pane) => pane.read(cx).path(),
+                    Self::Editor(pane) => pane.read(cx).path(),
+                    _ => return None,
+                };
+                let dir = path.parent()?;
                 Some(app::home_dir().map_or_else(
                     || dir.display().to_string(),
                     |home| bareframe_core::config::display_path(dir, &home),
@@ -97,7 +106,7 @@ impl PaneView {
         match self {
             Self::Terminal(_) => None,
             Self::Settings(_) => Some("icons/gear.svg"),
-            Self::Markdown(_) => Some("icons/file.svg"),
+            Self::Markdown(_) | Self::Editor(_) => Some("icons/file.svg"),
         }
     }
 
@@ -106,6 +115,7 @@ impl PaneView {
             Self::Terminal(pane) => pane.update(cx, |pane, cx| pane.focus(window, cx)),
             Self::Settings(pane) => pane.update(cx, |pane, cx| pane.focus(window, cx)),
             Self::Markdown(pane) => pane.update(cx, |pane, cx| pane.focus(window, cx)),
+            Self::Editor(pane) => pane.update(cx, |pane, cx| pane.focus(window, cx)),
         }
     }
 
@@ -114,6 +124,7 @@ impl PaneView {
             Self::Terminal(pane) => pane.clone().into(),
             Self::Settings(pane) => pane.clone().into(),
             Self::Markdown(pane) => pane.clone().into(),
+            Self::Editor(pane) => pane.clone().into(),
         }
     }
 }
@@ -316,6 +327,9 @@ impl WorkspaceView {
                 Some(SavedPane::Markdown { path }) if path.is_file() => {
                     self.insert_markdown_pane(id, path.clone(), window, cx)
                 }
+                Some(SavedPane::Editor { path }) if path.is_file() => {
+                    self.insert_editor_pane(id, path.clone(), window, cx)
+                }
                 kind => {
                     let cwd = match kind {
                         Some(SavedPane::Terminal { cwd }) if cwd.is_dir() => cwd.clone(),
@@ -338,6 +352,9 @@ impl WorkspaceView {
                     },
                     PaneView::Settings(_) => SavedPane::Settings,
                     PaneView::Markdown(pane) => SavedPane::Markdown {
+                        path: pane.read(cx).path().to_path_buf(),
+                    },
+                    PaneView::Editor(pane) => SavedPane::Editor {
                         path: pane.read(cx).path().to_path_buf(),
                     },
                 };
@@ -440,9 +457,14 @@ impl WorkspaceView {
     /// The active pane's cwd comes from OSC 7, which any local program's output can send
     /// (Ghostty already rejects remote hosts), so only an existing directory is trusted.
     fn active_cwd(&self, cx: &Context<Self>) -> std::path::PathBuf {
-        self.terminal(self.model.active_pane())
-            .and_then(|pane| pane.read(cx).cwd().canonicalize().ok())
-            .filter(|cwd| cwd.is_dir())
+        let dir = match self.pane(self.model.active_pane()) {
+            Some(PaneView::Terminal(pane)) => pane.read(cx).cwd().canonicalize().ok(),
+            // A file's pane works in the file's folder.
+            Some(PaneView::Editor(pane)) => pane.read(cx).path().parent().map(Into::into),
+            Some(PaneView::Markdown(pane)) => pane.read(cx).path().parent().map(Into::into),
+            _ => None,
+        };
+        dir.filter(|cwd| cwd.is_dir())
             .unwrap_or_else(|| self.config.cwd.clone())
     }
 
@@ -534,6 +556,15 @@ impl WorkspaceView {
     }
 
     fn close_pane(&mut self, id: PaneId, window: &mut Window, cx: &mut Context<Self>) {
+        // An editor with unsaved changes asks first, and closes itself once answered.
+        if let Some(PaneView::Editor(editor)) = self.pane(id).cloned()
+            && !editor.update(cx, |editor, cx| editor.request_close(cx))
+        {
+            if self.model.focus(id) {
+                self.sync(window, cx);
+            }
+            return;
+        }
         self.drop_clipboard_prompt_for(id, cx);
         if let Some((PaneView::Terminal(pane), _)) = self.panes.remove(&id) {
             pane.update(cx, |pane, cx| pane.shutdown(cx));
@@ -600,6 +631,10 @@ impl WorkspaceView {
                 PaneView::Markdown(pane) => {
                     let mono = self.mono_font();
                     pane.update(cx, |pane, cx| pane.set_theme(ui, mono, cx))
+                }
+                PaneView::Editor(pane) => {
+                    let (mono, size) = (self.mono_font(), self.settings.font_size());
+                    pane.update(cx, |pane, cx| pane.set_style(ui, mono, size, cx))
                 }
             }
         }
@@ -941,8 +976,15 @@ impl Render for WorkspaceView {
             .on_action(cx.listener(|_, _: &ToggleFullscreen, window, _| window.toggle_fullscreen()))
             .on_action(cx.listener(|view, _: &ReloadSettings, _, cx| view.reload_from_disk(cx)))
             .on_action(cx.listener(|view, _: &CloseWindow, window, cx| {
-                view.shutdown(cx);
-                window.remove_window();
+                if view.confirm_unsaved(window, cx) {
+                    view.shutdown(cx);
+                    window.remove_window();
+                }
+            }))
+            .on_action(cx.listener(|view, _: &Quit, window, cx| {
+                if view.confirm_unsaved(window, cx) {
+                    cx.quit();
+                }
             }))
             .on_action(cx.listener(|view, _: &ClosePane, window, cx| {
                 let pane = view.model.active_pane();

@@ -434,6 +434,16 @@ pub const DEFS: &[Def] = &[
     def(
         Features,
         "Files",
+        "open-files-in-editor",
+        "Open text files in the code editor",
+        "Open code and text files from the project explorer, global search and code review in bareframe's editor instead of the default app.",
+        Toggle,
+        "true",
+        App,
+    ),
+    def(
+        Features,
+        "Files",
         "open-file-layout",
         "Choose a layout to open files",
         "Where files opened in bareframe appear.",

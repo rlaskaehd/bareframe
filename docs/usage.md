@@ -87,6 +87,16 @@ MVP 1의 셸 실행 모드는 zsh를 기준으로 한다. 다른 셸을 지정�
 - 파일이 디스크에서 바뀌면(다른 편집기에서 저장) 다시 읽는다. 열린 문서는 레이아웃과 함께 저장·복원된다.
 - 편집(`Raw` 전환)은 3b-3 Code editor 뒤에 붙인다.
 
+### Code editor
+
+- Project explorer, Global search(해당 줄로), Code review의 `Open`에서 텍스트 파일(앞 8KB가 UTF-8이고 NUL이 없는 일반 파일)을 열면 bareframe 편집기로 연다. Settings › Features › Files의 `Open text files in the code editor`를 끄면 기본 앱으로 연다. 열리는 자리는 Markdown과 같은 `Choose a layout to open files`를 따르고, 이미 열린 파일은 그 Pane으로 이동한다. 열린 파일은 레이아웃과 함께 복원된다(저장하지 않은 변경은 남지 않는다).
+- 줄 번호, 현재 줄 강조, 아래쪽 상태 줄(줄·열, 선택한 글자 수, 읽기 전용, LF/CRLF, UTF-8). 글꼴과 크기는 터미널 설정을 따른다. 줄바꿈 없이 가로로 스크롤한다.
+- 키: 방향키(`Shift`로 선택), `Option+←/→` 단어, `Cmd+←/→`·`Home`/`End`·`Ctrl+A`/`Ctrl+E` 줄 처음(들여쓰기 → 0열)·끝, `Cmd+↑/↓` 문서 처음·끝, `Page Up/Down`, `Option+Backspace` 단어 지우기, `Cmd+Backspace` 줄 앞 지우기, `Enter`(들여쓰기 유지), `Tab`(파일이 탭을 쓰면 탭, 아니면 공백 4칸), `Esc` 선택 해제, `Cmd+A/C/X/V`(선택이 없으면 줄 전체 복사·잘라내기), `Cmd+Z`/`Cmd+Shift+Z`, `Cmd+S` 저장. 마우스: 클릭, 드래그 선택, `Shift`+클릭, 더블클릭 단어, 트리플클릭 줄.
+- 한글 등 입력기 조합을 지원하고, 조합 중인 글자는 밑줄로 보인다. 한 음절 조합은 실행 취소 한 번으로 돌아간다. 타이핑은 단어 단위로, 지우기는 이어진 만큼 묶어서 되돌린다.
+- 저장하지 않은 변경은 탭·Pane 제목에 `●`로 보인다. 저장하지 않은 채 Pane을 닫거나(`×`, `Cmd+W`) 창을 닫거나 `Cmd+Q`로 끝내면 편집기 위에 `Save` / `Don't Save` / `Cancel`을 묻는다.
+- 다른 프로그램이 파일을 바꾸면 변경이 없을 때는 다시 읽고, 있으면 `Reload` / `Keep my changes`를 묻는다. 저장은 파일을 그 자리에서 덮어써 권한과 링크가 유지된다. 5MB가 넘는 파일은 읽기 전용으로 연다.
+- 구문 강조, 찾기·바꾸기, 줄로 이동, 파일 탭 묶음은 다음 단계(3b-3b·3b-3c)다.
+
 ### Code review
 
 - 활성 Pane의 작업 디렉터리가 git 저장소 안이고 변경이 있으면 상단 바 오른쪽에 `± +N −M`(HEAD 대비 추가·삭제 줄 수, 추적하지 않는 파일 포함)이 보인다. 누르면 창 오른쪽에 Code review 패널이 열리고, 왼쪽 가장자리를 끌어 너비를 바꾼다. 패널의 열림과 너비는 레이아웃과 함께 저장된다. 버튼은 Settings › Features › Code review에서 끌 수 있다.

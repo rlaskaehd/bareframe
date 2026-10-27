@@ -155,6 +155,17 @@ impl Buffer {
             at: now,
         };
         match self.history.last_mut() {
+            // An input method rewriting what it just inserted (한 → 한ㄱ → 한글) amends
+            // that edit, so composing a syllable is one undo step.
+            Some(last)
+                if self.saved != Some(self.applied)
+                    && last.start == edit.start
+                    && last.new == edit.old
+                    && edit.at.duration_since(last.at) <= GROUP =>
+            {
+                last.new = edit.new;
+                last.at = edit.at;
+            }
             Some(last) if self.saved != Some(self.applied) && joins(last, &edit) => {
                 if edit.old.is_empty() {
                     last.new.push_str(&edit.new);
@@ -420,6 +431,20 @@ mod tests {
         buffer.replace(at..at, "!", later);
         buffer.undo();
         assert_eq!(buffer.text(), "fn main");
+    }
+
+    #[test]
+    fn composing_hangul_is_one_undo_step() {
+        let mut buffer = Buffer::new("x");
+        let t = Instant::now();
+        let start = p(0, 1);
+        let mut end = buffer.replace(start..start, "ㅎ", t);
+        for step in ["하", "한", "한ㄱ", "한그", "한글"] {
+            end = buffer.replace(start..end, step, t);
+        }
+        assert_eq!(buffer.text(), "x한글");
+        buffer.undo();
+        assert_eq!(buffer.text(), "x");
     }
 
     #[test]

@@ -105,8 +105,7 @@ impl WorkspaceView {
         cx: &mut Context<Self>,
     ) {
         match event {
-            // ponytail: the line is dropped until bareframe has its own editor (3b).
-            SearchEvent::Open(path, _line) => self.open_file(path, window, cx),
+            SearchEvent::Open(path, line) => self.open_file_at(path, Some(*line), window, cx),
             SearchEvent::Dismiss => self.sync(window, cx),
         }
     }
