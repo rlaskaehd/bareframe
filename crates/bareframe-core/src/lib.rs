@@ -5,6 +5,7 @@ pub mod fuzzy;
 pub mod git;
 pub mod ime;
 pub mod keymap;
+pub mod layout;
 pub mod session;
 pub mod settings;
 pub mod state;

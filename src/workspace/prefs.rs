@@ -11,8 +11,8 @@ use crate::{
 };
 use bareframe_core::{
     keymap,
+    layout::PaneId,
     settings::{self, Settings, ThemeName},
-    workspace::PaneId,
 };
 use gpui::{AppContext, Context, Window, WindowAppearance};
 use gpui_libghostty::TerminalTheme;

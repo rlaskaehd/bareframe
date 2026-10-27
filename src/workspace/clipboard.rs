@@ -2,7 +2,7 @@
 //! or a program reading or writing the clipboard (OSC 52) when Settings say to ask.
 use super::WorkspaceView;
 use crate::theme::{self, hsla};
-use bareframe_core::{session::ClipboardOperation, workspace::PaneId};
+use bareframe_core::{layout::PaneId, session::ClipboardOperation};
 use gpui::{
     Context, FocusHandle, Subscription, Window, anchored, deferred, div, point, prelude::*, px,
 };

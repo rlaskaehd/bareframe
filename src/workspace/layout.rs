@@ -1,7 +1,7 @@
 //! The active tab's split layout and the pane headers, as in Warp.
 use super::{PaneView, Resize, WorkspaceView, drag::DraggedPane};
 use crate::theme::{self, hsla};
-use bareframe_core::workspace::{Axis, Layout, PaneId};
+use bareframe_core::layout::{Axis, Layout, PaneId};
 use gpui::{AnyElement, Context, CursorStyle, MouseButton, canvas, div, prelude::*, px, relative};
 
 impl WorkspaceView {

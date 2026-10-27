@@ -2,7 +2,7 @@
 //! is saved before the panes go.
 use super::{PaneView, WorkspaceView};
 use crate::editor_tabs::EditorTabs;
-use bareframe_core::workspace::PaneId;
+use bareframe_core::layout::PaneId;
 use gpui::{Context, Window};
 
 /// What waits on answers about unsaved changes.

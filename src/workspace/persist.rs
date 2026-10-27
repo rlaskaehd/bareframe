@@ -2,8 +2,8 @@
 use super::{PaneView, WorkspaceView};
 use crate::files;
 use bareframe_core::{
+    layout::PaneId,
     state::{self, SavedPane, SavedState},
-    workspace::PaneId,
 };
 use gpui::{App, Context, Window};
 use std::collections::HashMap;

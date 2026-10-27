@@ -11,9 +11,10 @@ use crate::{
 };
 use bareframe_core::{
     config::LaunchConfig,
+    layout::{Axis, Direction, Layout, PaneId},
     settings::Settings,
     state::SavedState,
-    workspace::{Axis, Closed, Direction, GroupId, Layout, PaneId, TabId, Workspace},
+    workspace::{Closed, GroupId, TabId, Workspace},
 };
 use columns::Column;
 pub use exit::Exit;

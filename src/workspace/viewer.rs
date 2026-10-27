@@ -5,7 +5,7 @@ use crate::{
     editor_tabs::{EditorTabs, TabsEvent},
     markdown::{MarkdownEvent, MarkdownPane, Target, is_markdown},
 };
-use bareframe_core::workspace::{Axis, PaneId};
+use bareframe_core::layout::{Axis, PaneId};
 use gpui::{AppContext, Context, Window};
 use std::path::{Path, PathBuf};
 

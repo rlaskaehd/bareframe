@@ -3,8 +3,8 @@
 use super::{Exit, PaneView, RenameTarget, WorkspaceView, menu::MenuAction, tools};
 use crate::actions::*;
 use bareframe_core::{
+    layout::{Axis, Direction},
     settings::ThemeName,
-    workspace::{Axis, Direction},
 };
 use gpui::{Context, prelude::*};
 

@@ -1,7 +1,10 @@
 //! Sidebar and pane context menus.
 use super::{RenameTarget, WorkspaceView};
 use crate::theme::{self, hsla};
-use bareframe_core::workspace::{Axis, GroupId, PaneId};
+use bareframe_core::{
+    layout::{Axis, PaneId},
+    workspace::GroupId,
+};
 use gpui::{AnyElement, Context, Pixels, Point, Window, anchored, deferred, div, prelude::*, px};
 
 /// Width of every context menu. Menus may overlap the terminals because `open_menu`

@@ -6,7 +6,10 @@ use super::{
     sidebar::{tab_label, terminal_icon},
 };
 use crate::theme::{self, Theme, hsla};
-use bareframe_core::workspace::{Direction, GroupId, PaneId, TabId};
+use bareframe_core::{
+    layout::{Direction, PaneId},
+    workspace::{GroupId, TabId},
+};
 use gpui::{
     Bounds, Context, DragMoveEvent, InteractiveElement, Pixels, Point, Window, div, prelude::*, px,
     relative,

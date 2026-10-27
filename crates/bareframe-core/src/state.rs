@@ -2,7 +2,10 @@
 //!
 //! One record per line, space-separated, with text fields percent-encoded so names and
 //! paths may hold any byte. An unreadable file is reported and ignored by the caller.
-use crate::workspace::{Axis, Group, GroupId, Layout, PaneId, Tab, TabId, Workspace};
+use crate::{
+    layout::{Axis, Layout, MIN_RATIO, PaneId},
+    workspace::{Group, GroupId, Tab, TabId, Workspace},
+};
 use std::{
     ffi::OsString,
     os::unix::ffi::{OsStrExt, OsStringExt},
@@ -273,10 +276,7 @@ fn read_layout<'a>(tokens: &mut impl Iterator<Item = &'a str>) -> Option<Layout>
                 } else {
                     Axis::Vertical
                 },
-                ratio: ratio.clamp(
-                    crate::workspace::MIN_RATIO,
-                    1.0 - crate::workspace::MIN_RATIO,
-                ),
+                ratio: ratio.clamp(MIN_RATIO, 1.0 - MIN_RATIO),
                 first: Box::new(read_layout(tokens)?),
                 second: Box::new(read_layout(tokens)?),
             })

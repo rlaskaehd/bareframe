@@ -1,11 +1,11 @@
 use crate::{terminal::GhosttyAdapter, theme};
 use bareframe_core::{
     config::{LaunchConfig, display_path},
+    layout::PaneId,
     session::{
         ClipboardOperation, SessionId, SessionState, SessionStatus, TerminalEvent,
         TerminalEventKind,
     },
-    workspace::PaneId,
 };
 use gpui::{
     Context, Entity, EventEmitter, FocusHandle, RenderImage, Subscription, Window, div, img,
