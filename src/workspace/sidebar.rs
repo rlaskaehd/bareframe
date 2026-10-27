@@ -300,9 +300,9 @@ impl WorkspaceView {
                     .child(
                         widgets::icon_button(theme, "new-tab", "+")
                             .text_size(px(16.0))
-                            .on_click(cx.listener(|view, _, window, cx| {
+                            .on_click(cx.listener(|view, event: &gpui::ClickEvent, _, cx| {
                                 cx.stop_propagation();
-                                view.new_tab(window, cx)
+                                view.open_new_tab_menu(event.position(), cx)
                             })),
                     ),
             )

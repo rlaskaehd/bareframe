@@ -23,6 +23,8 @@ pub(super) enum MenuAction {
     PinGroup(GroupId, bool),
     MoveGroup(GroupId, bool),
     CloseTabs(Vec<usize>),
+    NewTab,
+    NewBrowserTab,
     NewTabInGroup(GroupId),
     Ungroup(GroupId),
     CloseGroup(GroupId),
@@ -265,6 +267,8 @@ impl WorkspaceView {
             MenuAction::PinGroup(group, pinned) => self.model.set_group_pinned(group, pinned),
             MenuAction::MoveGroup(group, up) => self.model.move_group(group, up),
             MenuAction::CloseTabs(tabs) => self.close_tabs(&tabs, window, cx),
+            MenuAction::NewTab => return self.new_tab(window, cx),
+            MenuAction::NewBrowserTab => return self.new_browser_tab(window, cx),
             MenuAction::NewTabInGroup(group) => self.new_tab_in_group(group, window, cx),
             MenuAction::Ungroup(group) => {
                 let tabs = self.model.group_tabs(group);
@@ -303,6 +307,15 @@ impl WorkspaceView {
             MenuAction::Separator | MenuAction::TabColors(_) => {}
         }
         self.sync(window, cx);
+    }
+
+    /// The sidebar's `+`: a terminal or a browser tab.
+    pub(super) fn open_new_tab_menu(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+        let items = vec![
+            ("New terminal tab\t⌘T".into(), MenuAction::NewTab),
+            ("New browser tab\t⇧⌘T".into(), MenuAction::NewBrowserTab),
+        ];
+        self.open_menu(position, items, cx);
     }
 
     /// The pane header's overflow menu, opened below its button like Warp's.
