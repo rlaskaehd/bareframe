@@ -6,8 +6,8 @@ use crate::{
 };
 use gpui::{
     AnyElement, App, Context, EventEmitter, FocusHandle, Font, FontStyle, FontWeight,
-    InteractiveText, ScrollHandle, StrikethroughStyle, StyledText, TextRun, UnderlineStyle, Window,
-    div, img, prelude::*, px,
+    InteractiveText, ListAlignment, ListState, StrikethroughStyle, StyledText, TextRun,
+    UnderlineStyle, Window, div, img, list, prelude::*, px,
 };
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use std::{
@@ -482,7 +482,9 @@ pub struct MarkdownPane {
     theme: &'static Theme,
     mono: String,
     focus: FocusHandle,
-    scroll: ScrollHandle,
+    /// The blocks as a list that lays out only those in view: a long document stays quick
+    /// to scroll and to redraw.
+    list: ListState,
     /// Links and pictures resolved against the disk once per load, not on every redraw.
     links: std::collections::HashMap<String, Option<Target>>,
     pictures: std::collections::HashMap<String, Option<PathBuf>>,
@@ -517,7 +519,7 @@ impl MarkdownPane {
             theme,
             mono,
             focus: cx.focus_handle(),
-            scroll: ScrollHandle::new(),
+            list: ListState::new(0, ListAlignment::Top, px(600.0)),
             links: Default::default(),
             pictures: Default::default(),
             _watch: None,
@@ -549,7 +551,7 @@ impl MarkdownPane {
         self.path = path;
         self.load();
         self._watch = self.watch(cx);
-        self.scroll.set_offset(gpui::point(px(0.0), px(0.0)));
+        self.list.scroll_to(gpui::ListOffset::default());
         cx.notify();
     }
 
@@ -592,6 +594,12 @@ impl MarkdownPane {
         }
         self.links = links;
         self.pictures = pictures;
+        // Keep the reader's place when the file changes on disk.
+        let top = self.list.logical_scroll_top();
+        self.list.reset(self.blocks.len());
+        if top.item_ix < self.blocks.len() {
+            self.list.scroll_to(top);
+        }
     }
 
     fn watch(&self, cx: &mut Context<Self>) -> Option<Watch> {
@@ -897,20 +905,6 @@ impl MarkdownPane {
 impl Render for MarkdownPane {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = self.theme;
-        let mut ids = 0;
-        let blocks: Vec<AnyElement> = match &self.error {
-            Some(error) => vec![
-                div()
-                    .text_color(hsla(theme.text_muted))
-                    .child(error.clone())
-                    .into_any_element(),
-            ],
-            None => self
-                .blocks
-                .iter()
-                .map(|block| self.render_block(block, &mut ids, cx))
-                .collect(),
-        };
         let switch = view_switch(self.theme, false, {
             let pane = cx.entity().downgrade();
             move |_, cx| {
@@ -918,30 +912,42 @@ impl Render for MarkdownPane {
                     .ok();
             }
         });
-        let content = div()
-            .id("markdown")
-            .flex_1()
-            .min_h_0()
-            .overflow_y_scroll()
-            .track_scroll(&self.scroll)
-            .bg(hsla(theme.terminal_background))
-            .font_family(theme::UI_FONT)
-            .text_size(px(TEXT_SIZE))
-            .line_height(gpui::relative(1.55))
-            .text_color(hsla(theme.text))
-            .child(
-                div().w_full().flex().justify_center().child(
+        let content = match &self.error {
+            Some(error) => div()
+                .p_6()
+                .text_color(hsla(theme.text_muted))
+                .child(error.clone())
+                .into_any_element(),
+            None => list(
+                self.list.clone(),
+                cx.processor(|pane, index: usize, _, cx| {
+                    let Some(block) = pane.blocks.get(index) else {
+                        return div().into_any_element();
+                    };
+                    // Ids only need to be unique within a block, which lays out on its own.
+                    let mut ids = index * 10_000;
+                    let element = pane.render_block(block, &mut ids, cx);
+                    let last = index + 1 == pane.blocks.len();
+                    // Centered at a readable width, as one column, the gap below each block.
                     div()
                         .w_full()
-                        .max_w(px(MAX_WIDTH))
-                        .px_6()
-                        .py_5()
                         .flex()
-                        .flex_col()
-                        .gap_3()
-                        .children(blocks),
-                ),
-            );
+                        .justify_center()
+                        .child(
+                            div()
+                                .w_full()
+                                .max_w(px(MAX_WIDTH))
+                                .px_6()
+                                .when(index == 0, |this| this.pt_5())
+                                .pb(px(if last { 20.0 } else { 12.0 }))
+                                .child(element),
+                        )
+                        .into_any_element()
+                }),
+            )
+            .flex_1()
+            .into_any_element(),
+        };
         div()
             .size_full()
             .flex()
@@ -949,6 +955,10 @@ impl Render for MarkdownPane {
             .key_context(KEY_CONTEXT)
             .track_focus(&self.focus)
             .bg(hsla(theme.terminal_background))
+            .font_family(theme::UI_FONT)
+            .text_size(px(TEXT_SIZE))
+            .line_height(gpui::relative(1.55))
+            .text_color(hsla(theme.text))
             .on_action(cx.listener(|_, _: &ToggleRaw, _, cx| cx.emit(MarkdownEvent::ShowRaw)))
             .child(switch)
             .child(content)

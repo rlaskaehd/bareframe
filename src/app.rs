@@ -186,7 +186,7 @@ pub fn name() -> &'static str {
 /// Icons compiled into the binary; GPUI renders them as masks in the text color.
 struct Assets;
 
-const ICONS: [(&str, &[u8]); 9] = [
+const ICONS: [(&str, &[u8]); 10] = [
     ("icons/pin.svg", include_bytes!("../assets/icons/pin.svg")),
     (
         "icons/corner.svg",
@@ -206,6 +206,7 @@ const ICONS: [(&str, &[u8]); 9] = [
         include_bytes!("../assets/icons/folder.svg"),
     ),
     ("icons/file.svg", include_bytes!("../assets/icons/file.svg")),
+    ("icons/diff.svg", include_bytes!("../assets/icons/diff.svg")),
     (
         "icons/chevron-right.svg",
         include_bytes!("../assets/icons/chevron-right.svg"),

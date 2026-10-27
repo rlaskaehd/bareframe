@@ -105,14 +105,23 @@ impl WorkspaceView {
         cx.notify();
     }
 
-    /// The top bar's `+N −M` button, as Warp's; hidden outside a repository or with
-    /// nothing changed, and when Settings turn it off.
+    /// The top bar's diff button, as Warp's: always there (unless Settings hide it), with
+    /// `+N −M` once lines changed, and dimmed outside a repository.
     pub(super) fn render_diff_button(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
-        let (_, summary) = self.repo.as_ref()?;
-        if summary.status.entries.is_empty() || !self.settings.flag("code-review-button") {
+        if !self.settings.flag("code-review-button") {
             return None;
         }
         let theme = self.theme();
+        let counts = self
+            .repo
+            .as_ref()
+            .map(|(_, summary)| (summary.added, summary.removed))
+            .filter(|(added, removed)| *added > 0 || *removed > 0);
+        let color = match (&self.repo, self.review_open) {
+            (None, _) => theme.text_muted,
+            (Some(_), true) => theme.text,
+            (Some(_), false) => theme.text_muted,
+        };
         Some(
             div()
                 .id("diff-button")
@@ -124,14 +133,21 @@ impl WorkspaceView {
                 .h(px(24.0))
                 .rounded_md()
                 .text_size(px(12.0))
+                .font_weight(gpui::FontWeight::SEMIBOLD)
+                .when(self.repo.is_none(), |this| this.opacity(0.5))
                 .when(self.review_open, |this| this.bg(hsla(theme.tab_active)))
                 .hover(|style| style.bg(hsla(theme.tab_hover)))
                 .on_click(cx.listener(|view, _, window, cx| {
                     cx.stop_propagation();
                     view.toggle_review(window, cx)
                 }))
-                .child(div().text_color(hsla(theme.text_muted)).child("±"))
-                .child(review::counts(theme, summary.added, summary.removed)),
+                .child(
+                    gpui::svg()
+                        .path("icons/diff.svg")
+                        .size(px(15.0))
+                        .text_color(hsla(color)),
+                )
+                .children(counts.map(|(added, removed)| review::counts(theme, added, removed))),
         )
     }
 

@@ -416,7 +416,7 @@ pub const DEFS: &[Def] = &[
         "Code review",
         "code-review-button",
         "Show the code review button",
-        "Show the +N −M button in the top bar when the active pane's repository has changes.",
+        "Show the diff button in the top bar, with +N −M when the active pane's repository has changes.",
         Toggle,
         "true",
         App,
