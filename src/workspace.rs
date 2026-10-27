@@ -32,6 +32,7 @@ pub use viewer::Exit;
 mod changes;
 mod clipboard;
 mod columns;
+mod drag;
 mod layout;
 mod menu;
 mod palette;
@@ -946,11 +947,7 @@ impl Render for WorkspaceView {
                 cx.listener(|view, _, _, cx| {
                     view.resize = None;
                     view.resizing_column = None;
-                    if !view.dragging.is_empty() {
-                        view.dragging.clear();
-                        cx.notify();
-                    }
-                    if view.drag_frozen || view.drop_target.is_some() {
+                    if view.drag_frozen || view.drop_target.is_some() || !view.dragging.is_empty() {
                         view.end_drag(cx);
                     }
                 }),

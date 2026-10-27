@@ -1,103 +1,17 @@
-//! The vertical tabs sidebar: search, groups, tab cards, renaming and drag and drop.
-use super::{PaneView, RenameTarget, WorkspaceView, icon_button, layout::DraggedPane};
+//! The vertical tabs sidebar: search, groups, tab cards and renaming.
+use super::{
+    PaneView, RenameTarget, WorkspaceView,
+    drag::{DraggedPane, DraggedTab},
+    icon_button,
+};
 use crate::{
     text_field::{TextField, TextFieldEvent},
     theme::{self, Theme, hsla},
 };
-use bareframe_core::workspace::{GroupId, Tab, TabId};
+use bareframe_core::workspace::{GroupId, Tab};
 use gpui::{AnyElement, Context, Hsla, MouseButton, MouseDownEvent, Window, div, prelude::*, px};
 
-/// Tabs being dragged in the sidebar (the selection, or one tab); renders as the whole
-/// card following the cursor, as in Warp.
-#[derive(Clone)]
-pub(super) struct DraggedTab {
-    /// Ids, not indices: a shell can exit and close a tab while the drag is under way.
-    pub(super) tabs: Vec<TabId>,
-    title: String,
-    subtitle: Option<String>,
-    width: f32,
-    theme: &'static Theme,
-    icon: Option<&'static str>,
-}
-
-impl Render for DraggedTab {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        let theme = self.theme;
-        // Same padding as a row, so the card stays where it was grabbed.
-        div().w(px(self.width)).px(px(6.0)).py(px(3.0)).child(
-            div()
-                .flex()
-                .items_center()
-                .gap(px(10.0))
-                .px(px(10.0))
-                .h(px(46.0))
-                .rounded_md()
-                .bg(hsla(theme.tab_active))
-                .border_1()
-                .border_color(hsla(theme.accent).opacity(0.6))
-                .shadow_lg()
-                .opacity(0.92)
-                .font_family(theme::UI_FONT)
-                .text_color(hsla(theme.text))
-                .child(terminal_icon(theme, true, None, self.icon))
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .flex()
-                        .flex_col()
-                        .child(
-                            div()
-                                .truncate()
-                                .text_size(px(13.0))
-                                .child(self.title.clone()),
-                        )
-                        .children(self.subtitle.clone().map(|subtitle| {
-                            div()
-                                .truncate()
-                                .text_size(px(11.5))
-                                .text_color(hsla(theme.text_muted))
-                                .child(subtitle)
-                        })),
-                ),
-        )
-    }
-}
-
 impl WorkspaceView {
-    /// Drops `dragged` before the tab at `to`, joining `group`.
-    fn drop_tab(
-        &mut self,
-        dragged: &DraggedTab,
-        to: usize,
-        group: Option<GroupId>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let indices: Vec<usize> = dragged
-            .tabs
-            .iter()
-            .filter_map(|&id| self.model.tab_index(id))
-            .collect();
-        self.model.move_tabs(&indices, to, group);
-        self.dragging.clear();
-        self.sync(window, cx);
-    }
-
-    /// A pane dropped on the sidebar leaves its tab for a new one before `to`, in `group`.
-    fn drop_pane_tab(
-        &mut self,
-        dragged: &DraggedPane,
-        to: usize,
-        group: Option<GroupId>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.end_drag(cx);
-        self.model.detach_pane(dragged.pane, to, group);
-        self.sync(window, cx);
-    }
-
     /// Plain click focuses a tab; shift extends the selection from the active tab and
     /// cmd toggles one tab, as in Warp's vertical tabs.
     fn click_tab(
@@ -402,14 +316,7 @@ impl WorkspaceView {
                             .drag_over::<DraggedPane>(move |style, _, _, _| {
                                 style.bg(hsla(theme.tab_hover))
                             })
-                            .on_drop(cx.listener(move |view, dragged: &DraggedTab, window, cx| {
-                                view.drop_tab(dragged, end, None, window, cx)
-                            }))
-                            .on_drop(cx.listener(
-                                move |view, dragged: &DraggedPane, window, cx| {
-                                    view.drop_pane_tab(dragged, end, None, window, cx)
-                                },
-                            )),
+                            .map(|this| self.tab_drop_target(this, end, None, cx)),
                     ),
             )
     }
@@ -451,12 +358,7 @@ impl WorkspaceView {
                     view.open_group_menu(id, event.position, cx)
                 }),
             )
-            .on_drop(cx.listener(move |view, dragged: &DraggedTab, window, cx| {
-                view.drop_tab(dragged, end, Some(id), window, cx)
-            }))
-            .on_drop(cx.listener(move |view, dragged: &DraggedPane, window, cx| {
-                view.drop_pane_tab(dragged, end, Some(id), window, cx)
-            }))
+            .map(|this| self.tab_drop_target(this, end, Some(id), cx))
             .child(
                 div()
                     .w(px(10.0))
@@ -591,22 +493,7 @@ impl WorkspaceView {
             .child(terminal_icon(theme, active, tint, icon))
             .child(match self.rename_field(RenameTarget::Tab(tab.id)) {
                 Some(field) => field,
-                None => div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .child(div().truncate().text_size(px(13.0)).child(title))
-                    .when_some(subtitle, |this, subtitle| {
-                        this.child(
-                            div()
-                                .truncate()
-                                .text_size(px(11.5))
-                                .text_color(hsla(theme.text_muted))
-                                .child(subtitle),
-                        )
-                    })
-                    .into_any_element(),
+                None => tab_label(theme, title, subtitle).into_any_element(),
             })
             .when(group.is_none() && tab.pinned, |this| {
                 this.child(pin_mark(theme))
@@ -633,20 +520,12 @@ impl WorkspaceView {
             )
             .on_drag(dragged, move |dragged, _, _, cx| {
                 let tabs = dragged.tabs.clone();
-                if let Err(error) = weak.update(cx, |view, cx| {
-                    view.dragging = tabs;
-                    view.start_drag(cx);
-                }) {
+                if let Err(error) = weak.update(cx, |view, cx| view.start_drag(tabs, cx)) {
                     eprintln!("bareframe: starting a tab drag: {error}");
                 }
                 cx.new(|_| dragged.clone())
             })
-            .on_drop(cx.listener(move |view, dragged: &DraggedTab, window, cx| {
-                view.drop_tab(dragged, index, group, window, cx)
-            }))
-            .on_drop(cx.listener(move |view, dragged: &DraggedPane, window, cx| {
-                view.drop_pane_tab(dragged, index, group, window, cx)
-            }))
+            .map(|this| self.tab_drop_target(this, index, group, cx))
             // The lifted card leaves an empty slot behind, as in Warp.
             .map(|this| {
                 if lifted {
@@ -713,9 +592,28 @@ impl WorkspaceView {
     }
 }
 
+/// A tab card's title and, below it, its location.
+pub(super) fn tab_label(theme: &Theme, title: String, subtitle: Option<String>) -> gpui::Div {
+    div()
+        .flex_1()
+        .min_w_0()
+        .flex()
+        .flex_col()
+        .child(div().truncate().text_size(px(13.0)).child(title))
+        .when_some(subtitle, |this, subtitle| {
+            this.child(
+                div()
+                    .truncate()
+                    .text_size(px(11.5))
+                    .text_color(hsla(theme.text_muted))
+                    .child(subtitle),
+            )
+        })
+}
+
 /// Warp's session icon: a prompt glyph (or the pane's own icon, as the gear of Settings)
 /// in a circle, in the tab's color if any.
-fn terminal_icon(
+pub(super) fn terminal_icon(
     theme: &Theme,
     active: bool,
     tint: Option<Hsla>,

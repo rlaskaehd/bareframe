@@ -1,139 +1,10 @@
-//! The active tab's split layout, the pane headers and dragging panes (or sidebar tabs)
-//! beside other panes, as in Warp.
-use super::{PaneView, Resize, WorkspaceView, icon_button, sidebar::DraggedTab};
-use crate::theme::{self, Theme, hsla};
-use bareframe_core::workspace::{Axis, Direction, Layout, PaneId, TabId};
-use gpui::{
-    AnyElement, Bounds, Context, CursorStyle, DragMoveEvent, MouseButton, Pixels, Point, Window,
-    canvas, div, prelude::*, px, relative,
-};
-
-/// A pane lifted by its header: a small card with its title follows the cursor.
-#[derive(Clone)]
-pub(super) struct DraggedPane {
-    pub(super) pane: PaneId,
-    title: String,
-    theme: &'static Theme,
-}
-
-impl Render for DraggedPane {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        let theme = self.theme;
-        div()
-            .px(px(12.0))
-            .py(px(6.0))
-            .rounded_md()
-            .bg(hsla(theme.tab_active))
-            .border_1()
-            .border_color(hsla(theme.accent).opacity(0.6))
-            .shadow_lg()
-            .opacity(0.92)
-            .font_family(theme::UI_FONT)
-            .text_size(px(12.0))
-            .text_color(hsla(theme.text))
-            .child(self.title.clone())
-    }
-}
-
-/// The side of `bounds` whose edge is nearest `position`.
-fn nearest_side(bounds: Bounds<Pixels>, position: Point<Pixels>) -> Direction {
-    let x = f32::from(position.x - bounds.left()) / f32::from(bounds.size.width);
-    let y = f32::from(position.y - bounds.top()) / f32::from(bounds.size.height);
-    [
-        (x, Direction::Left),
-        (1.0 - x, Direction::Right),
-        (y, Direction::Up),
-        (1.0 - y, Direction::Down),
-    ]
-    .into_iter()
-    .min_by(|a, b| a.0.total_cmp(&b.0))
-    .map_or(Direction::Right, |(_, side)| side)
-}
-
-/// The half of a pane a drop would give the dragged pane or tab.
-fn drop_zone(side: Direction, theme: &Theme) -> impl IntoElement {
-    let zone = div()
-        .absolute()
-        .rounded_sm()
-        .border_2()
-        .border_color(hsla(theme.accent).opacity(0.7))
-        .bg(hsla(theme.accent).opacity(0.18));
-    match side {
-        Direction::Left => zone.top_0().bottom_0().left_0().w(relative(0.5)),
-        Direction::Right => zone.top_0().bottom_0().right_0().w(relative(0.5)),
-        Direction::Up => zone.left_0().right_0().top_0().h(relative(0.5)),
-        Direction::Down => zone.left_0().right_0().bottom_0().h(relative(0.5)),
-    }
-}
+//! The active tab's split layout and the pane headers, as in Warp.
+use super::{PaneView, Resize, WorkspaceView, drag::DraggedPane, icon_button};
+use crate::theme::{self, hsla};
+use bareframe_core::workspace::{Axis, Layout, PaneId};
+use gpui::{AnyElement, Context, CursorStyle, MouseButton, canvas, div, prelude::*, px, relative};
 
 impl WorkspaceView {
-    /// A pane or tab drag begins: the terminals freeze so drop zones can be drawn over them.
-    pub(super) fn start_drag(&mut self, cx: &mut Context<Self>) {
-        if !self.frozen {
-            self.set_frozen(true, cx);
-            self.drag_frozen = true;
-        }
-        cx.notify();
-    }
-
-    pub(super) fn end_drag(&mut self, cx: &mut Context<Self>) {
-        self.drop_target = None;
-        if std::mem::take(&mut self.drag_frozen) {
-            self.set_frozen(false, cx);
-        }
-        cx.notify();
-    }
-
-    /// Follows the drag over pane `id`: a drop there lands on the side nearest the cursor.
-    fn hover_drop(
-        &mut self,
-        id: PaneId,
-        allowed: bool,
-        bounds: Bounds<Pixels>,
-        position: Point<Pixels>,
-        cx: &mut Context<Self>,
-    ) {
-        let target =
-            (allowed && bounds.contains(&position)).then(|| (id, nearest_side(bounds, position)));
-        if target.is_some() && self.drop_target != target
-            || target.is_none() && self.drop_target.is_some_and(|(pane, _)| pane == id)
-        {
-            self.drop_target = target;
-            cx.notify();
-        }
-    }
-
-    /// The side of pane `id` a drop lands on, ending the drag either way.
-    fn take_drop(&mut self, id: PaneId, cx: &mut Context<Self>) -> Option<Direction> {
-        let side = self
-            .drop_target
-            .filter(|(pane, _)| *pane == id)
-            .map(|(_, side)| side);
-        self.dragging.clear();
-        self.end_drag(cx);
-        side
-    }
-
-    fn drop_pane(&mut self, id: PaneId, pane: PaneId, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(side) = self.take_drop(id, cx) {
-            self.model.move_pane(pane, id, side);
-        }
-        self.sync(window, cx);
-    }
-
-    fn drop_tabs(
-        &mut self,
-        id: PaneId,
-        tabs: &[TabId],
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(side) = self.take_drop(id, cx) {
-            self.model.merge_tabs(tabs, id, side);
-        }
-        self.sync(window, cx);
-    }
-
     /// Shown once a tab is split, as in Warp: the title, a menu and a close button, with a
     /// corner mark on the focused pane.
     fn render_pane_header(&self, id: PaneId, cx: &mut Context<Self>) -> AnyElement {
@@ -150,7 +21,7 @@ impl WorkspaceView {
         div()
             .id(("pane-header", key))
             .on_drag(dragged, move |dragged, _, _, cx| {
-                if let Err(error) = weak.update(cx, |view, cx| view.start_drag(cx)) {
+                if let Err(error) = weak.update(cx, |view, cx| view.start_drag(Vec::new(), cx)) {
                     eprintln!("bareframe: starting a pane drag: {error}");
                 }
                 cx.new(|_| dragged.clone())
@@ -219,38 +90,15 @@ impl WorkspaceView {
             Layout::Pane(id) => {
                 let id = *id;
                 let split = self.model.active().layout.panes().len() > 1;
-                let pane = self.pane(id).map(PaneView::view);
+                let view = self.pane(id).map(PaneView::view);
                 let terminal = self.terminal(id).is_some();
-                let zone = self
-                    .drop_target
-                    .filter(|(pane, _)| *pane == id)
-                    .map(|(_, side)| side);
-                div()
+                let pane = div()
                     .relative()
                     .size_full()
                     .min_w_0()
                     .min_h_0()
                     .flex()
                     .flex_col()
-                    .on_drag_move(cx.listener(
-                        move |view, event: &DragMoveEvent<DraggedPane>, _, cx| {
-                            let allowed = event.drag(cx).pane != id;
-                            view.hover_drop(id, allowed, event.bounds, event.event.position, cx)
-                        },
-                    ))
-                    .on_drag_move(cx.listener(
-                        move |view, event: &DragMoveEvent<DraggedTab>, _, cx| {
-                            let own = view.model.active().id;
-                            let allowed = !event.drag(cx).tabs.contains(&own);
-                            view.hover_drop(id, allowed, event.bounds, event.event.position, cx)
-                        },
-                    ))
-                    .on_drop(cx.listener(move |view, dragged: &DraggedPane, window, cx| {
-                        view.drop_pane(id, dragged.pane, window, cx)
-                    }))
-                    .on_drop(cx.listener(move |view, dragged: &DraggedTab, window, cx| {
-                        view.drop_tabs(id, &dragged.tabs, window, cx)
-                    }))
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |view, _, window, cx| {
@@ -267,10 +115,9 @@ impl WorkspaceView {
                             .min_h_0()
                             // Breathing room around the text; the surface can't be padded from GPUI.
                             .when(terminal, |this| this.p(px(6.0)))
-                            .children(pane),
-                    )
-                    .children(zone.map(|side| drop_zone(side, theme)))
-                    .into_any_element()
+                            .children(view),
+                    );
+                self.pane_drop_target(id, pane, cx).into_any_element()
             }
             Layout::Split {
                 axis,
