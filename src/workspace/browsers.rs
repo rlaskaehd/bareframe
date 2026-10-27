@@ -36,7 +36,7 @@ impl WorkspaceView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Cookies, history and caches, kept between runs beside the config.
+        // Chromium's own files, beside the config; pages keep nothing on disk (see engine).
         let data = files::config_file()
             .map(|config| config.with_file_name("browser"))
             .unwrap_or_else(|| std::env::temp_dir().join("bareframe-browser"));

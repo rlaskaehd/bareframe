@@ -37,6 +37,11 @@ struct Engine {
     live: usize,
     /// Each browser's DevTools observer, kept registered while it is open.
     observers: HashMap<i32, Registration>,
+    /// Where pages keep cookies, history and caches: memory only, gone when the app quits.
+    /// Chromium would encrypt saved cookies with the fixed key (see BrowserApp), which any
+    /// program of the user's could read.
+    /// ponytail: a profile on disk with a Keychain-held key when logins must survive quitting.
+    memory: Option<RequestContext>,
     /// DevTools calls waiting for their result, by message id.
     replies: HashMap<i32, Reply>,
     next_message: i32,
@@ -78,7 +83,7 @@ pub fn needs_start() -> bool {
     STARTED.with_borrow(Option::is_none)
 }
 
-/// Starts Chromium if it hasn't been, keeping cookies and caches in `data`.
+/// Starts Chromium if it hasn't been, keeping its own files (not the pages') in `data`.
 pub fn start(data: &Path, cx: &mut Gpui) -> Result<(), String> {
     if let Some(started) = STARTED.with_borrow(Clone::clone) {
         return started;
@@ -109,7 +114,6 @@ fn start_now(data: &Path, cx: &mut Gpui) -> Result<(), String> {
     std::mem::forget(loader);
     let _ = api_hash(sys::CEF_API_VERSION_LAST, 0);
     mac::teach_application()?;
-    // Cookies there are encrypted with a fixed key (see BrowserApp), so only the owner reads it.
     if let Err(error) = std::fs::create_dir_all(data).and_then(|()| {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(data, std::fs::Permissions::from_mode(0o700))
@@ -250,13 +254,20 @@ pub fn open(
         ..Default::default()
     }
     .set_as_child(parent.cast(), &Rect::default());
+    let mut memory = ENGINE
+        .with_borrow(|engine| engine.memory.clone())
+        .or_else(|| {
+            // An empty cache path keeps the context in memory.
+            request_context_create_context(Some(&RequestContextSettings::default()), None)
+        })?;
+    ENGINE.with_borrow_mut(|engine| engine.memory = Some(memory.clone()));
     let browser = browser_host_create_browser_sync(
         Some(&info),
         Some(&mut client::client(events, keyboard)),
         Some(&CefString::from(url)),
         Some(&BrowserSettings::default()),
         None,
-        None,
+        Some(&mut memory),
     )?;
     let id = browser.identifier();
     let observer = browser
