@@ -1,11 +1,9 @@
 //! Asks before a clipboard operation the terminal would not do on its own: an unsafe paste,
 //! or a program reading or writing the clipboard (OSC 52) when Settings say to ask.
 use super::WorkspaceView;
-use crate::theme::{self, hsla};
+use crate::theme::hsla;
 use bareframe_core::{session::ClipboardOperation, workspace::PaneId};
-use gpui::{
-    Context, FocusHandle, KeyDownEvent, Window, anchored, deferred, div, point, prelude::*, px,
-};
+use gpui::{Context, FocusHandle, KeyDownEvent, Window, div, prelude::*, px};
 
 /// Lines of the text shown in the prompt; enough to spot a hidden command.
 const PREVIEW_LINES: usize = 12;
@@ -144,100 +142,80 @@ impl WorkspaceView {
                 .hover(|style| style.opacity(0.85))
                 .child(label)
         };
-        let viewport = self
-            .window_bounds
-            .map_or((1040.0, 720.0), |[_, _, w, h]| (w, h));
-        let width = 520.0_f32.min(viewport.0 - 40.0);
+        let (_, height) = self.window_size();
         Some(
-            deferred(
-                anchored()
-                    .position(point(px((viewport.0 - width) / 2.0), px(viewport.1 * 0.18)))
+            self.dialog(
+                520.0,
+                height * 0.18,
+                div()
+                    .track_focus(&prompt.focus)
+                    .p_4()
+                    .gap_3()
+                    // Esc refuses; there is no key that approves, so a stray
+                    // Enter can't confirm a paste.
+                    .on_key_down(cx.listener(|view, event: &KeyDownEvent, window, cx| {
+                        if event.keystroke.key == "escape" {
+                            view.finish_clipboard_prompt(false, window, cx);
+                        }
+                    }))
                     .child(
                         div()
-                            .track_focus(&prompt.focus)
-                            .occlude()
-                            .w(px(width))
-                            .p_4()
+                            .text_size(px(15.0))
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .child(title),
+                    )
+                    .child(div().text_color(hsla(theme.text_muted)).child(body))
+                    .children(source.map(|source| {
+                        div()
+                            .text_size(px(12.0))
+                            .text_color(hsla(theme.text_muted))
+                            .truncate()
+                            .child(source)
+                    }))
+                    .child(
+                        div()
+                            .p_2()
+                            .rounded_md()
+                            .bg(hsla(theme.terminal_background))
+                            .font_family(self.settings.font_family().unwrap_or("Menlo").to_owned())
+                            .text_size(px(12.0))
                             .flex()
                             .flex_col()
-                            .gap_3()
-                            .rounded_lg()
-                            .border_1()
-                            .border_color(hsla(theme.border))
-                            .bg(hsla(theme.tab_active))
-                            .shadow_lg()
-                            .font_family(theme::UI_FONT)
-                            .text_size(px(13.0))
-                            .text_color(hsla(theme.text))
-                            // Esc refuses; there is no key that approves, so a stray
-                            // Enter can't confirm a paste.
-                            .on_key_down(cx.listener(|view, event: &KeyDownEvent, window, cx| {
-                                if event.keystroke.key == "escape" {
-                                    view.finish_clipboard_prompt(false, window, cx);
-                                }
-                            }))
-                            .child(
-                                div()
-                                    .text_size(px(15.0))
-                                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                                    .child(title),
-                            )
-                            .child(div().text_color(hsla(theme.text_muted)).child(body))
-                            .children(source.map(|source| {
-                                div()
-                                    .text_size(px(12.0))
-                                    .text_color(hsla(theme.text_muted))
-                                    .truncate()
-                                    .child(source)
-                            }))
-                            .child(
-                                div()
-                                    .p_2()
-                                    .rounded_md()
-                                    .bg(hsla(theme.terminal_background))
-                                    .font_family(
-                                        self.settings.font_family().unwrap_or("Menlo").to_owned(),
-                                    )
-                                    .text_size(px(12.0))
-                                    .flex()
-                                    .flex_col()
-                                    .children(preview.into_iter().map(|line| div().child(line)))
-                                    .when(more > 0, |this| {
-                                        this.child(
-                                            div()
-                                                .text_color(hsla(theme.text_muted))
-                                                .child(format!("… {more} more lines")),
-                                        )
-                                    }),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .justify_end()
-                                    .gap_2()
-                                    .child(button("clipboard-cancel", "Cancel", false).on_click(
-                                        cx.listener(|view, _, window, cx| {
-                                            view.finish_clipboard_prompt(false, window, cx)
-                                        }),
-                                    ))
-                                    .child(button("clipboard-confirm", confirm, true).on_click(
-                                        cx.listener(|view, _, window, cx| {
-                                            let early = view.clipboard_prompt.as_ref().is_some_and(
-                                                |prompt| {
-                                                    prompt.shown.get().is_none_or(|shown| {
-                                                        shown.elapsed() < CONFIRM_DELAY
-                                                    })
-                                                },
-                                            );
-                                            if !early {
-                                                view.finish_clipboard_prompt(true, window, cx)
-                                            }
-                                        }),
-                                    )),
-                            ),
+                            .children(preview.into_iter().map(|line| div().child(line)))
+                            .when(more > 0, |this| {
+                                this.child(
+                                    div()
+                                        .text_color(hsla(theme.text_muted))
+                                        .child(format!("… {more} more lines")),
+                                )
+                            }),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .justify_end()
+                            .gap_2()
+                            .child(button("clipboard-cancel", "Cancel", false).on_click(
+                                cx.listener(|view, _, window, cx| {
+                                    view.finish_clipboard_prompt(false, window, cx)
+                                }),
+                            ))
+                            .child(button("clipboard-confirm", confirm, true).on_click(
+                                cx.listener(|view, _, window, cx| {
+                                    let early =
+                                        view.clipboard_prompt.as_ref().is_some_and(|prompt| {
+                                            prompt
+                                                .shown
+                                                .get()
+                                                .is_none_or(|shown| shown.elapsed() < CONFIRM_DELAY)
+                                        });
+                                    if !early {
+                                        view.finish_clipboard_prompt(true, window, cx)
+                                    }
+                                }),
+                            )),
                     ),
-            )
-            .with_priority(2),
+            ),
         )
     }
 }

@@ -5,7 +5,7 @@ use crate::{
     rename::RenameInput,
     search::SearchPanel,
     settings_pane::SettingsPane,
-    theme::{Theme, hsla},
+    theme::{self, Theme, hsla},
 };
 use bareframe_core::{
     config::LaunchConfig,
@@ -15,7 +15,8 @@ use bareframe_core::{
 };
 use gpui::{
     AnyView, App, Bounds, Context, CursorStyle, Entity, FocusHandle, MouseButton, MouseMoveEvent,
-    Pixels, Subscription, Window, WindowControlArea, div, prelude::*, px,
+    Pixels, Subscription, Window, WindowControlArea, anchored, deferred, div, point, prelude::*,
+    px,
 };
 use gpui_libghostty::TerminalTheme;
 use menu::ContextMenu;
@@ -693,6 +694,39 @@ impl WorkspaceView {
                             .text_color(hsla(theme.text_muted)),
                     ),
             )
+    }
+
+    /// The window's size in points, as recorded on the last render.
+    fn window_size(&self) -> (f32, f32) {
+        self.window_bounds
+            .map_or((1040.0, 720.0), |[_, _, width, height]| (width, height))
+    }
+
+    /// A dialog card centered across the window, `top` points down and at most `width`
+    /// wide, drawn above menus. `card` brings its own content and padding.
+    fn dialog(&self, width: f32, top: f32, card: gpui::Div) -> impl IntoElement {
+        let theme = self.theme();
+        let (window_width, _) = self.window_size();
+        let width = width.min(window_width - 40.0);
+        deferred(
+            anchored()
+                .position(point(px((window_width - width) / 2.0), px(top)))
+                .child(
+                    card.occlude()
+                        .w(px(width))
+                        .flex()
+                        .flex_col()
+                        .rounded_lg()
+                        .border_1()
+                        .border_color(hsla(theme.border))
+                        .bg(hsla(theme.tab_active))
+                        .shadow_lg()
+                        .font_family(theme::UI_FONT)
+                        .text_size(px(13.0))
+                        .text_color(hsla(theme.text)),
+                ),
+        )
+        .with_priority(2)
     }
 
     /// Re-clamped on every render, so shrinking the window can't squeeze the terminals

@@ -5,7 +5,7 @@ use crate::{
     app,
     rename::{RenameEvent, RenameInput},
     settings_pane::{self, Section},
-    theme::{self, hsla},
+    theme::hsla,
 };
 use bareframe_core::{
     fuzzy::fuzzy_match,
@@ -13,7 +13,7 @@ use bareframe_core::{
 };
 use gpui::{
     Context, Entity, FontWeight, HighlightStyle, KeyDownEvent, ScrollHandle, StyledText,
-    Subscription, Window, anchored, deferred, div, point, prelude::*, px,
+    Subscription, Window, div, prelude::*, px,
 };
 
 const WIDTH: f32 = 600.0;
@@ -182,10 +182,6 @@ impl WorkspaceView {
         let query = palette.input.read(cx).text().to_owned();
         let items = self.palette_items(&query, cx);
         let selected = palette.selected.min(items.len().saturating_sub(1));
-        let viewport = self
-            .window_bounds
-            .map_or((1040.0, 720.0), |[_, _, w, h]| (w, h));
-        let width = WIDTH.min(viewport.0 - 40.0);
         let rows = items.into_iter().enumerate().map(|(index, item)| {
             let chosen = index == selected;
             let highlight = HighlightStyle {
@@ -244,96 +240,76 @@ impl WorkspaceView {
         let rows: Vec<_> = rows.collect();
         let empty = rows.is_empty();
         Some(
-            deferred(
-                anchored()
-                    .position(point(
-                        px((viewport.0 - width) / 2.0),
-                        px(app::TITLE_BAR_HEIGHT + 6.0),
-                    ))
+            self.dialog(
+                WIDTH,
+                app::TITLE_BAR_HEIGHT + 6.0,
+                div()
+                    .on_mouse_down_out(
+                        cx.listener(|view, _, window, cx| view.close_palette(window, cx)),
+                    )
+                    // The field has no use for Up and Down; they move the selection.
+                    .on_key_down(cx.listener(|view, event: &KeyDownEvent, _, cx| {
+                        let step = match event.keystroke.key.as_str() {
+                            "up" => -1,
+                            "down" => 1,
+                            _ => return,
+                        };
+                        cx.stop_propagation();
+                        view.move_palette(step, cx);
+                    }))
                     .child(
                         div()
-                            .occlude()
-                            .w(px(width))
                             .flex()
-                            .flex_col()
-                            .rounded_lg()
-                            .border_1()
+                            .items_center()
+                            .gap_2()
+                            .px_3()
+                            .h(px(40.0))
+                            .border_b_1()
                             .border_color(hsla(theme.border))
-                            .bg(hsla(theme.tab_active))
-                            .shadow_lg()
-                            .font_family(theme::UI_FONT)
-                            .text_size(px(13.0))
-                            .text_color(hsla(theme.text))
-                            .on_mouse_down_out(
-                                cx.listener(|view, _, window, cx| view.close_palette(window, cx)),
+                            .child(
+                                gpui::svg()
+                                    .path("icons/search.svg")
+                                    .flex_shrink_0()
+                                    .size(px(14.0))
+                                    .text_color(hsla(theme.text_muted)),
                             )
-                            // The field has no use for Up and Down; they move the selection.
-                            .on_key_down(cx.listener(|view, event: &KeyDownEvent, _, cx| {
-                                let step = match event.keystroke.key.as_str() {
-                                    "up" => -1,
-                                    "down" => 1,
-                                    _ => return,
-                                };
-                                cx.stop_propagation();
-                                view.move_palette(step, cx);
-                            }))
                             .child(
                                 div()
+                                    .relative()
+                                    .flex_1()
+                                    .min_w_0()
                                     .flex()
                                     .items_center()
-                                    .gap_2()
-                                    .px_3()
-                                    .h(px(40.0))
-                                    .border_b_1()
-                                    .border_color(hsla(theme.border))
-                                    .child(
-                                        gpui::svg()
-                                            .path("icons/search.svg")
-                                            .flex_shrink_0()
-                                            .size(px(14.0))
-                                            .text_color(hsla(theme.text_muted)),
-                                    )
-                                    .child(
-                                        div()
-                                            .relative()
-                                            .flex_1()
-                                            .min_w_0()
-                                            .flex()
-                                            .items_center()
-                                            .when(query.is_empty(), |this| {
-                                                this.child(
-                                                    div()
-                                                        .absolute()
-                                                        .left_0()
-                                                        .text_color(hsla(theme.text_muted))
-                                                        .child(
-                                                            "Search commands, settings and tabs",
-                                                        ),
-                                                )
-                                            })
-                                            .child(palette.input.clone()),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .id("palette-rows")
-                                    .max_h(px(LIST_HEIGHT))
-                                    .overflow_y_scroll()
-                                    .track_scroll(&palette.scroll)
-                                    .p_1()
-                                    .children(rows)
-                                    .when(empty, |this| {
+                                    .when(query.is_empty(), |this| {
                                         this.child(
                                             div()
-                                                .p_3()
+                                                .absolute()
+                                                .left_0()
                                                 .text_color(hsla(theme.text_muted))
-                                                .child("No matching commands"),
+                                                .child("Search commands, settings and tabs"),
                                         )
-                                    }),
+                                    })
+                                    .child(palette.input.clone()),
                             ),
+                    )
+                    .child(
+                        div()
+                            .id("palette-rows")
+                            .max_h(px(LIST_HEIGHT))
+                            .overflow_y_scroll()
+                            .track_scroll(&palette.scroll)
+                            .p_1()
+                            .children(rows)
+                            .when(empty, |this| {
+                                this.child(
+                                    div()
+                                        .p_3()
+                                        .text_color(hsla(theme.text_muted))
+                                        .child("No matching commands"),
+                                )
+                            }),
                     ),
-            )
-            .with_priority(2),
+            ),
         )
     }
 }
