@@ -52,6 +52,8 @@ pub struct TextField {
     finished: bool,
     /// Rename fields commit on blur and finish once; the search field never finishes.
     blur: Option<Subscription>,
+    /// The click that focuses the field selects all of it, as in a browser's address bar.
+    select_on_focus: bool,
 }
 
 impl EventEmitter<TextFieldEvent> for TextField {}
@@ -85,11 +87,17 @@ impl TextField {
             accent,
             finished: false,
             blur: None,
+            select_on_focus: false,
         }
     }
 
     pub fn focus(&self, window: &mut Window, cx: &mut Context<Self>) {
         self.focus.focus(window, cx);
+    }
+
+    /// Makes the click that focuses the field select all of it, as in a browser's address bar.
+    pub fn select_on_focus(&mut self) {
+        self.select_on_focus = true;
     }
 
     pub fn is_focused(&self, window: &Window) -> bool {
@@ -261,7 +269,12 @@ impl TextField {
         cx: &mut Context<Self>,
     ) {
         cx.stop_propagation();
+        let focusing = !self.focus.is_focused(window);
         self.focus.focus(window, cx);
+        if focusing && self.select_on_focus {
+            self.move_to(0, cx);
+            return self.select_to(self.content.len(), cx);
+        }
         let (Some(bounds), Some(line)) = (self.last_bounds, self.last_layout.as_ref()) else {
             return;
         };

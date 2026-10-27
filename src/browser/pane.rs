@@ -100,6 +100,7 @@ impl BrowserPane {
     ) -> Self {
         let address = cx.new(|cx| {
             let mut field = TextField::search(theme.accent, window, cx);
+            field.select_on_focus();
             field.set_text(&url, cx);
             field
         });
