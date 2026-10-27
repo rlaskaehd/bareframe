@@ -1,4 +1,4 @@
-use crate::{terminal::adapter::GhosttyAdapter, theme};
+use crate::{terminal::GhosttyAdapter, theme};
 use bareframe_core::{
     config::{LaunchConfig, display_path},
     session::{
