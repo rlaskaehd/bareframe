@@ -395,8 +395,9 @@ fn is_image(path: &Path) -> bool {
         .extension()
         .and_then(|extension| extension.to_str())
         .is_some_and(|extension| {
-            ["png", "jpg", "jpeg", "gif", "webp", "bmp"]
-                .contains(&extension.to_ascii_lowercase().as_str())
+            // ponytail: animated GIF and WebP are left out, since frames multiply the
+            // decoded size past what the header shows; count frames if they are wanted.
+            ["png", "jpg", "jpeg", "bmp"].contains(&extension.to_ascii_lowercase().as_str())
         });
     picture
         && std::fs::metadata(path)
