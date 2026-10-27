@@ -49,11 +49,7 @@ impl EditorPane {
             .get(line)
             .into_iter()
             .flatten()
-            .filter(|(range, _)| {
-                range.end <= text.len()
-                    && text.is_char_boundary(range.start)
-                    && text.is_char_boundary(range.end)
-            })
+            .filter(|(range, _)| text.get(range.clone()).is_some())
             .cloned()
             .collect();
         let marked = self

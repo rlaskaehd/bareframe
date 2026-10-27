@@ -140,10 +140,7 @@ impl EditorPane {
     pub(super) fn render_notice(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
         let notice = self.notice.as_ref()?;
         let theme = self.theme;
-        let name = self
-            .path
-            .file_name()
-            .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+        let name = crate::explorer::file_name(&self.path);
         let button = |id: &'static str, label: &'static str, primary: bool| {
             widgets::button(theme, id, label, primary)
                 .px_2()

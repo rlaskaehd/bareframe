@@ -708,11 +708,7 @@ impl CodeReview {
             .and_then(|lines| lines.get(line_index))
             .into_iter()
             .flatten()
-            .filter(|(range, _)| {
-                range.end <= text.len()
-                    && text.is_char_boundary(range.start)
-                    && text.is_char_boundary(range.end)
-            })
+            .filter(|(range, _)| text.get(range.clone()).is_some())
             .map(|(range, syntax)| {
                 let color = hsla(syntax::color(theme, *syntax));
                 (range.clone(), HighlightStyle::color(color))

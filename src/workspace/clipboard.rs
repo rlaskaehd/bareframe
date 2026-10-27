@@ -200,9 +200,7 @@ impl WorkspaceView {
                                 .p_2()
                                 .rounded_md()
                                 .bg(hsla(theme.terminal_background))
-                                .font_family(
-                                    self.settings.font_family().unwrap_or("Menlo").to_owned(),
-                                )
+                                .font_family(self.mono_font())
                                 .text_size(px(12.0))
                                 .flex()
                                 .flex_col()

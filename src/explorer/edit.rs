@@ -224,11 +224,7 @@ fn create(dir: &Path, name: &str, folder: bool) -> Result<PathBuf, String> {
     let made = if folder {
         std::fs::create_dir(&path)
     } else {
-        std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)
-            .map(drop)
+        std::fs::File::create_new(&path).map(drop)
     };
     made.map(|_| path)
         .map_err(|error| format!("Could not create {name}: {error}"))

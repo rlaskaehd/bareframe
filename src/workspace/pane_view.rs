@@ -68,10 +68,7 @@ impl PaneView {
             Self::Markdown(_) | Self::Editor(_) => {
                 let path = self.file(cx)?;
                 let dir = path.parent()?;
-                Some(files::home_dir().map_or_else(
-                    || dir.display().to_string(),
-                    |home| bareframe_core::config::display_path(dir, &home),
-                ))
+                Some(files::display_path(dir))
             }
         }
     }

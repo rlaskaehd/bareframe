@@ -1,6 +1,6 @@
 use crate::{terminal::GhosttyAdapter, theme};
 use bareframe_core::{
-    config::{LaunchConfig, display_path},
+    config::LaunchConfig,
     layout::PaneId,
     session::{
         ClipboardOperation, SessionId, SessionState, SessionStatus, TerminalEvent,
@@ -146,10 +146,7 @@ impl TerminalPane {
     }
 
     pub fn display_cwd(&self) -> String {
-        match crate::files::home_dir() {
-            Some(home) => display_path(&self.session.cwd, &home),
-            None => self.session.cwd.display().to_string(),
-        }
+        crate::files::display_path(&self.session.cwd)
     }
 
     /// Where a tab opened from this pane starts. Known only if the shell reports it.

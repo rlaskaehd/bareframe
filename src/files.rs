@@ -34,6 +34,14 @@ pub fn home_dir() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
 }
 
+/// `path` for showing, with the home folder as `~`.
+pub fn display_path(path: &Path) -> String {
+    home_dir().map_or_else(
+        || path.display().to_string(),
+        |home| bareframe_core::config::display_path(path, &home),
+    )
+}
+
 /// A file beside the settings; the validation instance keeps its own under `target/` so
 /// results are reproducible.
 fn app_file(name: &str, path: fn(Option<&Path>, &Path) -> PathBuf) -> Option<PathBuf> {

@@ -14,7 +14,6 @@ pub enum ThemeName {
     Light,
 }
 
-pub const DEFAULT_FONT_SIZE: f32 = 13.0;
 pub const FONT_SIZE_RANGE: std::ops::RangeInclusive<f32> = 6.0..=72.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -757,7 +756,7 @@ mod tests {
         );
         assert_eq!(settings.theme(), Some(ThemeName::Light));
         assert_eq!(settings.font_family(), Some("JetBrains Mono"));
-        assert_eq!(settings.font_size(), DEFAULT_FONT_SIZE);
+        assert_eq!(settings.font_size(), 13.0);
         assert_eq!(settings.keybinds, ["cmd+t=new_tab"]);
         assert_eq!(warnings.len(), 3);
         assert!(warnings[0].starts_with("line 4:"));
