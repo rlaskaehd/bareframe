@@ -1,7 +1,9 @@
 use crate::{
-    app::{self, *},
+    actions::*,
+    app,
     editor_tabs::EditorTabs,
     explorer::Explorer,
+    files,
     markdown::MarkdownPane,
     pane::{PaneEvent, TerminalPane},
     rename::RenameInput,
@@ -102,7 +104,7 @@ impl PaneView {
             Self::Markdown(_) | Self::Editor(_) => {
                 let path = self.file(cx)?;
                 let dir = path.parent()?;
-                Some(app::home_dir().map_or_else(
+                Some(files::home_dir().map_or_else(
                     || dir.display().to_string(),
                     |home| bareframe_core::config::display_path(dir, &home),
                 ))
@@ -426,10 +428,10 @@ impl WorkspaceView {
         if text == self.saved {
             return;
         }
-        let Some(path) = app::state_file() else {
+        let Some(path) = files::state_file() else {
             return;
         };
-        match app::write_atomically(&path, &text) {
+        match files::write_atomically(&path, &text) {
             Ok(()) => self.saved = text,
             Err(error) => eprintln!("bareframe: saving {}: {error}", path.display()),
         }
@@ -569,7 +571,7 @@ impl WorkspaceView {
 
     fn new_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let cwd = match self.settings.get("working-directory") {
-            "home" => app::home_dir().unwrap_or_else(|| self.config.cwd.clone()),
+            "home" => files::home_dir().unwrap_or_else(|| self.config.cwd.clone()),
             _ => self.active_cwd(cx),
         };
         let color = self.model.active().color;
@@ -698,7 +700,7 @@ impl WorkspaceView {
         let mono = self.mono_font();
         self.review
             .update(cx, |review, cx| review.set_theme(ui, mono, cx));
-        app::bind_keys(&self.settings, cx);
+        bind_keys(&self.settings, cx);
         cx.notify();
     }
 

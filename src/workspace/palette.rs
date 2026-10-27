@@ -162,7 +162,7 @@ impl WorkspaceView {
         self.close_palette(window, cx);
         match command {
             Command::Action(name) => {
-                if let Some(action) = app::keymap_action(name) {
+                if let Some(action) = crate::actions::keymap_action(name) {
                     window.dispatch_action(action, cx);
                 }
             }

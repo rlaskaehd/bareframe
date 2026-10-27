@@ -1,6 +1,6 @@
 //! Only this module knows GPUI's embedding and the pinned Ghostty adapter ABI.
 //! It emits backend-independent events. Command output is still owned by Ghostty.
-use crate::app::{
+use crate::actions::{
     ClearScreen, Copy, JumpToNextPrompt, JumpToPreviousPrompt, Paste, ScrollPageDown, ScrollPageUp,
     ScrollToBottom, ScrollToTop, TerminalSelectAll,
 };
@@ -53,7 +53,7 @@ impl GhosttyAdapter {
         cx: &mut Context<T>,
     ) -> Result<Entity<Self>, String> {
         let user_zdotdir = std::env::var_os("ZDOTDIR").map(std::path::PathBuf::from);
-        let integration = crate::app::zsh_integration();
+        let integration = crate::files::zsh_integration();
         let command = config.command_with_zsh_integration(
             integration
                 .as_ref()

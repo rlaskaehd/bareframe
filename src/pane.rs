@@ -146,7 +146,7 @@ impl TerminalPane {
     }
 
     pub fn display_cwd(&self) -> String {
-        match crate::app::home_dir() {
+        match crate::files::home_dir() {
             Some(home) => display_path(&self.session.cwd, &home),
             None => self.session.cwd.display().to_string(),
         }

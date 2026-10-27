@@ -2,7 +2,7 @@
 //! back to `~/.config/bareframe/config` and applied; outside edits to the file are reloaded.
 use super::{PaneView, WorkspaceView};
 use crate::{
-    app,
+    files,
     settings_pane::{SettingsEvent, SettingsPane},
     theme::Theme,
     watch::watch,
@@ -79,7 +79,7 @@ impl WorkspaceView {
         };
         match self.settings.set(key, value) {
             Ok(value) => {
-                match app::save_setting(key, &value, def.default) {
+                match files::save_setting(key, &value, def.default) {
                     Ok(text) => self.config_text = text,
                     Err(error) => eprintln!("bareframe: saving settings: {error}"),
                 }
@@ -101,14 +101,14 @@ impl WorkspaceView {
         cx: &mut Context<Self>,
     ) {
         let change = change.map(Option::as_ref);
-        match app::edit_config(|text| keymap::write_binding(text, name, change)) {
+        match files::edit_config(|text| keymap::write_binding(text, name, change)) {
             Ok(text) => self.reload_settings(text, cx),
             Err(error) => eprintln!("bareframe: saving keyboard shortcut: {error}"),
         }
     }
 
     fn open_config_file(&self) {
-        let Some(path) = app::config_file() else {
+        let Some(path) = files::config_file() else {
             return;
         };
         if !path.exists()
@@ -132,7 +132,7 @@ impl WorkspaceView {
     /// Reloads the settings when the file changes on disk, unless the change is our own
     /// write. A font size set with Cmd+= is not saved, so a reload returns to the file's.
     pub(super) fn watch_config(&mut self, cx: &mut Context<Self>) {
-        let Some(path) = app::config_file() else {
+        let Some(path) = files::config_file() else {
             return;
         };
         let Some(dir) = path.parent().map(std::path::Path::to_path_buf) else {
@@ -152,7 +152,7 @@ impl WorkspaceView {
         let reload = move |view: &mut Self, cx: &mut Context<Self>| {
             // A file caught mid-save or unreadable for a moment keeps the settings as
             // they are; a deleted one means the defaults.
-            match app::read_optional(&path) {
+            match files::read_optional(&path) {
                 Ok(text) => view.reload_settings(text.unwrap_or_default(), cx),
                 Err(error) => eprintln!("bareframe: {}: {error}", path.display()),
             }
@@ -169,10 +169,10 @@ impl WorkspaceView {
 
     /// Settings › Reload settings file (Ghostty's `reload_config`).
     pub(super) fn reload_from_disk(&mut self, cx: &mut Context<Self>) {
-        let Some(path) = app::config_file() else {
+        let Some(path) = files::config_file() else {
             return;
         };
-        let text = match app::read_optional(&path) {
+        let text = match files::read_optional(&path) {
             Ok(text) => text.unwrap_or_default(),
             Err(error) => return eprintln!("bareframe: {}: {error}", path.display()),
         };

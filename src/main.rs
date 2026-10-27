@@ -1,12 +1,16 @@
 #[cfg(not(target_os = "macos"))]
 compile_error!("bareframe currently targets macOS");
 
+mod actions;
 mod app;
+mod assets;
 mod diagram;
 mod editor;
 mod editor_tabs;
 mod explorer;
+mod files;
 mod markdown;
+mod menu_bar;
 mod pane;
 mod rename;
 mod repo;
@@ -37,7 +41,7 @@ fn main() {
     let request = std::env::current_dir()
         .map_err(|error| error.to_string())
         .and_then(|cwd| {
-            let home = app::home_dir().unwrap_or_else(|| cwd.clone());
+            let home = files::home_dir().unwrap_or_else(|| cwd.clone());
             LaunchConfig::parse(args, &cwd, &home)
         });
     match request {
