@@ -25,14 +25,32 @@ fn fonts() -> Option<&'static NativeFontContext> {
         .as_ref()
 }
 
-/// The diagram in `source` as SVG, in Mermaid's dark or neutral theme.
+/// Mermaid's plain `base` theme in the app's colors, set out the way VS Code and cmux draw
+/// diagrams: boxes filled apart from the page with a clear light (or dark) border, groups on
+/// a gray ground, and edge labels on gray chips. Dark first, then light.
+const THEME_VARIABLES: [&str; 2] = [
+    r##""background": "#262624", "primaryColor": "#1c1b1a", "mainBkg": "#1c1b1a",
+    "nodeBkg": "#1c1b1a", "primaryTextColor": "#ece9e1", "textColor": "#ece9e1",
+    "nodeTextColor": "#ece9e1", "titleColor": "#ece9e1", "primaryBorderColor": "#bdbab1",
+    "nodeBorder": "#bdbab1", "lineColor": "#bdbab1", "secondaryColor": "#30302e",
+    "tertiaryColor": "#3a3936", "clusterBkg": "#3a3936", "clusterBorder": "#5e5c57",
+    "edgeLabelBackground": "#4a4945""##,
+    r##""background": "#faf9f5", "primaryColor": "#ffffff", "mainBkg": "#ffffff",
+    "nodeBkg": "#ffffff", "primaryTextColor": "#141413", "textColor": "#141413",
+    "nodeTextColor": "#141413", "titleColor": "#141413", "primaryBorderColor": "#5c5b56",
+    "nodeBorder": "#5c5b56", "lineColor": "#5c5b56", "secondaryColor": "#f5f4ed",
+    "tertiaryColor": "#f0eee6", "clusterBkg": "#f0eee6", "clusterBorder": "#c9c6bd",
+    "edgeLabelBackground": "#e8e6dc""##,
+];
+
+/// The diagram in `source` as SVG, in the app's dark or light colors.
 ///
 /// Labels keep Mermaid's HTML layout, then merman's resvg-safe pass turns them into plain
 /// SVG text: GPUI draws SVG with resvg, which shows no HTML. (merman's own SVG-text labels
 /// wrap when measured but not when written, so long labels spilled out of their boxes.)
 pub fn render(source: &str, dark: bool) -> Result<String, String> {
-    // Mermaid's gray "neutral" sits with the ivory light theme better than its purple default.
-    let theme = if dark { "dark" } else { "neutral" };
+    // An init directive is one line.
+    let variables = THEME_VARIABLES[usize::from(!dark)].replace('\n', " ");
     let mut environment = SvgEnvironment::deterministic();
     let mut family = String::new();
     if let Some(fonts) = fonts()
@@ -49,7 +67,7 @@ pub fn render(source: &str, dark: bool) -> Result<String, String> {
         "dagre"
     };
     let source = format!(
-        "%%{{init: {{\"theme\": \"{theme}\", \"layout\": \"{layout}\"{family}}}}}%%\n{source}"
+        "%%{{init: {{\"theme\": \"base\", \"themeVariables\": {{{variables}}}, \"layout\": \"{layout}\"{family}}}}}%%\n{source}"
     );
     let request = SvgRequest {
         environment,
@@ -77,6 +95,7 @@ mod tests {
         .expect("flowchart");
         assert!(svg.contains("<svg") && svg.contains("시작"));
         assert!(!svg.contains("<foreignObject"), "labels must be SVG text");
+        assert!(svg.contains("#1c1b1a"), "the app's dark colors");
         let state = render(
             "stateDiagram-v2\n  [*] --> On : 광고주 요청(캠페인이 SUSPENDED일 때만)\n  On --> [*]",
             false,
