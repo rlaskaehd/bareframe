@@ -96,7 +96,10 @@ MVP 1의 셸 실행 모드는 zsh를 기준으로 한다. 다른 셸을 지정�
 - 저장하지 않은 변경은 탭·Pane 제목에 `●`로 보인다. 저장하지 않은 채 Pane을 닫거나(`×`, `Cmd+W`) 창을 닫거나 `Cmd+Q`로 끝내면 편집기 위에 `Save` / `Don't Save` / `Cancel`을 묻는다.
 - 다른 프로그램이 파일을 바꾸면 변경이 없을 때는 다시 읽고, 있으면 `Reload` / `Keep my changes`를 묻는다. 저장은 파일을 그 자리에서 덮어써 권한과 링크가 유지된다. 5MB가 넘는 파일은 읽기 전용으로 연다.
 - 구문 강조: Rust, Markdown, TOML, JSON, YAML, Shell, Python, JavaScript/TypeScript/TSX, C/C++, Go, HTML, CSS, Swift, Java, Ruby, Lua, SQL, Dockerfile. 색은 터미널 테마 팔레트를 쓴다. 입력이 멈추고 잠시 뒤 백그라운드에서 다시 파싱하며, 그 사이 고친 줄만 잠깐 색이 빠진다. 2MB가 넘는 파일은 강조하지 않는다.
-- 찾기·바꾸기, 줄로 이동, 파일 탭 묶음은 다음 단계(3b-3c)다.
+- 찾기 `Cmd+F`, 바꾸기 `Cmd+Option+F`: 편집기 위에 찾기 줄이 열리고, 한 줄 안의 선택은 그대로 찾을 말이 된다. 입력하는 동안 찾기를 시작한 곳 다음의 첫 결과로 간다. `Enter`·`Cmd+G`·`↓` 다음, `Cmd+Shift+G`·`↑` 이전, `Esc`·`×` 닫기. 대문자가 있으면 대소문자를 가리고 없으면 가리지 않는다. 결과 수와 현재 위치(`2 of 41`)를 보이고, 화면의 모든 결과를 칠한다. 바꾸기 칸의 `Enter`나 `Replace`는 현재 결과를 바꾸고 다음으로, `All`은 모두 바꾼다(실행 취소 한 번).
+- 줄로 이동 `Ctrl+G`: 줄 번호를 넣고 `Enter`.
+- Settings › Features › Editor: 줄 번호(절대·상대·끔), 자동 저장(기본 끔, 켜면 마지막 변경 1초 뒤 저장).
+- 파일 탭 묶음과 Markdown `Raw` 전환은 다음 단계다.
 
 ### Code review
 

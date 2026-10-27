@@ -94,6 +94,14 @@ impl RenameInput {
         &self.content
     }
 
+    /// Replaces the text and selects it all, so typing starts over.
+    pub fn set_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.content = text.to_owned();
+        self.selected_range = 0..text.len();
+        self.marked_range = None;
+        cx.notify();
+    }
+
     fn finish(&mut self, confirm: bool, cx: &mut Context<Self>) {
         if self.blur.is_some() && std::mem::replace(&mut self.finished, true) {
             return;

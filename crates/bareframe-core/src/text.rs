@@ -305,6 +305,45 @@ impl Buffer {
         Position::new(position.line, start)..Position::new(position.line, end)
     }
 
+    /// Every place `query` occurs, line by line (a match never spans a line break). The
+    /// case is ignored unless the query has an uppercase letter, as editors' smart case.
+    pub fn find_all(&self, query: &str) -> Vec<Range<Position>> {
+        if query.is_empty() || query.contains('\n') {
+            return Vec::new();
+        }
+        let exact = query.chars().any(char::is_uppercase);
+        let same = |a: char, b: char| {
+            if exact {
+                a == b
+            } else {
+                a == b || a.to_lowercase().eq(b.to_lowercase())
+            }
+        };
+        let wanted: Vec<char> = query.chars().collect();
+        let mut found = Vec::new();
+        for (line, text) in self.lines.iter().enumerate() {
+            let chars: Vec<(usize, char)> = text.char_indices().collect();
+            let mut index = 0;
+            while index + wanted.len() <= chars.len() {
+                let hit = wanted
+                    .iter()
+                    .zip(&chars[index..])
+                    .all(|(want, (_, have))| same(*want, *have));
+                if hit {
+                    let start = chars[index].0;
+                    let end = chars
+                        .get(index + wanted.len())
+                        .map_or(text.len(), |(offset, _)| *offset);
+                    found.push(Position::new(line, start)..Position::new(line, end));
+                    index += wanted.len();
+                } else {
+                    index += 1;
+                }
+            }
+        }
+        found
+    }
+
     /// The leading spaces or tabs of a line, which Enter carries to the next.
     pub fn indent(&self, line: usize) -> &str {
         let text = self.line(line);
@@ -501,6 +540,26 @@ mod tests {
             assert_eq!(buffer.from_utf16(buffer.to_utf16(position)), position);
         }
         assert_eq!(buffer.from_utf16(99), p(1, 5));
+    }
+
+    #[test]
+    fn find_uses_smart_case_and_stays_on_char_boundaries() {
+        let buffer = Buffer::new(
+            "Foo foo FOO
+한글 foo 한글",
+        );
+        assert_eq!(buffer.find_all("foo").len(), 4);
+        assert_eq!(buffer.find_all("Foo"), [p(0, 0)..p(0, 3)]);
+        assert_eq!(
+            buffer.find_all("글"),
+            [p(1, 3)..p(1, 6), p(1, 14)..p(1, 17)]
+        );
+        assert!(buffer.find_all("").is_empty());
+        assert_eq!(
+            Buffer::new("aaaa").find_all("aa").len(),
+            2,
+            "matches don't overlap"
+        );
     }
 
     #[test]

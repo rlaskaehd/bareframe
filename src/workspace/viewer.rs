@@ -1,7 +1,7 @@
 //! Files opened inside bareframe: Markdown in the viewer, other text in the code editor.
 use super::{PaneView, WorkspaceView, tools::open_externally};
 use crate::{
-    editor::{EditorEvent, EditorPane, is_text_file},
+    editor::{EditorEvent, EditorPane, LineNumbers, is_text_file},
     markdown::{MarkdownEvent, MarkdownPane, Target, is_markdown},
 };
 use bareframe_core::workspace::{Axis, PaneId};
@@ -80,6 +80,7 @@ impl WorkspaceView {
         let theme = self.theme();
         let (mono, size) = (self.mono_font(), self.settings.font_size());
         let pane = cx.new(|cx| EditorPane::new(path, theme, mono, size, cx));
+        self.apply_editor_options(&pane, cx);
         let events = cx.subscribe_in(
             &pane,
             window,
@@ -90,6 +91,16 @@ impl WorkspaceView {
         );
         self.panes
             .insert(id, (PaneView::Editor(pane), Some(events)));
+    }
+
+    pub(super) fn apply_editor_options(
+        &self,
+        pane: &gpui::Entity<EditorPane>,
+        cx: &mut Context<Self>,
+    ) {
+        let numbers = LineNumbers::from_setting(self.settings.get("editor-line-numbers"));
+        let autosave = self.settings.flag("editor-autosave");
+        pane.update(cx, |pane, cx| pane.set_options(numbers, autosave, cx));
     }
 
     /// Before quitting or closing the window: the first editor with unsaved changes asks,

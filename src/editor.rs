@@ -2,6 +2,7 @@
 //! usual movement and editing keys, undo, clipboard, Korean input through the system
 //! input method, saving, and guarding unsaved changes. Syntax colors and find come next.
 use crate::{
+    rename::{RenameEvent, RenameInput},
     syntax::{self, LineSyntax, Syntax},
     theme::{self, Theme, hsla},
 };
@@ -10,9 +11,9 @@ use futures::StreamExt;
 use gpui::{
     App, Bounds, ClipboardItem, Context, CursorStyle, ElementId, ElementInputHandler, Entity,
     EntityInputHandler, EventEmitter, FocusHandle, GlobalElementId, LayoutId, MouseButton,
-    MouseDownEvent, MouseMoveEvent, Pixels, Point, ScrollWheelEvent, ShapedLine, Style, Task,
-    TextRun, UTF16Selection, UnderlineStyle, Window, actions, div, fill, point, prelude::*, px,
-    relative, size,
+    MouseDownEvent, MouseMoveEvent, Pixels, Point, ScrollWheelEvent, ShapedLine, Style,
+    Subscription, Task, TextRun, UTF16Selection, UnderlineStyle, Window, actions, div, fill, point,
+    prelude::*, px, relative, size,
 };
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use std::{
@@ -60,10 +61,18 @@ actions!(
         Redo,
         Save,
         Collapse,
+        Find,
+        FindReplace,
+        FindNext,
+        FindPrevious,
+        GoToLine,
     ]
 );
 
+/// Editing keys apply only to the text area, so the find field keeps Tab and arrows.
 const KEY_CONTEXT: &str = "Editor";
+/// Find, go to line and save apply anywhere in the editor pane, find field included.
+const FILE_CONTEXT: &str = "EditorFile";
 /// Files larger than this open read-only: every edit copies a line vector this long.
 const MAX_EDITABLE: u64 = 5 << 20;
 const LINE_HEIGHT: f32 = 1.45;
@@ -73,6 +82,34 @@ pub enum EditorEvent {
     Changed,
     /// The user chose Save or Don't Save when asked; the pane may go.
     Close,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum LineNumbers {
+    Absolute,
+    Relative,
+    Off,
+}
+
+impl LineNumbers {
+    pub fn from_setting(value: &str) -> Self {
+        match value {
+            "relative" => Self::Relative,
+            "off" => Self::Off,
+            _ => Self::Absolute,
+        }
+    }
+}
+
+/// The find bar: the query, an optional replacement, and where the query occurs.
+struct FindBar {
+    query: Entity<RenameInput>,
+    replacement: Option<Entity<RenameInput>>,
+    matches: Vec<Range<Position>>,
+    current: Option<usize>,
+    /// The text and buffer version `matches` were found for.
+    found: Option<(String, u64)>,
+    _subscriptions: Vec<Subscription>,
 }
 
 enum Notice {
@@ -116,6 +153,11 @@ pub struct EditorPane {
     layout: Option<Layout>,
     /// The grammar for this file's colors, if one is bundled.
     language: Option<&'static str>,
+    find: Option<FindBar>,
+    go_to: Option<(Entity<RenameInput>, Subscription)>,
+    line_numbers: LineNumbers,
+    autosave: bool,
+    _autosave: Option<Task<()>>,
     /// Colors per line from the last parse; lines edited since have none until the next.
     syntax: Vec<LineSyntax>,
     _highlight: Option<Task<()>>,
@@ -178,6 +220,11 @@ impl EditorPane {
             discarded: false,
             layout: None,
             language: None,
+            find: None,
+            go_to: None,
+            line_numbers: LineNumbers::Absolute,
+            autosave: false,
+            _autosave: None,
             syntax: Vec::new(),
             _highlight: None,
             _watch: None,
@@ -218,6 +265,17 @@ impl EditorPane {
         self.theme = theme;
         self.font = font;
         self.font_size = font_size;
+        cx.notify();
+    }
+
+    pub fn set_options(
+        &mut self,
+        line_numbers: LineNumbers,
+        autosave: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.line_numbers = line_numbers;
+        self.autosave = autosave;
         cx.notify();
     }
 
@@ -280,6 +338,18 @@ impl EditorPane {
                 .splice(first..=last, std::iter::repeat_n(Vec::new(), fresh));
         }
         self.highlight(cx);
+        if self.autosave {
+            self._autosave = Some(cx.spawn(async move |editor, cx| {
+                cx.background_executor().timer(Duration::from_secs(1)).await;
+                editor
+                    .update(cx, |editor, cx| {
+                        if editor.buffer.is_dirty() {
+                            editor.save(cx);
+                        }
+                    })
+                    .ok();
+            }));
+        }
         self.anchor = end;
         self.head = end;
         self.marked = None;
@@ -646,6 +716,314 @@ impl EditorPane {
         if tabs { "\t" } else { "    " }
     }
 
+    fn open_find(&mut self, replace: bool, window: &mut Window, cx: &mut Context<Self>) {
+        self.go_to = None;
+        let accent = self.theme.accent;
+        // A selection on one line becomes the query, as in most editors.
+        let selected = self.buffer.slice(self.selection());
+        let seed = (!selected.is_empty() && !selected.contains('\n')).then_some(selected);
+        if self.find.is_none() {
+            let query = cx.new(|cx| RenameInput::search(accent, window, cx));
+            let events = cx.subscribe_in(&query, window, |e, _, event, window, cx| match event {
+                RenameEvent::Confirm(_) => e.find_step(true, cx),
+                RenameEvent::Cancel => e.close_bars(window, cx),
+            });
+            // Typing in the field jumps to the first match from where the search began.
+            let changes = cx.observe(&query, |e, _, cx| {
+                if let Some(find) = &mut e.find {
+                    find.found = None;
+                }
+                let from = e.selection().start;
+                e.anchor = from;
+                e.head = from;
+                e.find_from(from, cx);
+            });
+            self.find = Some(FindBar {
+                query,
+                replacement: None,
+                matches: Vec::new(),
+                current: None,
+                found: None,
+                _subscriptions: vec![events, changes],
+            });
+        }
+        let Some(find) = &mut self.find else {
+            return;
+        };
+        if let Some(seed) = seed {
+            find.query.update(cx, |input, cx| input.set_text(&seed, cx));
+        }
+        if replace && find.replacement.is_none() {
+            let input = cx.new(|cx| RenameInput::search(accent, window, cx));
+            let events = cx.subscribe_in(&input, window, |e, _, event, window, cx| match event {
+                RenameEvent::Confirm(_) => e.replace_current(cx),
+                RenameEvent::Cancel => e.close_bars(window, cx),
+            });
+            find._subscriptions.push(events);
+            find.replacement = Some(input);
+        }
+        find.query.update(cx, |input, cx| input.focus(window, cx));
+        cx.notify();
+    }
+
+    fn open_go_to(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.find = None;
+        let input = cx.new(|cx| RenameInput::search(self.theme.accent, window, cx));
+        let events = cx.subscribe_in(&input, window, |e, _, event, window, cx| {
+            if let RenameEvent::Confirm(text) = event
+                && let Ok(line) = text.trim().parse::<u64>()
+            {
+                e.go_to_line(line.max(1), cx);
+            }
+            e.close_bars(window, cx);
+        });
+        self.go_to = Some((input, events));
+        cx.notify();
+    }
+
+    fn close_bars(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.find = None;
+        self.go_to = None;
+        self.focus.focus(window, cx);
+        cx.notify();
+    }
+
+    /// Finds the query again if it or the text changed since the last look.
+    fn refresh_find(&mut self, cx: &App) {
+        let Some(find) = &mut self.find else {
+            return;
+        };
+        let query = find.query.read(cx).text().to_owned();
+        let key = (query, self.buffer.version);
+        if find.found.as_ref() != Some(&key) {
+            find.matches = self.buffer.find_all(&key.0);
+            find.current = None;
+            find.found = Some(key);
+        }
+    }
+
+    fn select_match(&mut self, index: usize, cx: &mut Context<Self>) {
+        let Some(range) = self
+            .find
+            .as_ref()
+            .and_then(|find| find.matches.get(index))
+            .cloned()
+        else {
+            return;
+        };
+        if let Some(find) = &mut self.find {
+            find.current = Some(index);
+        }
+        self.anchor = range.start;
+        self.select(range.end, true, cx);
+    }
+
+    /// The first match at or after `from`, wrapping to the top.
+    fn find_from(&mut self, from: Position, cx: &mut Context<Self>) {
+        self.refresh_find(cx);
+        let Some(find) = &self.find else {
+            return;
+        };
+        if find.matches.is_empty() {
+            return cx.notify();
+        }
+        let index = find.matches.partition_point(|range| range.start < from) % find.matches.len();
+        self.select_match(index, cx);
+    }
+
+    fn find_step(&mut self, forward: bool, cx: &mut Context<Self>) {
+        self.refresh_find(cx);
+        let Some(find) = &self.find else {
+            return;
+        };
+        let count = find.matches.len();
+        if count == 0 {
+            return;
+        }
+        let index = if forward {
+            find.matches
+                .partition_point(|range| range.start < self.selection().end)
+                % count
+        } else {
+            let before = find
+                .matches
+                .partition_point(|range| range.start < self.selection().start);
+            (before + count - 1) % count
+        };
+        self.select_match(index, cx);
+    }
+
+    fn replacement_text(&self, cx: &App) -> Option<String> {
+        let find = self.find.as_ref()?;
+        Some(find.replacement.as_ref()?.read(cx).text().to_owned())
+    }
+
+    /// Replaces the selected match and moves to the next one.
+    fn replace_current(&mut self, cx: &mut Context<Self>) {
+        let Some(text) = self.replacement_text(cx) else {
+            return;
+        };
+        self.refresh_find(cx);
+        let selection = self.selection();
+        let selected_match = self
+            .find
+            .as_ref()
+            .is_some_and(|find| find.matches.contains(&selection));
+        if selected_match {
+            self.replace(selection, &text, cx);
+        }
+        let from = self.head;
+        self.find_from(from, cx);
+    }
+
+    /// Every match at once, as one step to undo.
+    fn replace_all(&mut self, cx: &mut Context<Self>) {
+        let Some(text) = self.replacement_text(cx) else {
+            return;
+        };
+        self.refresh_find(cx);
+        let Some(find) = &self.find else {
+            return;
+        };
+        if find.matches.is_empty() || self.read_only {
+            return;
+        }
+        let mut lines: Vec<String> = self.buffer.lines().map(str::to_owned).collect();
+        for range in find.matches.iter().rev() {
+            lines[range.start.line].replace_range(range.start.column..range.end.column, &text);
+        }
+        let head = self.head;
+        let end = self.buffer.end();
+        self.replace(Position::default()..end, &lines.join("\n"), cx);
+        self.select(head, false, cx);
+    }
+
+    fn render_bars(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+        let theme = self.theme;
+        let field =
+            |id: &'static str, input: &Entity<RenameInput>, hint: &'static str, cx: &App| {
+                let empty = input.read(cx).text().is_empty();
+                let focus_input = input.clone();
+                div()
+                    .id(id)
+                    .relative()
+                    .flex_1()
+                    .min_w_0()
+                    .h(px(24.0))
+                    .px_2()
+                    .flex()
+                    .items_center()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(hsla(theme.border))
+                    .bg(hsla(theme.terminal_background))
+                    .overflow_hidden()
+                    .cursor_text()
+                    .on_click(move |_, window, cx| {
+                        focus_input.update(cx, |input, cx| input.focus(window, cx))
+                    })
+                    .when(empty, |this| {
+                        this.child(
+                            div()
+                                .absolute()
+                                .left(px(9.0))
+                                .text_color(hsla(theme.text_muted))
+                                .child(hint),
+                        )
+                    })
+                    .child(input.clone())
+            };
+        let button = |id: &'static str, label: &'static str| {
+            div()
+                .id(id)
+                .flex_none()
+                .px_2()
+                .py(px(2.0))
+                .rounded_md()
+                .text_color(hsla(theme.text_muted))
+                .hover(|style| style.bg(hsla(theme.tab_hover)).text_color(hsla(theme.text)))
+                .child(label)
+        };
+        let bar = div()
+            .flex()
+            .flex_none()
+            .flex_col()
+            .gap_1()
+            .px_3()
+            .py_1()
+            .border_b_1()
+            .border_color(hsla(theme.border))
+            .bg(hsla(theme.tab_active))
+            .font_family(theme::UI_FONT)
+            .text_size(px(12.0));
+        if let Some((input, _)) = &self.go_to {
+            return Some(
+                bar.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child("Go to line")
+                        .child(field("editor-go-to", input, "Line number", cx)),
+                )
+                .into_any_element(),
+            );
+        }
+        let find = self.find.as_ref()?;
+        let count = match (find.current, find.matches.len()) {
+            (_, 0) if find.query.read(cx).text().is_empty() => String::new(),
+            (_, 0) => "No results".to_owned(),
+            (Some(current), total) => format!("{} of {total}", current + 1),
+            (None, total) => format!("{total} found"),
+        };
+        Some(
+            bar.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(field("editor-find", &find.query, "Find", cx))
+                    .child(
+                        div()
+                            .flex_none()
+                            .min_w(px(64.0))
+                            .text_color(hsla(theme.text_muted))
+                            .child(count),
+                    )
+                    .child(
+                        button("editor-find-previous", "↑")
+                            .on_click(cx.listener(|e, _, _, cx| e.find_step(false, cx))),
+                    )
+                    .child(
+                        button("editor-find-next", "↓")
+                            .on_click(cx.listener(|e, _, _, cx| e.find_step(true, cx))),
+                    )
+                    .child(
+                        button("editor-find-close", "×")
+                            .on_click(cx.listener(|e, _, window, cx| e.close_bars(window, cx))),
+                    ),
+            )
+            .when_some(find.replacement.as_ref(), |this, replacement| {
+                this.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(field("editor-replace", replacement, "Replace", cx))
+                        .child(
+                            button("editor-replace-one", "Replace")
+                                .on_click(cx.listener(|e, _, _, cx| e.replace_current(cx))),
+                        )
+                        .child(
+                            button("editor-replace-all", "All")
+                                .on_click(cx.listener(|e, _, _, cx| e.replace_all(cx))),
+                        ),
+                )
+            })
+            .into_any_element(),
+        )
+    }
+
     fn render_notice(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
         let notice = self.notice.as_ref()?;
         let theme = self.theme;
@@ -922,7 +1300,7 @@ impl Element for EditorElement {
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
-        self.editor.update(cx, |editor, _| {
+        self.editor.update(cx, |editor, cx| {
             let line_height = editor.line_height();
             let font_id = window.text_system().resolve_font(&editor.base_font());
             let em = window
@@ -930,7 +1308,11 @@ impl Element for EditorElement {
                 .em_advance(font_id, px(editor.font_size))
                 .unwrap_or(px(8.0));
             let digits = editor.buffer.line_count().to_string().len().max(3);
-            let gutter_width = em * (digits as f32 + 2.0);
+            let gutter_width = match editor.line_numbers {
+                LineNumbers::Off => Pixels::ZERO,
+                _ => em * (digits as f32 + 2.0),
+            };
+            editor.refresh_find(cx);
             let text_left = bounds.left() + gutter_width + em;
             // Bring the cursor into view after a move or an edit.
             if std::mem::take(&mut editor.reveal) {
@@ -964,9 +1346,20 @@ impl Element for EditorElement {
                     strikethrough: None,
                 }]
             };
-            let gutter = (first..last)
+            let numbers = if editor.line_numbers == LineNumbers::Off {
+                0..0
+            } else {
+                first..last
+            };
+            let gutter = numbers
                 .map(|line| {
-                    let label = (line + 1).to_string();
+                    // Relative numbers count from the cursor's line, which shows its own.
+                    let label = match editor.line_numbers {
+                        LineNumbers::Relative if line != editor.head.line => {
+                            line.abs_diff(editor.head.line).to_string()
+                        }
+                        _ => (line + 1).to_string(),
+                    };
                     let color = hsla(if line == editor.head.line {
                         editor.theme.text
                     } else {
@@ -1011,6 +1404,20 @@ impl Element for EditorElement {
         let focused = focus.is_focused(window);
         let theme = editor.theme;
         let (scroll, head, selection) = (editor.scroll, editor.head, editor.selection());
+        // Matches on the lines in view; `first_match` is the first one's index overall.
+        let (matches, first_match, current) = match &editor.find {
+            Some(find) => {
+                let (first, shown) = (prepaint.layout.first, prepaint.layout.lines.len());
+                let low = find
+                    .matches
+                    .partition_point(|range| range.start.line < first);
+                let high = find
+                    .matches
+                    .partition_point(|range| range.start.line < first + shown);
+                (find.matches[low..high].to_vec(), low, find.current)
+            }
+            None => (Vec::new(), 0, None),
+        };
         let layout = &prepaint.layout;
         let (line_height, text_left) = (layout.line_height, layout.text_left);
         let top = |line: usize| bounds.top() + line_height * line as f32 - scroll.y;
@@ -1050,6 +1457,29 @@ impl Element for EditorElement {
             }
         });
         window.with_content_mask(Some(gpui::ContentMask { bounds: text_area }), |window| {
+            for (index, range) in matches.iter().enumerate() {
+                let Some(shaped) = range
+                    .start
+                    .line
+                    .checked_sub(layout.first)
+                    .and_then(|index| layout.lines.get(index))
+                else {
+                    continue;
+                };
+                let y = top(range.start.line);
+                let strength = if Some(index + first_match) == current {
+                    0.45
+                } else {
+                    0.18
+                };
+                window.paint_quad(fill(
+                    Bounds::from_corners(
+                        point(left + shaped.x_for_index(range.start.column), y),
+                        point(left + shaped.x_for_index(range.end.column), y + line_height),
+                    ),
+                    hsla(theme.palette[3]).opacity(strength),
+                ));
+            }
             for (index, shaped) in layout.lines.iter().enumerate() {
                 let line = layout.first + index;
                 let y = top(line);
@@ -1118,13 +1548,12 @@ impl Element for EditorElement {
 impl Render for EditorPane {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = self.theme;
-        div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .bg(hsla(theme.terminal_background))
+        let editing = div()
+            .flex_1()
+            .min_h_0()
             .key_context(KEY_CONTEXT)
             .track_focus(&self.focus)
+            .cursor(CursorStyle::IBeam)
             .on_action(cx.listener(|e, _: &Left, _, cx| {
                 let to = if e.anchor == e.head {
                     e.buffer.previous(e.head)
@@ -1260,26 +1689,33 @@ impl Render for EditorPane {
                     cx.emit(EditorEvent::Changed);
                 }
             }))
+            .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
+            .on_mouse_move(cx.listener(Self::on_mouse_move))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|e, _, _, _| e.selecting = false),
+            )
+            .on_scroll_wheel(cx.listener(Self::on_scroll))
+            .child(EditorElement {
+                editor: cx.entity(),
+            });
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .bg(hsla(theme.terminal_background))
+            .key_context(FILE_CONTEXT)
             .on_action(cx.listener(|e, _: &Save, _, cx| {
                 e.save(cx);
             }))
+            .on_action(cx.listener(|e, _: &Find, window, cx| e.open_find(false, window, cx)))
+            .on_action(cx.listener(|e, _: &FindReplace, window, cx| e.open_find(true, window, cx)))
+            .on_action(cx.listener(|e, _: &FindNext, _, cx| e.find_step(true, cx)))
+            .on_action(cx.listener(|e, _: &FindPrevious, _, cx| e.find_step(false, cx)))
+            .on_action(cx.listener(|e, _: &GoToLine, window, cx| e.open_go_to(window, cx)))
             .children(self.render_notice(cx))
-            .child(
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .cursor(CursorStyle::IBeam)
-                    .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
-                    .on_mouse_move(cx.listener(Self::on_mouse_move))
-                    .on_mouse_up(
-                        MouseButton::Left,
-                        cx.listener(|e, _, _, _| e.selecting = false),
-                    )
-                    .on_scroll_wheel(cx.listener(Self::on_scroll))
-                    .child(EditorElement {
-                        editor: cx.entity(),
-                    }),
-            )
+            .children(self.render_bars(cx))
+            .child(editing)
             .child(self.render_status())
     }
 }
@@ -1345,7 +1781,12 @@ pub fn key_bindings() -> Vec<gpui::KeyBinding> {
         KeyBinding::new("cmd-v", Paste, context),
         KeyBinding::new("cmd-z", Undo, context),
         KeyBinding::new("cmd-shift-z", Redo, context),
-        KeyBinding::new("cmd-s", Save, context),
+        KeyBinding::new("cmd-s", Save, Some(FILE_CONTEXT)),
+        KeyBinding::new("cmd-f", Find, Some(FILE_CONTEXT)),
+        KeyBinding::new("cmd-alt-f", FindReplace, Some(FILE_CONTEXT)),
+        KeyBinding::new("cmd-g", FindNext, Some(FILE_CONTEXT)),
+        KeyBinding::new("cmd-shift-g", FindPrevious, Some(FILE_CONTEXT)),
+        KeyBinding::new("ctrl-g", GoToLine, Some(FILE_CONTEXT)),
     ]
 }
 

@@ -634,7 +634,8 @@ impl WorkspaceView {
                 }
                 PaneView::Editor(pane) => {
                     let (mono, size) = (self.mono_font(), self.settings.font_size());
-                    pane.update(cx, |pane, cx| pane.set_style(ui, mono, size, cx))
+                    pane.update(cx, |pane, cx| pane.set_style(ui, mono, size, cx));
+                    self.apply_editor_options(pane, cx);
                 }
             }
         }
