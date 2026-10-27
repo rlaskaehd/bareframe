@@ -1,6 +1,7 @@
 use crate::{
     app::{self, *},
     explorer::Explorer,
+    markdown::MarkdownPane,
     pane::{PaneEvent, TerminalPane},
     rename::RenameInput,
     search::SearchPanel,
@@ -30,6 +31,7 @@ mod palette;
 mod prefs;
 mod sidebar;
 mod tools;
+mod viewer;
 
 #[derive(Clone, Copy, PartialEq)]
 enum RenameTarget {
@@ -43,13 +45,14 @@ enum RenameTarget {
 enum PaneView {
     Terminal(Entity<TerminalPane>),
     Settings(Entity<SettingsPane>),
+    Markdown(Entity<MarkdownPane>),
 }
 
 impl PaneView {
     fn terminal(&self) -> Option<&Entity<TerminalPane>> {
         match self {
             Self::Terminal(pane) => Some(pane),
-            Self::Settings(_) => None,
+            Self::Settings(_) | Self::Markdown(_) => None,
         }
     }
 
@@ -58,6 +61,7 @@ impl PaneView {
         match self {
             Self::Terminal(pane) => pane.read(cx).title(),
             Self::Settings(_) => "Settings".into(),
+            Self::Markdown(pane) => pane.read(cx).file_name(),
         }
     }
 
@@ -66,18 +70,39 @@ impl PaneView {
         match self {
             Self::Terminal(pane) => pane.read(cx).name(),
             Self::Settings(_) => "Settings".into(),
+            Self::Markdown(pane) => pane.read(cx).file_name(),
         }
     }
 
     /// The sidebar card's second line.
     fn location(&self, cx: &App) -> Option<String> {
-        self.terminal().map(|pane| pane.read(cx).display_cwd())
+        match self {
+            Self::Terminal(pane) => Some(pane.read(cx).display_cwd()),
+            Self::Settings(_) => None,
+            Self::Markdown(pane) => {
+                let dir = pane.read(cx).path().parent()?;
+                Some(app::home_dir().map_or_else(
+                    || dir.display().to_string(),
+                    |home| bareframe_core::config::display_path(dir, &home),
+                ))
+            }
+        }
+    }
+
+    /// The sidebar card's icon in place of the prompt glyph.
+    fn icon(&self) -> Option<&'static str> {
+        match self {
+            Self::Terminal(_) => None,
+            Self::Settings(_) => Some("icons/gear.svg"),
+            Self::Markdown(_) => Some("icons/file.svg"),
+        }
     }
 
     fn focus(&self, window: &mut Window, cx: &mut App) {
         match self {
             Self::Terminal(pane) => pane.update(cx, |pane, cx| pane.focus(window, cx)),
             Self::Settings(pane) => pane.update(cx, |pane, cx| pane.focus(window, cx)),
+            Self::Markdown(pane) => pane.update(cx, |pane, cx| pane.focus(window, cx)),
         }
     }
 
@@ -85,6 +110,7 @@ impl PaneView {
         match self {
             Self::Terminal(pane) => pane.clone().into(),
             Self::Settings(pane) => pane.clone().into(),
+            Self::Markdown(pane) => pane.clone().into(),
         }
     }
 }
@@ -166,8 +192,8 @@ impl WorkspaceView {
         let explorer = cx.new(|cx| Explorer::new(theme, cx));
         let show_hidden = settings.flag("show-hidden-files");
         explorer.update(cx, |explorer, cx| explorer.set_show_hidden(show_hidden, cx));
-        let explorer_events = cx.subscribe(&explorer, |view, _, event, cx| {
-            view.on_explorer_event(event, cx)
+        let explorer_events = cx.subscribe_in(&explorer, window, |view, _, event, window, cx| {
+            view.on_explorer_event(event, window, cx)
         });
         let global_search = cx.new(|cx| SearchPanel::new(theme, window, cx));
         let search_events =
@@ -257,6 +283,9 @@ impl WorkspaceView {
         for id in panes {
             match kinds.get(&id) {
                 Some(SavedPane::Settings) => self.insert_settings_pane(id, window, cx),
+                Some(SavedPane::Markdown { path }) if path.is_file() => {
+                    self.insert_markdown_pane(id, path.clone(), window, cx)
+                }
                 kind => {
                     let cwd = match kind {
                         Some(SavedPane::Terminal { cwd }) if cwd.is_dir() => cwd.clone(),
@@ -278,6 +307,9 @@ impl WorkspaceView {
                         cwd: pane.read(cx).cwd().to_path_buf(),
                     },
                     PaneView::Settings(_) => SavedPane::Settings,
+                    PaneView::Markdown(pane) => SavedPane::Markdown {
+                        path: pane.read(cx).path().to_path_buf(),
+                    },
                 };
                 (*id, saved)
             })
@@ -529,6 +561,10 @@ impl WorkspaceView {
                     pane.set_theme(ui, cx);
                     pane.set_settings(self.settings.clone(), cx);
                 }),
+                PaneView::Markdown(pane) => {
+                    let mono = self.mono_font();
+                    pane.update(cx, |pane, cx| pane.set_theme(ui, mono, cx))
+                }
             }
         }
         let show_hidden = self.settings.flag("show-hidden-files");

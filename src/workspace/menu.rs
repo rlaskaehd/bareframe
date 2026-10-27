@@ -268,7 +268,7 @@ impl WorkspaceView {
                 cx.write_to_clipboard(gpui::ClipboardItem::new_string(text))
             }
             MenuAction::MoveTab(index, up) => self.model.move_tab(index, up),
-            MenuAction::OpenPath(path) => super::tools::open_externally(&path),
+            MenuAction::OpenPath(path) => self.open_file(&path, window, cx),
             MenuAction::Reveal(path) => super::tools::reveal_in_finder(&path),
             MenuAction::CdTo(path) => return self.cd_to(&path, window, cx),
             MenuAction::NewTabAt(path) => return self.new_tab_at(path, window, cx),

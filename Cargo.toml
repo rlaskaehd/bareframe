@@ -20,6 +20,7 @@ ignore = "0.4"
 notify = "8"
 futures = "0.3"
 grep = "0.4"
+pulldown-cmark = { version = "0.13", default-features = false }
 
 [lints.rust]
 unsafe_code = "deny"

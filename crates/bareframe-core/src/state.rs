@@ -18,6 +18,10 @@ pub enum SavedPane {
         cwd: PathBuf,
     },
     Settings,
+    /// A Markdown file in the viewer.
+    Markdown {
+        path: PathBuf,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -83,6 +87,13 @@ pub fn encode(state: &SavedState) -> String {
                 )
             }
             SavedPane::Settings => format!("pane {} settings", id.0),
+            SavedPane::Markdown { path } => {
+                format!(
+                    "pane {} markdown {}",
+                    id.0,
+                    escape(path.as_os_str().as_bytes())
+                )
+            }
         });
     }
     out.push(String::new());
@@ -158,6 +169,11 @@ pub fn decode(input: &str) -> Result<SavedState, String> {
                         )),
                     },
                     "settings" => SavedPane::Settings,
+                    "markdown" => SavedPane::Markdown {
+                        path: PathBuf::from(OsString::from_vec(
+                            unescape(next()?).ok_or_else(|| fail("bad path"))?,
+                        )),
+                    },
                     other => return Err(fail(&format!("unknown pane kind `{other}`"))),
                 };
                 panes.push((id, pane));
@@ -329,6 +345,14 @@ mod tests {
             .collect();
         panes.retain(|(id, _)| *id != second);
         panes.push((second, SavedPane::Settings));
+        // A third tab showing a Markdown file.
+        let third = ws.new_tab();
+        panes.push((
+            third,
+            SavedPane::Markdown {
+                path: PathBuf::from("/tmp/문서 a.md"),
+            },
+        ));
         assert!(ws.tabs.iter().any(|tab| tab.layout.contains(first)));
         SavedState {
             workspace: ws,

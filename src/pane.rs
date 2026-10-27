@@ -165,6 +165,12 @@ impl TerminalPane {
         }
     }
 
+    pub fn paste(&self, cx: &mut Context<Self>) {
+        if let Some(terminal) = &self.terminal {
+            terminal.update(cx, |terminal, _| terminal.paste());
+        }
+    }
+
     pub fn type_text(&self, text: &str, cx: &mut Context<Self>) {
         if let Some(terminal) = &self.terminal {
             terminal.update(cx, |terminal, _| terminal.type_text(text));

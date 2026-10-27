@@ -22,7 +22,7 @@ struct DraggedTab {
     subtitle: Option<String>,
     width: f32,
     theme: &'static Theme,
-    settings: bool,
+    icon: Option<&'static str>,
 }
 
 impl Render for DraggedTab {
@@ -44,7 +44,7 @@ impl Render for DraggedTab {
                 .opacity(0.92)
                 .font_family(theme::UI_FONT)
                 .text_color(hsla(theme.text))
-                .child(terminal_icon(theme, true, None, self.settings))
+                .child(terminal_icon(theme, true, None, self.icon))
                 .child(
                     div()
                         .flex_1()
@@ -520,7 +520,7 @@ impl WorkspaceView {
             .and_then(|group| self.model.group(group))
             .map(|group| hsla(theme.group_colors[group.color]));
         let tint = tab.color.map(|color| hsla(theme.group_colors[color]));
-        let settings = matches!(self.pane(tab.active_pane), Some(PaneView::Settings(_)));
+        let icon = self.pane(tab.active_pane).and_then(PaneView::icon);
         let hover = format!("tab-{index}");
         let dragged = DraggedTab {
             title: if selected {
@@ -536,7 +536,7 @@ impl WorkspaceView {
             },
             width,
             theme,
-            settings,
+            icon,
         };
         let lifted = self.dragging.contains(&tab.id);
         let weak = cx.entity().downgrade();
@@ -571,7 +571,7 @@ impl WorkspaceView {
             .when_some(group_color, |this, color| {
                 this.child(div().w(px(3.0)).h(px(26.0)).rounded_sm().bg(color))
             })
-            .child(terminal_icon(theme, active, tint, settings))
+            .child(terminal_icon(theme, active, tint, icon))
             .child(match self.rename_field(RenameTarget::Tab(tab.id)) {
                 Some(field) => field,
                 None => div()
@@ -690,13 +690,13 @@ impl WorkspaceView {
     }
 }
 
-/// Warp's session icon: a prompt glyph (or a gear for Settings) in a circle, in the tab's
-/// color if any.
+/// Warp's session icon: a prompt glyph (or the pane's own icon, as the gear of Settings)
+/// in a circle, in the tab's color if any.
 fn terminal_icon(
     theme: &Theme,
     active: bool,
     tint: Option<Hsla>,
-    settings: bool,
+    icon: Option<&'static str>,
 ) -> impl IntoElement {
     let color = tint.unwrap_or(hsla(theme.text));
     div()
@@ -717,17 +717,9 @@ fn terminal_icon(
         .text_size(px(11.0))
         .font_weight(gpui::FontWeight::BOLD)
         .text_color(color)
-        .map(|this| {
-            if settings {
-                this.child(
-                    gpui::svg()
-                        .path("icons/gear.svg")
-                        .size(px(14.0))
-                        .text_color(color),
-                )
-            } else {
-                this.child(">_")
-            }
+        .map(|this| match icon {
+            Some(icon) => this.child(gpui::svg().path(icon).size(px(14.0)).text_color(color)),
+            None => this.child(">_"),
         })
 }
 

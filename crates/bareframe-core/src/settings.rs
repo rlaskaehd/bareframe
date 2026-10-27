@@ -411,6 +411,26 @@ pub const DEFS: &[Def] = &[
             ]
         }),
     ),
+    def(
+        Features,
+        "Files",
+        "open-markdown-in-viewer",
+        "Open Markdown files in the Markdown viewer",
+        "Open .md files from the project explorer and global search in bareframe instead of the default app.",
+        Toggle,
+        "true",
+        App,
+    ),
+    def(
+        Features,
+        "Files",
+        "open-file-layout",
+        "Choose a layout to open files",
+        "Where files opened in bareframe appear.",
+        Choice(&[("split", "Split pane"), ("tab", "New tab")]),
+        "split",
+        App,
+    ),
 ];
 
 pub fn find(key: &str) -> Option<&'static Def> {

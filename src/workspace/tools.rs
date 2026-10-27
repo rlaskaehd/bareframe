@@ -106,7 +106,7 @@ impl WorkspaceView {
     ) {
         match event {
             // ponytail: the line is dropped until bareframe has its own editor (3b).
-            SearchEvent::Open(path, _line) => open_externally(path),
+            SearchEvent::Open(path, _line) => self.open_file(path, window, cx),
             SearchEvent::Dismiss => self.sync(window, cx),
         }
     }
@@ -149,9 +149,14 @@ impl WorkspaceView {
             .update(cx, |explorer, cx| explorer.set_roots(roots, cx));
     }
 
-    pub(super) fn on_explorer_event(&mut self, event: &ExplorerEvent, cx: &mut Context<Self>) {
+    pub(super) fn on_explorer_event(
+        &mut self,
+        event: &ExplorerEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         match event {
-            ExplorerEvent::Open(path) => open_externally(path),
+            ExplorerEvent::Open(path) => self.open_file(path, window, cx),
             ExplorerEvent::ContextMenu {
                 path,
                 root,

@@ -361,6 +361,11 @@ impl GhosttyAdapter {
         }
     }
 
+    /// Ghostty's own paste of the clipboard, with bracketed paste and the unsafe-paste check.
+    pub fn paste(&mut self) {
+        self.binding(c"paste_from_clipboard");
+    }
+
     fn binding(&mut self, action: &std::ffi::CStr) {
         self.send_committed();
         if let Some(surface) = &mut self.surface {
