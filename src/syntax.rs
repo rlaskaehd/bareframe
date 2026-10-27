@@ -100,9 +100,7 @@ fn markdown_inline(text: &str, classes: &mut [Option<Syntax>]) {
     // Wider first, so bold inside a link still shows bold.
     spans.sort_by_key(|(range, _)| std::cmp::Reverse(range.len()));
     for (range, syntax) in spans {
-        for slot in &mut classes[range.start.min(text.len())..range.end.min(text.len())] {
-            *slot = Some(syntax);
-        }
+        classes[range.start.min(text.len())..range.end.min(text.len())].fill(Some(syntax));
     }
 }
 
@@ -117,10 +115,7 @@ pub fn highlight(language: &str, text: &str) -> Option<Vec<LineSyntax>> {
         let Some(syntax) = class(&span.capture) else {
             continue;
         };
-        let range = span.start as usize..(span.end as usize).min(text.len());
-        for slot in &mut classes[range] {
-            *slot = Some(syntax);
-        }
+        classes[span.start as usize..(span.end as usize).min(text.len())].fill(Some(syntax));
     }
     if language == "markdown" {
         markdown_inline(text, &mut classes);
