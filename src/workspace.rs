@@ -162,8 +162,8 @@ impl WorkspaceView {
             ThemeName::Light
         }));
         let explorer = cx.new(|cx| Explorer::new(theme, cx));
-        let explorer_events = cx.subscribe_in(&explorer, window, |view, _, event, window, cx| {
-            view.on_explorer_event(event, window, cx)
+        let explorer_events = cx.subscribe(&explorer, |view, _, event, cx| {
+            view.on_explorer_event(event, cx)
         });
         let global_search = cx.new(|cx| SearchPanel::new(theme, window, cx));
         let search_events =
@@ -546,9 +546,12 @@ impl WorkspaceView {
                 self.resizing_sidebar = false;
                 return;
             }
-            let max = (f32::from(window.viewport_size().width) * SIDEBAR_MAX_SHARE)
-                .max(SIDEBAR_MIN_WIDTH);
-            self.sidebar_width = f32::from(event.position.x).clamp(SIDEBAR_MIN_WIDTH, max);
+            self.sidebar_width = column_width(
+                f32::from(event.position.x),
+                window,
+                SIDEBAR_MAX_SHARE,
+                SIDEBAR_MIN_WIDTH,
+            );
             cx.notify();
             return;
         }
@@ -695,9 +698,12 @@ impl WorkspaceView {
     /// Re-clamped on every render, so shrinking the window can't squeeze the terminals
     /// behind a sidebar sized for a wider one.
     fn sidebar_shown_width(&self, window: &Window) -> f32 {
-        self.sidebar_width
-            .min(f32::from(window.viewport_size().width) * SIDEBAR_MAX_SHARE)
-            .max(SIDEBAR_MIN_WIDTH)
+        column_width(
+            self.sidebar_width,
+            window,
+            SIDEBAR_MAX_SHARE,
+            SIDEBAR_MIN_WIDTH,
+        )
     }
 
     fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
@@ -940,6 +946,13 @@ impl Render for WorkspaceView {
                     .child(div().flex_1().min_w_0().h_full().child(content)),
             )
     }
+}
+
+/// A side column's width: at most `share` of the window, never under `min`.
+fn column_width(width: f32, window: &Window, share: f32, min: f32) -> f32 {
+    width
+        .min(f32::from(window.viewport_size().width) * share)
+        .max(min)
 }
 
 fn icon_button(

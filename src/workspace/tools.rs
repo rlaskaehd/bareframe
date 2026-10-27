@@ -1,6 +1,6 @@
 //! Warp's tools panel: a column between the tab sidebar and the panes, holding the project
 //! explorer (and global search, 3a-3).
-use super::{WorkspaceView, icon_button, menu::MenuAction};
+use super::{WorkspaceView, column_width, icon_button, menu::MenuAction};
 use crate::{
     explorer::ExplorerEvent,
     search::SearchEvent,
@@ -137,12 +137,7 @@ impl WorkspaceView {
             .update(cx, |explorer, cx| explorer.set_roots(roots, cx));
     }
 
-    pub(super) fn on_explorer_event(
-        &mut self,
-        event: &ExplorerEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn on_explorer_event(&mut self, event: &ExplorerEvent, cx: &mut Context<Self>) {
         match event {
             ExplorerEvent::Open(path) => open_externally(path),
             ExplorerEvent::ContextMenu {
@@ -150,7 +145,7 @@ impl WorkspaceView {
                 root,
                 dir,
                 position,
-            } => self.open_explorer_menu(path, root, *dir, *position, window, cx),
+            } => self.open_explorer_menu(path, root, *dir, *position, cx),
         }
     }
 
@@ -160,7 +155,6 @@ impl WorkspaceView {
         root: &Path,
         dir: bool,
         position: Point<Pixels>,
-        _: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let relative = path.strip_prefix(root).map_or_else(
@@ -220,16 +214,17 @@ impl WorkspaceView {
             self.resizing_tools = false;
             return true;
         }
-        let max = (f32::from(window.viewport_size().width) * TOOLS_MAX_SHARE).max(TOOLS_MIN_WIDTH);
-        self.tools_width =
-            (f32::from(event.position.x) - self.tools_left).clamp(TOOLS_MIN_WIDTH, max);
+        self.tools_width = column_width(
+            f32::from(event.position.x) - self.tools_left,
+            window,
+            TOOLS_MAX_SHARE,
+            TOOLS_MIN_WIDTH,
+        );
         true
     }
 
     pub(super) fn tools_shown_width(&self, window: &Window) -> f32 {
-        self.tools_width
-            .min(f32::from(window.viewport_size().width) * TOOLS_MAX_SHARE)
-            .max(TOOLS_MIN_WIDTH)
+        column_width(self.tools_width, window, TOOLS_MAX_SHARE, TOOLS_MIN_WIDTH)
     }
 
     pub(super) fn render_tools(&self, width: f32, cx: &mut Context<Self>) -> impl IntoElement {
