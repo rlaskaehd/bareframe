@@ -10,8 +10,7 @@ use std::collections::HashMap;
 
 impl WorkspaceView {
     /// Reopens a saved layout: terminals start fresh shells in their last directory (home
-    /// if it is gone); programs that were running are not restarted, but an agent's resume
-    /// command waits at the prompt.
+    /// if it is gone); programs that were running are not restarted.
     pub(super) fn restore(
         &mut self,
         saved: SavedState,
@@ -52,18 +51,18 @@ impl WorkspaceView {
                         .unwrap_or(0);
                     self.insert_editor_pane(id, files, shown, window, cx)
                 }
-                Some(SavedPane::Terminal { cwd, resume }) if cwd.is_dir() => {
-                    self.open_pane_with(id, cwd.clone(), resume.clone(), window, cx);
-                }
-                _ => {
-                    let cwd = self.config.cwd.clone();
+                kind => {
+                    let cwd = match kind {
+                        Some(SavedPane::Terminal { cwd }) if cwd.is_dir() => cwd.clone(),
+                        _ => self.config.cwd.clone(),
+                    };
                     self.open_pane(id, cwd, window, cx);
                 }
             }
         }
     }
 
-    fn state(&self, resume: &HashMap<PaneId, String>, cx: &App) -> SavedState {
+    fn state(&self, cx: &App) -> SavedState {
         let panes = self
             .panes
             .iter()
@@ -71,7 +70,6 @@ impl WorkspaceView {
                 let saved = match pane {
                     PaneView::Terminal(pane) => SavedPane::Terminal {
                         cwd: pane.read(cx).cwd().to_path_buf(),
-                        resume: resume.get(id).cloned(),
                     },
                     PaneView::Settings(_) => SavedPane::Settings,
                     PaneView::Browser(pane) => SavedPane::Browser {
@@ -109,30 +107,7 @@ impl WorkspaceView {
 
     /// Writes the layout if it changed.
     pub(super) fn save_state(&mut self, cx: &App) {
-        self.save_state_with(&HashMap::new(), cx);
-    }
-
-    /// Writes the layout as bareframe goes, with what picks up each terminal's agent.
-    pub(super) fn save_final_state(&mut self, cx: &App) {
-        let terminals: Vec<(PaneId, String)> = self
-            .panes
-            .iter()
-            .filter_map(|(id, (pane, _))| match pane {
-                PaneView::Terminal(pane) => Some((*id, pane.read(cx).marker())),
-                _ => None,
-            })
-            .collect();
-        let markers: Vec<String> = terminals.iter().map(|(_, marker)| marker.clone()).collect();
-        let mut commands = crate::resume::commands(&markers);
-        let resume = terminals
-            .into_iter()
-            .filter_map(|(id, marker)| Some((id, commands.remove(&marker)?)))
-            .collect();
-        self.save_state_with(&resume, cx);
-    }
-
-    fn save_state_with(&mut self, resume: &HashMap<PaneId, String>, cx: &App) {
-        let mut state = self.state(resume, cx);
+        let mut state = self.state(cx);
         state.panes.sort_by_key(|(id, _)| *id);
         let text = state::encode(&state);
         if text == self.saved {

@@ -64,7 +64,7 @@ impl WorkspaceView {
     pub fn shutdown(&mut self, cx: &mut Context<Self>) {
         // Quitting and closing the window both land here, before the panes go away.
         if !self.panes.is_empty() {
-            self.save_final_state(cx);
+            self.save_state(cx);
         }
         for (_, (pane, _)) in self.panes.drain() {
             match pane {

@@ -254,18 +254,6 @@ impl WorkspaceView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.open_pane_with(id, cwd, None, window, cx);
-    }
-
-    /// A terminal whose zsh offers `prefill` at the first prompt.
-    fn open_pane_with(
-        &mut self,
-        id: PaneId,
-        cwd: std::path::PathBuf,
-        prefill: Option<String>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
         let mut config = LaunchConfig {
             cwd,
             ..self.config.clone()
@@ -276,7 +264,7 @@ impl WorkspaceView {
             config.shell = shell.to_path_buf();
         }
         let theme = self.terminal_theme();
-        let pane = cx.new(|cx| TerminalPane::new(id, config, prefill, &theme, window, cx));
+        let pane = cx.new(|cx| TerminalPane::new(id, config, &theme, window, cx));
         let subscription =
             cx.subscribe_in(
                 &pane,

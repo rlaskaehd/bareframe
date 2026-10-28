@@ -19,9 +19,6 @@ pub enum SavedPane {
     /// A terminal reopens as a fresh shell in its last directory.
     Terminal {
         cwd: PathBuf,
-        /// What to offer at its first prompt: picking up the agent that ran there when
-        /// bareframe quit.
-        resume: Option<String>,
     },
     Settings,
     /// A Markdown file in the viewer.
@@ -103,17 +100,12 @@ pub fn encode(state: &SavedState) -> String {
     }
     for (id, pane) in &state.panes {
         out.push(match pane {
-            SavedPane::Terminal { cwd, resume } => {
-                let mut line = format!(
+            SavedPane::Terminal { cwd } => {
+                format!(
                     "pane {} terminal {}",
                     id.0,
                     escape(cwd.as_os_str().as_bytes())
-                );
-                if let Some(resume) = resume {
-                    line.push(' ');
-                    line.push_str(&escape(resume.as_bytes()));
-                }
-                line
+                )
             }
             SavedPane::Settings => format!("pane {} settings", id.0),
             SavedPane::Markdown { path } => {
@@ -211,15 +203,6 @@ pub fn decode(input: &str) -> Result<SavedState, String> {
                         cwd: PathBuf::from(OsString::from_vec(
                             unescape(next()?).ok_or_else(|| fail("bad path"))?,
                         )),
-                        resume: match next() {
-                            Ok(word) => Some(
-                                String::from_utf8(
-                                    unescape(word).ok_or_else(|| fail("bad resume"))?,
-                                )
-                                .map_err(|_| fail("bad resume"))?,
-                            ),
-                            Err(_) => None,
-                        },
                     },
                     "settings" => SavedPane::Settings,
                     "browser" => SavedPane::Browser {
@@ -408,7 +391,6 @@ mod tests {
                     id,
                     SavedPane::Terminal {
                         cwd: PathBuf::from("/tmp/with space/한글"),
-                        resume: (id == first).then(|| "claude --resume 1a-2b".into()),
                     },
                 )
             })
