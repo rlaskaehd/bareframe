@@ -37,6 +37,8 @@ pub struct TerminalPane {
     stale: Vec<Arc<RenderImage>>,
     /// The running or last finished command, from the shell integration's titles.
     last_command: Option<String>,
+    /// A command zsh offers at the first prompt (see resume).
+    prefill: Option<String>,
     /// Hands the snapshots back to the window when the pane goes, however it is closed.
     _snapshots: Subscription,
 }
@@ -47,6 +49,7 @@ impl TerminalPane {
     pub fn new(
         id: PaneId,
         config: LaunchConfig,
+        prefill: Option<String>,
         theme: &TerminalTheme,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -60,6 +63,7 @@ impl TerminalPane {
             frozen: None,
             stale: Vec::new(),
             last_command: None,
+            prefill,
             _snapshots: cx.on_release_in(window, |pane: &mut Self, window, _| {
                 pane.stale.extend(pane.frozen.take());
                 pane.drop_stale(window);
@@ -70,7 +74,8 @@ impl TerminalPane {
     }
 
     fn start(&mut self, theme: &TerminalTheme, window: &mut Window, cx: &mut Context<Self>) {
-        match GhosttyAdapter::spawn(&self.config, self.session.key, theme, window, cx) {
+        let prefill = self.prefill.as_deref();
+        match GhosttyAdapter::spawn(&self.config, self.session.key, prefill, theme, window, cx) {
             Ok(terminal) => {
                 self.backend = Some(cx.subscribe(
                     &terminal,
@@ -158,6 +163,11 @@ impl TerminalPane {
     /// Where a tab opened from this pane starts. Known only if the shell reports it.
     pub fn cwd(&self) -> &std::path::Path {
         &self.session.cwd
+    }
+
+    /// Names this terminal's shell among the processes (see resume).
+    pub fn marker(&self) -> String {
+        crate::resume::marker(self.session.key)
     }
 
     pub fn focus(&self, window: &mut Window, cx: &mut Context<Self>) {

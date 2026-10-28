@@ -22,6 +22,7 @@ mod markdown;
 mod menu_bar;
 mod pane;
 mod repo;
+mod resume;
 mod review;
 mod search;
 mod settings_pane;

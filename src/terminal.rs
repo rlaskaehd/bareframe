@@ -50,6 +50,7 @@ impl GhosttyAdapter {
     pub fn spawn<T: 'static>(
         config: &LaunchConfig,
         key: SessionKey,
+        prefill: Option<&str>,
         theme: &TerminalTheme,
         window: &mut Window,
         cx: &mut Context<T>,
@@ -67,6 +68,16 @@ impl GhosttyAdapter {
             Some(env) => format!("{env} {command}"),
             None => command,
         };
+        // Finds its agent as bareframe quits, and offers to pick one up (see resume).
+        let quote = bareframe_core::config::quote;
+        let prefill = prefill.map_or_else(String::new, |prefill| {
+            format!(" {}={}", crate::resume::PREFILL_VAR, quote(prefill))
+        });
+        let command = format!(
+            "/usr/bin/env {}={}{prefill} {command}",
+            crate::resume::MARKER_VAR,
+            crate::resume::marker(key)
+        );
         let mut options = TerminalOptions::new(command, config.cwd.clone());
         options.configuration = TerminalConfiguration::Custom(theme.clone());
         // Ghostty asks only for unsafe pastes (a newline outside bracketed paste, or text
