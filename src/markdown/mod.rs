@@ -108,7 +108,7 @@ pub struct MarkdownPane {
     diagrams: std::collections::HashMap<String, Diagram>,
     diagrams_dark: bool,
     /// Diagrams no longer shown; GPUI keeps them until the window lets them go.
-    stale: Vec<std::sync::Arc<gpui::Image>>,
+    stale: Vec<std::sync::Arc<gpui::RenderImage>>,
     _diagrams: Option<Task<()>>,
     /// The text of each piece drawn so far, for copying a selection (see `select`).
     pieces: std::cell::RefCell<std::collections::BTreeMap<usize, String>>,
@@ -119,14 +119,16 @@ pub struct MarkdownPane {
 
 pub(super) enum Diagram {
     Pending,
-    Ready(std::sync::Arc<gpui::Image>),
+    /// Drawn off the UI thread and owned by this pane, not GPUI's shared image cache: two
+    /// panes showing one document each let go of their own.
+    Ready(std::sync::Arc<gpui::RenderImage>),
     Failed(String),
 }
 
 /// Drops the diagrams whose source `gone` picks, moving their pictures to `stale`.
 fn forget(
     diagrams: &mut std::collections::HashMap<String, Diagram>,
-    stale: &mut Vec<std::sync::Arc<gpui::Image>>,
+    stale: &mut Vec<std::sync::Arc<gpui::RenderImage>>,
     gone: impl Fn(&str) -> bool,
 ) {
     let forgotten = diagrams.extract_if(|source, _| gone(source));
@@ -170,9 +172,9 @@ impl MarkdownPane {
             pieces: Default::default(),
             selection: None,
             _watch: None,
-            _release: cx.on_release_in(window, |pane: &mut Self, window, cx| {
+            _release: cx.on_release_in(window, |pane: &mut Self, window, _| {
                 forget(&mut pane.diagrams, &mut pane.stale, |_| true);
-                pane.drop_stale(window, cx);
+                pane.drop_stale(window);
             }),
         };
         pane.load();
@@ -214,9 +216,10 @@ impl MarkdownPane {
         forget(&mut self.diagrams, &mut self.stale, |source| {
             !sources.contains(&source)
         });
+        // Pending ones too: replacing `_diagrams` below cancels the drawing they waited for.
         let wanted: Vec<String> = sources
             .into_iter()
-            .filter(|source| !self.diagrams.contains_key(*source))
+            .filter(|source| matches!(self.diagrams.get(*source), None | Some(Diagram::Pending)))
             .map(str::to_owned)
             .collect();
         if wanted.is_empty() {
@@ -226,6 +229,7 @@ impl MarkdownPane {
             self.diagrams.insert(source.clone(), Diagram::Pending);
         }
         let dark = self.diagrams_dark;
+        let renderer = cx.svg_renderer();
         self._diagrams = Some(cx.spawn(async move |pane, cx| {
             let drawn = cx
                 .background_executor()
@@ -233,13 +237,13 @@ impl MarkdownPane {
                     wanted
                         .into_iter()
                         .map(|source| {
-                            let diagram = match crate::diagram::render(&source, dark) {
-                                Ok(svg) => {
-                                    Diagram::Ready(std::sync::Arc::new(gpui::Image::from_bytes(
-                                        gpui::ImageFormat::Svg,
-                                        svg.into_bytes(),
-                                    )))
-                                }
+                            let diagram = crate::diagram::render(&source, dark).and_then(|svg| {
+                                gpui::Image::from_bytes(gpui::ImageFormat::Svg, svg.into_bytes())
+                                    .to_image_data(renderer.clone())
+                                    .map_err(|error| error.to_string())
+                            });
+                            let diagram = match diagram {
+                                Ok(image) => Diagram::Ready(image),
                                 Err(error) => Diagram::Failed(error),
                             };
                             (source, diagram)
@@ -259,14 +263,11 @@ impl MarkdownPane {
         }));
     }
 
-    /// Hands the pictures of forgotten diagrams back: GPUI's image cache and the window's
-    /// texture atlas keep them otherwise.
-    fn drop_stale(&mut self, window: &mut Window, cx: &mut gpui::App) {
+    /// Hands the pictures of forgotten diagrams back: the window's texture atlas keeps
+    /// them otherwise.
+    fn drop_stale(&mut self, window: &mut Window) {
         for image in self.stale.drain(..) {
-            if let Some(data) = image.clone().get_render_image(window, cx) {
-                let _ = window.drop_image(data);
-            }
-            image.remove_asset(cx);
+            let _ = window.drop_image(image);
         }
     }
 
@@ -373,7 +374,7 @@ impl MarkdownPane {
 
 impl Render for MarkdownPane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.drop_stale(window, cx);
+        self.drop_stale(window);
         let theme = self.theme;
         let switch = view_switch(self.theme, false, {
             let pane = cx.entity().downgrade();

@@ -208,8 +208,9 @@ impl BrowserPane {
                 .filter(|_| self.visible)
                 .map(|id| engine::devtools(id, "Page.captureScreenshot", serde_json::json!({})));
             let timeout = cx.background_executor().timer(SNAPSHOT);
+            let renderer = cx.svg_renderer();
             self._snapshot = Some(cx.spawn(async move |pane, cx| {
-                let image = match shot {
+                let png = match shot {
                     Some(shot) => {
                         match futures::future::select(std::pin::pin!(shot), timeout).await {
                             Either::Left((Ok(result), _)) => decode(&result),
@@ -218,10 +219,17 @@ impl BrowserPane {
                     }
                     None => None,
                 };
+                // A window-sized PNG takes tens of milliseconds to unpack: not on the UI thread.
+                let image = match png {
+                    Some(png) => {
+                        cx.background_executor()
+                            .spawn(async move { png.to_image_data(renderer).ok() })
+                            .await
+                    }
+                    None => None,
+                };
                 pane.update(cx, |pane, cx| {
                     if matches!(pane.frozen, Frozen::Capturing) {
-                        let image =
-                            image.and_then(|image| image.to_image_data(cx.svg_renderer()).ok());
                         pane.frozen = Frozen::Shot(image);
                         pane.show_view();
                         cx.notify();

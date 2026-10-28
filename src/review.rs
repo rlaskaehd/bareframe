@@ -74,6 +74,8 @@ pub struct CodeReview {
     commit: Option<CommitForm>,
     /// Bumped by each reload so an older, slower one can't overwrite a newer result.
     generation: u64,
+    /// The panel is open and wants the diffs; a revert or commit ending reloads only then.
+    shown: bool,
     _load: Option<Task<()>>,
     theme: &'static Theme,
     mono: String,
@@ -103,6 +105,7 @@ impl CodeReview {
             pending: None,
             commit: None,
             generation: 0,
+            shown: false,
             _load: None,
             theme,
             mono,
@@ -130,6 +133,7 @@ impl CodeReview {
 
     /// The panel closed: its diffs and their colors are let go until it opens again.
     pub fn unload(&mut self, cx: &mut Context<Self>) {
+        self.shown = false;
         self._load = None;
         self.loading = false;
         self.files = Vec::new();
@@ -139,6 +143,7 @@ impl CodeReview {
     }
 
     pub fn reload(&mut self, cx: &mut Context<Self>) {
+        self.shown = true;
         self.generation += 1;
         let generation = self.generation;
         let Some(root) = self.root.clone() else {
@@ -149,8 +154,9 @@ impl CodeReview {
             return cx.notify();
         };
         if self.changing {
-            // The change reloads when it is done.
-            return;
+            // The change reloads when it is done; meanwhile the panel shows it loading.
+            self.loading = true;
+            return cx.notify();
         }
         let base = self.base.clone();
         self.loading = true;
@@ -278,7 +284,10 @@ impl CodeReview {
                 this.loading = false;
                 this.failure = result.err();
                 cx.emit(ReviewEvent::Changed);
-                this.reload(cx);
+                // A panel closed meanwhile keeps no diffs (see `unload`).
+                if this.shown {
+                    this.reload(cx);
+                }
             })
             .ok();
         }));
