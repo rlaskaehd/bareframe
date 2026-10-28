@@ -225,6 +225,8 @@ impl WorkspaceView {
                 }
             }),
         };
+        // Before any terminal starts, so restored ones get the socket too.
+        view.apply_browser_control(cx);
         match saved {
             Some(saved) => view.restore(saved, window, cx),
             None => {

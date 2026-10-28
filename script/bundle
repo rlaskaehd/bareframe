@@ -38,6 +38,8 @@ cp resources/shell-integration/README resources/shell-integration/COPYING "$inte
 mkdir -p "$integration/bareframe"
 cp resources/shell-integration/bareframe/.zshenv "$integration/bareframe/"
 cp "$CARGO_TARGET_DIR/$profile/bareframe" "$bundle_dir/MacOS/bareframe"
+# What agents in terminals run to reach the browser tabs (see src/browser/control.rs).
+cp "$CARGO_TARGET_DIR/$profile/bareframe-browser" "$bundle_dir/MacOS/bareframe-browser"
 # What is handed out carries its license and every built-in component's.
 if [[ "$profile" == release ]]; then
     cp LICENSE "$bundle_dir/Resources/LICENSE"

@@ -920,6 +920,7 @@ version = "0.2.3"
 dependencies = [
  "arborium",
  "bareframe-core",
+ "base64 0.22.1",
  "cef",
  "ed25519-dalek",
  "futures",

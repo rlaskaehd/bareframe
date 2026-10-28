@@ -62,6 +62,11 @@ impl GhosttyAdapter {
                 .map(|(own, ghostty)| (own.as_path(), ghostty.as_path())),
             user_zdotdir.as_deref(),
         );
+        // Agents run here find the browser through these (see browser::control).
+        let command = match crate::browser::control::launch_env() {
+            Some(env) => format!("{env} {command}"),
+            None => command,
+        };
         let mut options = TerminalOptions::new(command, config.cwd.clone());
         options.configuration = TerminalConfiguration::Custom(theme.clone());
         // Ghostty asks only for unsafe pastes (a newline outside bracketed paste, or text

@@ -77,6 +77,8 @@ merman = { version = "0.9.2", default-features = false, features = [
 ] }
 # The allocator for Rust's memory (see main.rs).
 mimalloc = "0.1.52"
+# Screenshots arrive in base64 (bareframe-browser).
+base64 = "0.22"
 
 # Dependencies (GPUI's layout and text shaping, tree-sitter, the Mermaid layout) run many
 # times slower unoptimized, which made the app itself sluggish. They are built optimized

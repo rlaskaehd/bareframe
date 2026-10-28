@@ -444,6 +444,16 @@ pub const DEFS: &[Def] = &[
     ),
     def(
         Features,
+        "Browser",
+        "browser-agent-control",
+        "Let agents in terminals control browser tabs",
+        "Programs in terminals opened afterwards (Claude Code, Codex) can list browser tabs and read and screenshot their pages through bareframe-browser.",
+        Toggle,
+        "false",
+        App,
+    ),
+    def(
+        Features,
         "Code review",
         "code-review-button",
         "Show the code review button",

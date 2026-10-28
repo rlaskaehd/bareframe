@@ -104,6 +104,7 @@ impl BrowserPane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        super::control::register(cx.weak_entity());
         let address = cx.new(|cx| {
             let mut field = TextField::search(theme.accent, window, cx);
             field.select_on_focus();
@@ -172,6 +173,18 @@ impl BrowserPane {
         if let Some(id) = self.browser.take() {
             engine::close(id);
         }
+    }
+
+    pub fn browser_id(&self) -> Option<i32> {
+        self.browser
+    }
+
+    pub fn is_visible(&self) -> bool {
+        self.visible
+    }
+
+    pub fn is_loading(&self) -> bool {
+        self.loading
     }
 
     pub fn url(&self) -> &str {

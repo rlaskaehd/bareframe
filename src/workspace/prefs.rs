@@ -89,7 +89,13 @@ impl WorkspaceView {
             .update(cx, |review, cx| review.set_theme(ui, mono, cx));
         bind_keys(&self.settings, cx);
         self.apply_update_setting(cx);
+        self.apply_browser_control(cx);
         cx.notify();
+    }
+
+    pub(super) fn apply_browser_control(&self, cx: &mut Context<Self>) {
+        let enabled = self.settings.flag("browser-agent-control");
+        crate::browser::control::set_enabled(enabled, cx);
     }
 
     pub(super) fn apply_update_setting(&self, cx: &mut Context<Self>) {
