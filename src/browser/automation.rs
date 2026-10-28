@@ -5,7 +5,7 @@ use super::engine;
 use futures::future::Either;
 use gpui::AsyncApp;
 use serde_json::{Value, json};
-use std::{collections::HashMap, time::Duration};
+use std::{cell::RefCell, collections::HashMap, time::Duration};
 
 /// How long a page has to answer one DevTools call.
 const DEADLINE: Duration = Duration::from_secs(10);
@@ -175,6 +175,52 @@ async fn object(browser: i32, node: i64, cx: &mut AsyncApp) -> Result<String, Fa
         .ok_or(("REF_NOT_FOUND", format!("no element ref={node}")))
 }
 
+thread_local! {
+    /// Each page's world of our own (see `untouched`), while its document lasts.
+    static WORLDS: RefCell<HashMap<i32, Value>> = RefCell::default();
+}
+
+/// Forgets what was kept for `browser`, once it closed.
+pub fn forget(browser: i32) {
+    WORLDS.with_borrow_mut(|worlds| worlds.remove(&browser));
+}
+
+/// The element `node` as seen from a world of our own beside the page's scripts: what the
+/// page did to the DOM's functions and prototypes does not reach code run on it there, so
+/// a page can't steer where a click lands or hide what covers it.
+async fn untouched(browser: i32, node: i64, cx: &mut AsyncApp) -> Result<String, Failure> {
+    for fresh in [false, true] {
+        let world = match WORLDS.with_borrow(|worlds| worlds.get(&browser).cloned()) {
+            Some(world) if !fresh => world,
+            // None yet, or the page moved to another document and took it along.
+            _ => {
+                let tree = call(browser, "Page.getFrameTree", json!({}), cx).await?;
+                let frame = &tree["frameTree"]["frame"]["id"];
+                let created = call(
+                    browser,
+                    "Page.createIsolatedWorld",
+                    json!({ "frameId": frame, "worldName": "bareframe" }),
+                    cx,
+                )
+                .await?;
+                let world = created["executionContextId"].clone();
+                WORLDS.with_borrow_mut(|worlds| worlds.insert(browser, world.clone()));
+                world
+            }
+        };
+        let params = json!({ "backendNodeId": node, "executionContextId": world });
+        if let Ok(resolved) = call(browser, "DOM.resolveNode", params, cx).await
+            && let Some(object) = resolved["object"]["objectId"].as_str()
+        {
+            return Ok(object.to_owned());
+        }
+    }
+    Err((
+        "REF_NOT_FOUND",
+        format!("no element ref={node}; take a new snapshot"),
+    ))
+}
+
 /// Runs `function` with `this` as `object` and returns its value.
 async fn on_object(
     browser: i32,
@@ -208,7 +254,7 @@ async fn locate(
     stay: bool,
     cx: &mut AsyncApp,
 ) -> Result<(f64, f64, bool, bool), Failure> {
-    let element = object(browser, node, cx).await?;
+    let element = untouched(browser, node, cx).await?;
     let found = on_object(
         browser,
         &element,

@@ -562,6 +562,7 @@ fn on_event(event: engine::Event) {
             state.documents.remove(&browser);
             state.logs.remove(&browser);
         });
+        automation::forget(browser);
         return;
     }
     let method = event.method.as_str();
