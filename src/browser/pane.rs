@@ -17,11 +17,11 @@ use cef::*;
 use futures::{StreamExt, future::Either};
 use gpui::{
     Bounds, Context, Entity, EventEmitter, FocusHandle, Image, ImageFormat, KeyBinding,
-    MouseButton, NavigationDirection, Pixels, RenderImage, Subscription, Task, Window, actions,
-    canvas, div, img, prelude::*, px,
+    MouseButton, NavigationDirection, Pixels, Point, RenderImage, Subscription, Task, Window,
+    actions, canvas, div, img, prelude::*, px,
 };
 use std::{
-    path::Path,
+    path::{Path, PathBuf},
     sync::{Arc, atomic::Ordering},
     time::Duration,
 };
@@ -70,6 +70,8 @@ enum Frozen {
 pub struct BrowserPane {
     /// The engine's browser; none before the first frame, or once it closed.
     browser: Option<i32>,
+    /// Where the page is in the window, as last laid out: drops from the explorer land there.
+    page_bounds: Bounds<Pixels>,
     /// Why there is no page: Chromium missing from this build, failing to start, or the page
     /// having closed itself.
     error: Option<String>,
@@ -148,6 +150,7 @@ impl BrowserPane {
         });
         Self {
             browser: None,
+            page_bounds: Bounds::default(),
             // Chromium starts here, from the user's action or the app's launch, where no run
             // loop pass is under way (see engine::start).
             error: engine::start(data, cx).err(),
@@ -180,6 +183,35 @@ impl BrowserPane {
 
     pub fn tab(&self) -> &str {
         &self.tab
+    }
+
+    /// Files dropped on the page from the explorer, as from Finder: the page under `at` (in
+    /// the window) gets dragenter, dragover and drop carrying them, and an upload area
+    /// takes them.
+    pub fn drop_files(&self, paths: &[PathBuf], at: Point<Pixels>, cx: &mut Context<Self>) {
+        let Some(browser) = self.browser else {
+            return;
+        };
+        let at = at - self.page_bounds.origin;
+        let (x, y) = (f32::from(at.x), f32::from(at.y));
+        let files: Vec<String> = paths
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect();
+        // Copy, as Finder offers.
+        let data = serde_json::json!({ "items": [], "files": files, "dragOperationsMask": 1 });
+        cx.spawn(async move |_, _| {
+            for kind in ["dragEnter", "dragOver", "drop"] {
+                let event = serde_json::json!({ "type": kind, "x": x, "y": y, "data": data });
+                if engine::devtools(browser, "Input.dispatchDragEvent", event)
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .detach();
     }
 
     /// Why there is no page, if there isn't one.
@@ -503,6 +535,7 @@ impl Render for BrowserPane {
         let page = canvas(
             move |bounds, window, cx| {
                 pane.update(cx, |pane, cx| {
+                    pane.page_bounds = bounds;
                     if let Some(view) = pane.browser.and_then(engine::view) {
                         mac::place(view, bounds);
                     } else if pane.browser.is_none() && !pane.starting && pane.error.is_none() {

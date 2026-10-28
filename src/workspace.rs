@@ -98,8 +98,11 @@ pub struct WorkspaceView {
     drop_target: Option<(PaneId, Direction)>,
     /// The terminals were frozen for a drag, so the drop zones can be drawn over them.
     drag_frozen: bool,
-    /// The explorer's file being dragged, when it can be dropped beside a pane.
-    dragged_file: Option<std::path::PathBuf>,
+    /// The explorer's file being dragged, and whether bareframe opens it itself: it can
+    /// then also be dropped beside a pane, not only into a browser page.
+    dragged_file: Option<(std::path::PathBuf, bool)>,
+    /// The browser pane whose page a dragged file would go into, and where.
+    page_drop: Option<(PaneId, gpui::Point<Pixels>)>,
     menu: Option<ContextMenu>,
     clipboard_prompt: Option<clipboard::ClipboardPrompt>,
     /// A quit or window close waiting for answers about unsaved editor changes.
@@ -193,6 +196,7 @@ impl WorkspaceView {
             drop_target: None,
             drag_frozen: false,
             dragged_file: None,
+            page_drop: None,
             menu: None,
             clipboard_prompt: None,
             pending_exit: None,

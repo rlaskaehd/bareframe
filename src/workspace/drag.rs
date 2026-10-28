@@ -2,7 +2,7 @@
 //! another pane (splitting it) or onto the sidebar (reordering tabs, or a pane becoming a
 //! tab of its own).
 use super::{
-    WorkspaceView,
+    PaneView, WorkspaceView,
     sidebar::{tab_label, terminal_icon},
 };
 use crate::{
@@ -82,8 +82,16 @@ fn nearest_side(bounds: Bounds<Pixels>, position: Point<Pixels>) -> Direction {
     .map_or(Direction::Right, |(_, side)| side)
 }
 
-/// The half of a pane a drop would give the dragged pane or tab.
-fn drop_zone(side: Direction, theme: &Theme) -> impl IntoElement {
+/// Whether `position` is in the middle of `bounds`, away from the edges a drop beside uses.
+fn in_middle(bounds: Bounds<Pixels>, position: Point<Pixels>) -> bool {
+    let x = f32::from(position.x - bounds.left()) / f32::from(bounds.size.width);
+    let y = f32::from(position.y - bounds.top()) / f32::from(bounds.size.height);
+    (0.25..0.75).contains(&x) && (0.25..0.75).contains(&y)
+}
+
+/// The half of a pane a drop would give the dragged pane or tab, or all of it for a file
+/// going into its page (`None`).
+fn drop_zone(side: Option<Direction>, theme: &Theme) -> impl IntoElement {
     let zone = div()
         .absolute()
         .rounded_sm()
@@ -91,10 +99,11 @@ fn drop_zone(side: Direction, theme: &Theme) -> impl IntoElement {
         .border_color(hsla(theme.accent).opacity(0.7))
         .bg(hsla(theme.accent).opacity(0.18));
     match side {
-        Direction::Left => zone.top_0().bottom_0().left_0().w(relative(0.5)),
-        Direction::Right => zone.top_0().bottom_0().right_0().w(relative(0.5)),
-        Direction::Up => zone.left_0().right_0().top_0().h(relative(0.5)),
-        Direction::Down => zone.left_0().right_0().bottom_0().h(relative(0.5)),
+        None => zone.inset_0(),
+        Some(Direction::Left) => zone.top_0().bottom_0().left_0().w(relative(0.5)),
+        Some(Direction::Right) => zone.top_0().bottom_0().right_0().w(relative(0.5)),
+        Some(Direction::Up) => zone.left_0().right_0().top_0().h(relative(0.5)),
+        Some(Direction::Down) => zone.left_0().right_0().bottom_0().h(relative(0.5)),
     }
 }
 
@@ -110,11 +119,12 @@ impl WorkspaceView {
         cx.notify();
     }
 
-    /// A file from the explorer is lifted: one bareframe opens itself can be dropped beside
-    /// a pane, so the terminals freeze for the drop zones as for a pane; others can't.
+    /// A file from the explorer is lifted: any file can go into a browser page, and one
+    /// bareframe opens itself also beside a pane; the terminals freeze for the drop zones
+    /// as for a pane.
     pub(super) fn start_file_drag(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
-        if self.opens_inside(path) {
-            self.dragged_file = Some(path.to_path_buf());
+        if path.is_file() {
+            self.dragged_file = Some((path.to_path_buf(), self.opens_inside(path)));
             self.start_drag(Vec::new(), cx);
         }
     }
@@ -124,6 +134,7 @@ impl WorkspaceView {
         self.dragging.clear();
         self.dragged_file = None;
         self.drop_target = None;
+        self.page_drop = None;
         if std::mem::take(&mut self.drag_frozen) {
             self.set_frozen(false, cx);
         }
@@ -138,10 +149,13 @@ impl WorkspaceView {
         pane: gpui::Div,
         cx: &mut Context<Self>,
     ) -> gpui::Div {
-        let zone = self
-            .drop_target
-            .filter(|(pane, _)| *pane == id)
-            .map(|(_, side)| drop_zone(side, self.theme()));
+        let zone = if self.page_drop.is_some_and(|(pane, _)| pane == id) {
+            Some(drop_zone(None, self.theme()))
+        } else {
+            self.drop_target
+                .filter(|(pane, _)| *pane == id)
+                .map(|(_, side)| drop_zone(Some(side), self.theme()))
+        };
         pane.on_drag_move(
             cx.listener(move |view, event: &DragMoveEvent<DraggedPane>, _, cx| {
                 let allowed = event.drag(cx).pane != id;
@@ -157,8 +171,19 @@ impl WorkspaceView {
         )
         .on_drag_move(
             cx.listener(move |view, event: &DragMoveEvent<DraggedEntry>, _, cx| {
-                let allowed = view.dragged_file.as_ref() == Some(&event.drag(cx).path);
-                view.hover_drop(id, allowed, event.bounds, event.event.position, cx)
+                let (bounds, at) = (event.bounds, event.event.position);
+                let (dragging, opens) = match &view.dragged_file {
+                    Some((path, opens)) if *path == event.drag(cx).path => (true, *opens),
+                    _ => (false, false),
+                };
+                // The middle of a page takes the file itself, as from Finder; the edges open
+                // it beside.
+                let into = dragging
+                    && matches!(view.pane(id), Some(PaneView::Browser(_)))
+                    && bounds.contains(&at)
+                    && in_middle(bounds, at);
+                view.hover_page(id, into.then_some(at), cx);
+                view.hover_drop(id, opens && !into, bounds, at, cx)
             }),
         )
         .on_drop(cx.listener(move |view, dragged: &DraggedPane, window, cx| {
@@ -169,7 +194,13 @@ impl WorkspaceView {
         }))
         .on_drop(
             cx.listener(move |view, dragged: &DraggedEntry, window, cx| {
-                if let Some(side) = view.take_drop(id, cx) {
+                if let Some((_, at)) = view.page_drop.filter(|(pane, _)| *pane == id) {
+                    view.end_drag(cx);
+                    if let Some(PaneView::Browser(browser)) = view.pane(id) {
+                        let paths = [dragged.path.clone()];
+                        browser.update(cx, |browser, cx| browser.drop_files(&paths, at, cx));
+                    }
+                } else if let Some(side) = view.take_drop(id, cx) {
                     view.open_file_beside(&dragged.path, id, side, window, cx);
                 }
             }),
@@ -210,6 +241,17 @@ impl WorkspaceView {
         {
             self.drop_target = target;
             cx.notify();
+        }
+    }
+
+    /// Follows a file over the middle of pane `id`'s page (`at`), or off it.
+    fn hover_page(&mut self, id: PaneId, at: Option<Point<Pixels>>, cx: &mut Context<Self>) {
+        let was = self.page_drop.is_some_and(|(pane, _)| pane == id);
+        if at.is_some() || was {
+            self.page_drop = at.map(|at| (id, at));
+            if was != at.is_some() {
+                cx.notify();
+            }
         }
     }
 
