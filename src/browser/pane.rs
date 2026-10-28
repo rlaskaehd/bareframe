@@ -25,11 +25,13 @@ use std::{
     time::Duration,
 };
 
-actions!(browser, [Copy, Cut, Paste, SelectAll, Undo, Redo]);
+actions!(browser, [Copy, Cut, Paste, SelectAll, Undo, Redo, Reload]);
 
 /// Editing keys go to the page's frame: Chromium takes them from the Edit menu, which
 /// bareframe's doesn't send it.
 const KEY_CONTEXT: &str = "BrowserPage";
+/// The whole pane, address bar included: browser keys such as reload.
+const PANE_CONTEXT: &str = "BrowserPane";
 
 pub fn key_bindings() -> Vec<KeyBinding> {
     let context = Some(KEY_CONTEXT);
@@ -40,6 +42,7 @@ pub fn key_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("cmd-a", SelectAll, context),
         KeyBinding::new("cmd-z", Undo, context),
         KeyBinding::new("cmd-shift-z", Redo, context),
+        KeyBinding::new("cmd-r", Reload, Some(PANE_CONTEXT)),
     ]
 }
 
@@ -488,6 +491,12 @@ impl Render for BrowserPane {
             _ => None,
         };
         div()
+            .key_context(PANE_CONTEXT)
+            .on_action(cx.listener(|pane, _: &Reload, _, _| {
+                if let Some(browser) = pane.browser.and_then(engine::browser) {
+                    browser.reload();
+                }
+            }))
             .size_full()
             .flex()
             .flex_col()
