@@ -3,10 +3,11 @@
 //! composition works while typing.
 use bareframe_core::text::{byte_column, utf16_column};
 use gpui::{
-    App, Bounds, ClipboardItem, Context, CursorStyle, ElementId, ElementInputHandler, Entity,
-    EntityInputHandler, EventEmitter, FocusHandle, GlobalElementId, LayoutId, MouseButton,
-    MouseDownEvent, PaintQuad, Pixels, ShapedLine, Style, Subscription, TextRun, UTF16Selection,
-    UnderlineStyle, Window, actions, div, fill, point, prelude::*, px, relative, size,
+    App, Bounds, ClipboardItem, Context, CursorStyle, DispatchPhase, ElementId,
+    ElementInputHandler, Entity, EntityInputHandler, EventEmitter, FocusHandle, GlobalElementId,
+    LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels,
+    ShapedLine, Style, Subscription, TextRun, UTF16Selection, UnderlineStyle, Window, actions, div,
+    fill, point, prelude::*, px, relative, size,
 };
 use std::ops::Range;
 
@@ -54,6 +55,9 @@ pub struct TextField {
     blur: Option<Subscription>,
     /// The click that focuses the field selects all of it, as in a browser's address bar.
     select_on_focus: bool,
+    /// A selecting drag: where it started, and whether it has left that spot (until then the
+    /// address bar's select-all click stands).
+    drag: Option<(usize, bool)>,
 }
 
 impl EventEmitter<TextFieldEvent> for TextField {}
@@ -88,6 +92,7 @@ impl TextField {
             finished: false,
             blur: None,
             select_on_focus: false,
+            drag: None,
         }
     }
 
@@ -271,15 +276,34 @@ impl TextField {
         cx.stop_propagation();
         let focusing = !self.focus.is_focused(window);
         self.focus.focus(window, cx);
+        let offset = self.offset_at(event.position.x);
+        self.drag = offset.map(|offset| (offset, false));
         if focusing && self.select_on_focus {
             self.move_to(0, cx);
             return self.select_to(self.content.len(), cx);
         }
-        let (Some(bounds), Some(line)) = (self.last_bounds, self.last_layout.as_ref()) else {
+        if let Some(offset) = offset {
+            self.move_to(offset, cx);
+        }
+    }
+
+    fn drag_to(&mut self, x: Pixels, cx: &mut Context<Self>) {
+        let (Some((anchor, moved)), Some(offset)) = (self.drag, self.offset_at(x)) else {
             return;
         };
-        let offset = line.closest_index_for_x(event.position.x - bounds.left() + self.scroll);
-        self.move_to(offset, cx);
+        if !moved && offset == anchor {
+            return;
+        }
+        self.drag = Some((anchor, true));
+        self.move_to(anchor, cx);
+        self.select_to(offset, cx);
+    }
+
+    fn offset_at(&self, x: Pixels) -> Option<usize> {
+        let (Some(bounds), Some(line)) = (self.last_bounds, self.last_layout.as_ref()) else {
+            return None;
+        };
+        Some(line.closest_index_for_x(x - bounds.left() + self.scroll))
     }
 }
 
@@ -530,6 +554,19 @@ impl Element for TextElement {
         window: &mut Window,
         cx: &mut App,
     ) {
+        // A selecting drag is followed out of the field, and ends wherever the button comes up.
+        let input = self.input.clone();
+        window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
+            if phase == DispatchPhase::Bubble && event.pressed_button == Some(MouseButton::Left) {
+                input.update(cx, |input, cx| input.drag_to(event.position.x, cx));
+            }
+        });
+        let input = self.input.clone();
+        window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
+            if phase == DispatchPhase::Bubble && event.button == MouseButton::Left {
+                input.update(cx, |input, _| input.drag = None);
+            }
+        });
         let focus = self.input.read(cx).focus.clone();
         window.handle_input(
             &focus,
