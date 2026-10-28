@@ -305,23 +305,19 @@ pub async fn press(browser: i32, key: &str, cx: &mut AsyncApp) -> Result<(), Fai
         "UNSUPPORTED_KEY",
         format!("{key:?} is not a key name or one character"),
     ))?;
-    let mut down = json!({
-        "type": "keyDown",
-        "key": key,
-        "code": code,
-        "windowsVirtualKeyCode": virtual_key,
-    });
-    if !text.is_empty() {
-        down["text"] = Value::from(text);
+    for kind in ["keyDown", "keyUp"] {
+        let mut event = json!({
+            "type": kind,
+            "key": key,
+            "code": code,
+            "windowsVirtualKeyCode": virtual_key,
+        });
+        // The press types the character.
+        if kind == "keyDown" && !text.is_empty() {
+            event["text"] = Value::from(text.as_str());
+        }
+        input(browser, "Input.dispatchKeyEvent", event, cx).await?;
     }
-    input(browser, "Input.dispatchKeyEvent", down, cx).await?;
-    let up = json!({
-        "type": "keyUp",
-        "key": key,
-        "code": code,
-        "windowsVirtualKeyCode": virtual_key,
-    });
-    input(browser, "Input.dispatchKeyEvent", up, cx).await?;
     Ok(())
 }
 

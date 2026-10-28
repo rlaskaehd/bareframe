@@ -288,6 +288,13 @@ fn terminal_of(params: &Value) -> String {
     params["terminal"].as_str().unwrap_or_default().to_owned()
 }
 
+/// The text parameter `name`, which the method needs.
+fn string<'a>(params: &'a Value, name: &str) -> Result<&'a str, Failure> {
+    params[name]
+        .as_str()
+        .ok_or(("BAD_REQUEST", format!("no `{name}`")))
+}
+
 /// A request about one tab: allowed first, then done.
 async fn on_tab(method: &str, params: &Value, cx: &mut AsyncApp) -> Result<Value, Failure> {
     let known = [
@@ -373,28 +380,17 @@ async fn on_tab(method: &str, params: &Value, cx: &mut AsyncApp) -> Result<Value
             result["data"] = automation::screenshot(browser, cx).await?;
         }
         "navigate" => {
-            let url = params["url"]
-                .as_str()
-                .ok_or(("BAD_REQUEST", "no `url`".to_owned()))?;
-            automation::navigate(browser, &address_for(url), cx).await?;
+            let url = address_for(string(params, "url")?);
+            automation::navigate(browser, &url, cx).await?;
         }
         "click" => automation::click(browser, node()?, cx).await?,
         "fill" => {
-            let text = params["text"]
-                .as_str()
-                .ok_or(("BAD_REQUEST", "no `text`".to_owned()))?;
+            let text = string(params, "text")?;
             automation::fill(browser, node()?, text, cx).await?;
         }
-        "press_key" => {
-            let key = params["key"]
-                .as_str()
-                .ok_or(("BAD_REQUEST", "no `key`".to_owned()))?;
-            automation::press(browser, key, cx).await?;
-        }
+        "press_key" => automation::press(browser, string(params, "key")?, cx).await?,
         "wait_for" => {
-            let text = params["text"]
-                .as_str()
-                .ok_or(("BAD_REQUEST", "no `text`".to_owned()))?;
+            let text = string(params, "text")?;
             let limit = params["timeout_ms"]
                 .as_u64()
                 .map_or(automation::WAIT, Duration::from_millis);
@@ -418,11 +414,7 @@ async fn on_tab(method: &str, params: &Value, cx: &mut AsyncApp) -> Result<Value
 
 /// Opens `url` in a new browser tab, owned by the asking terminal, and waits for it to load.
 async fn open(params: &Value, cx: &mut AsyncApp) -> Result<Value, Failure> {
-    let url = address_for(
-        params["url"]
-            .as_str()
-            .ok_or(("BAD_REQUEST", "no `url`".to_owned()))?,
-    );
+    let url = address_for(string(params, "url")?);
     let terminal = terminal_of(params);
     let (view, window) = STATE
         .with_borrow(|state| {

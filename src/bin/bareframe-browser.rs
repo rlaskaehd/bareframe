@@ -89,11 +89,7 @@ fn main() -> ExitCode {
     match result {
         // A snapshot reads best as the outline itself.
         Ok(result) if method == "snapshot" => {
-            println!(
-                "# {} document {}",
-                result["tab"].as_str().unwrap_or_default(),
-                result["document"]
-            );
+            println!("# {}", heading(&result));
             println!("{}", result["text"].as_str().unwrap_or_default());
             ExitCode::SUCCESS
         }
@@ -327,6 +323,15 @@ fn request(method: &str, mut params: Value) -> Result<Value, String> {
     Ok(reply["result"].take())
 }
 
+/// Which tab and document a snapshot or screenshot is of.
+fn heading(result: &Value) -> String {
+    format!(
+        "{} document {}",
+        result["tab"].as_str().unwrap_or_default(),
+        result["document"]
+    )
+}
+
 /// Writes a screenshot's PNG to `file`; the result says where, instead of carrying it.
 fn save(result: &Value, file: &str) -> Result<Value, String> {
     let png = base64::engine::general_purpose::STANDARD
@@ -338,7 +343,7 @@ fn save(result: &Value, file: &str) -> Result<Value, String> {
 
 /// The same requests as MCP tools: JSON-RPC, one message a line on stdin and stdout.
 mod mcp {
-    use super::{protocol, request};
+    use super::{heading, protocol, request};
     use serde_json::{Value, json};
     use std::{io::Write, process::ExitCode};
 
@@ -512,9 +517,8 @@ mod mcp {
         match request(method, arguments) {
             Ok(result) if method == "snapshot" => {
                 let mut text = format!(
-                    "{} document {}\n{}",
-                    result["tab"].as_str().unwrap_or_default(),
-                    result["document"],
+                    "{}\n{}",
+                    heading(&result),
                     result["text"].as_str().unwrap_or_default()
                 );
                 if result["truncated"].as_bool() == Some(true) {
@@ -524,8 +528,7 @@ mod mcp {
             }
             Ok(result) if method == "screenshot" => json!({ "content": [
                 { "type": "image", "data": result["data"], "mimeType": "image/png" },
-                { "type": "text", "text": format!("{} document {}",
-                    result["tab"].as_str().unwrap_or_default(), result["document"]) },
+                { "type": "text", "text": heading(&result) },
             ] }),
             Ok(result) => json!({ "content": [{ "type": "text", "text": result.to_string() }] }),
             Err(error) => {

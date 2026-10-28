@@ -34,7 +34,7 @@ impl WorkspaceView {
         url: String,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
+    ) -> Entity<BrowserPane> {
         // Chromium's own files, beside the config; pages keep nothing on disk (see engine).
         let data = files::config_file()
             .map(|config| config.with_file_name("browser"))
@@ -60,7 +60,8 @@ impl WorkspaceView {
             },
         );
         self.panes
-            .insert(id, (PaneView::Browser(pane), Some(events)));
+            .insert(id, (PaneView::Browser(pane.clone()), Some(events)));
+        pane
     }
 
     /// A page an agent in a terminal opens (see browser::control): split beside the active
@@ -74,13 +75,10 @@ impl WorkspaceView {
     ) -> Entity<BrowserPane> {
         let typing = self.model.active_pane();
         let id = self.model.split(Axis::Horizontal);
-        self.insert_browser_pane(id, url, window, cx);
+        let pane = self.insert_browser_pane(id, url, window, cx);
         self.model.focus(typing);
         self.sync(window, cx);
-        match self.panes.get(&id) {
-            Some((PaneView::Browser(pane), _)) => pane.clone(),
-            _ => unreachable!("inserted above"),
-        }
+        pane
     }
 
     /// Closes the pane showing `pane`, if this window has it.

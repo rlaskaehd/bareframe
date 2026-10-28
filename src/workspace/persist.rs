@@ -31,7 +31,7 @@ impl WorkspaceView {
             match kinds.get(&id) {
                 Some(SavedPane::Settings) => self.insert_settings_pane(id, window, cx),
                 Some(SavedPane::Browser { url }) => {
-                    self.insert_browser_pane(id, url.clone(), window, cx)
+                    self.insert_browser_pane(id, url.clone(), window, cx);
                 }
                 Some(SavedPane::Markdown { path }) if path.is_file() => {
                     self.insert_markdown_pane(id, path.clone(), window, cx)
