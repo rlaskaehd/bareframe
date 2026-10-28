@@ -447,9 +447,10 @@ fn joins(last: &Edit, edit: &Edit) -> bool {
 }
 
 /// A byte column in `line` as UTF-16 code units, as macOS input methods and LSP's default
-/// position encoding count.
+/// position encoding count. A column inside a character counts from its start: input
+/// methods ask from AppKit, where a panic aborts the app.
 pub fn utf16_column(line: &str, byte: usize) -> usize {
-    line[..byte.min(line.len())]
+    line[..line.floor_char_boundary(byte)]
         .chars()
         .map(char::len_utf16)
         .sum()
@@ -666,6 +667,8 @@ mod tests {
         // a=1 byte/1 unit, 한=3/1, 😀=4/2.
         assert_eq!(utf16_column(line, 4), 2);
         assert_eq!(utf16_column(line, 8), 4);
+        assert_eq!(utf16_column(line, 2), 1);
+        assert_eq!(utf16_column(line, 99), 5);
         assert_eq!(byte_column(line, 2), 4);
         assert_eq!(byte_column(line, 4), 8);
         assert_eq!(byte_column(line, 99), line.len());

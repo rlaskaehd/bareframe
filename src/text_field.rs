@@ -299,11 +299,13 @@ impl TextField {
         self.select_to(offset, cx);
     }
 
+    /// The text offset under `x`, while the last paint still shows the current text.
     fn offset_at(&self, x: Pixels) -> Option<usize> {
         let (Some(bounds), Some(line)) = (self.last_bounds, self.last_layout.as_ref()) else {
             return None;
         };
-        Some(line.closest_index_for_x(x - bounds.left() + self.scroll))
+        (line.text.as_ref() == self.content)
+            .then(|| line.closest_index_for_x(x - bounds.left() + self.scroll))
     }
 }
 
@@ -369,10 +371,11 @@ impl EntityInputHandler for TextField {
         self.content.replace_range(range.clone(), new_text);
         self.marked_range =
             (!new_text.is_empty()).then(|| range.start..range.start + new_text.len());
+        // The selection counts UTF-16 units from the start of the new text, not of the field:
+        // "a" then a composing "가" puts the cursor after "가", not inside it.
+        let base = utf16_column(&self.content, range.start);
         self.selected_range = new_selected_range_utf16
-            .as_ref()
-            .map(|selected| self.range_from_utf16(selected))
-            .map(|selected| range.start + selected.start..range.start + selected.end)
+            .map(|selected| self.range_from_utf16(&(base + selected.start..base + selected.end)))
             .unwrap_or_else(|| range.start + new_text.len()..range.start + new_text.len());
         cx.notify();
     }
