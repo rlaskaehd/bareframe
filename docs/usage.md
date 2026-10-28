@@ -133,7 +133,8 @@ MVP 1의 셸 실행 모드는 zsh를 기준으로 한다. 다른 셸을 지정�
 - 팔레트나 메뉴가 페이지 위에 열리는 동안은 페이지의 스냅샷을 대신 보인다. 페이지 뷰는 GPUI 위에 놓인 native view라 그 위로 그릴 수 없기 때문이다.
 - Chromium은 앱 안에서만 DevTools 프로토콜로 조작하고(`src/browser/engine.rs`의 `devtools`), 원격 디버깅 포트는 열지 않는다.
 - 터미널의 agent(Claude Code, Codex 등)가 브라우저 탭을 읽고 조작하게 할 수 있다(Settings › Features › Browser › `Let agents in terminals control browser tabs`, 기본 끔). 켠 뒤 연 터미널에는 `BAREFRAME_BROWSER_ENDPOINT`(앱의 소켓), `BAREFRAME_BROWSER_TERMINAL`(그 터미널의 ID), `BAREFRAME_BROWSER_CLI`(`bareframe-browser` 경로)가 들어간다.
-  - `"$BAREFRAME_BROWSER_CLI" setup`: Claude Code에 MCP 서버(`bareframe-browser mcp`)와 hook을 등록하는 명령과 설정을 출력한다. 설정은 바꾸지 않으며 사용자가 직접 넣는다.
+  - `"$BAREFRAME_BROWSER_CLI" setup`: Claude Code와 Codex에 MCP 서버(`bareframe-browser mcp`)와 hook을 등록하는 명령과 설정을 출력한다. 설정은 바꾸지 않으며 사용자가 직접 넣는다.
+  - Codex는 MCP 서버에 `env_vars`로 지정한 환경변수만 넘기므로 `BAREFRAME_BROWSER_ENDPOINT`와 `BAREFRAME_BROWSER_TERMINAL`을 적는다. Codex의 PreToolUse hook은 "묻기"를 지원하지 않아서, bareframe 도구는 매번 묻게(`default_tools_approval_mode = "prompt"`) 하고 PermissionRequest hook이 이미 쓰는 탭·탭 열기·`release`는 대신 허락한다. 처음 쓰는 탭은 Codex가 묻고, hook이 그 탭의 제목·주소를 알린다. 이때 "세션 동안"이나 "항상" 허락하면 그 도구는 다른 탭에서도 묻지 않으니 한 번만 허락한다.
   - 명령: `tabs`, `open <url>`(오른쪽에 새 Pane으로 열고 다 불러올 때까지 기다림), `navigate`, `snapshot`(접근성 트리를 `button "Save" [ref=12]`처럼 한 줄에 하나씩, 최대 4000줄), `screenshot`(숨은 탭도 가능), `click`, `fill`, `press`, `wait`, `diagnostics`, `release`, `close`. MCP 도구는 같은 이름의 `browser_*`다.
   - `click`·`fill`은 snapshot의 ref와 문서 번호를 받는다. 그 사이 페이지가 다른 문서로 바뀌었으면 `STALE_DOCUMENT`, 요소가 다른 것에 가려졌으면 `OBSCURED`로 실패한다.
   - 입력을 보낸 뒤 페이지가 답하지 않으면(10초) `OUTCOME_UNKNOWN`이다. 클릭이나 제출이 이미 일어났을 수 있으니 다시 하기 전에 페이지를 확인하라는 뜻이다.

@@ -108,15 +108,29 @@ fn main() -> ExitCode {
     }
 }
 
-/// Claude Code's PreToolUse hook: before the agent first uses a tab from this terminal, it
-/// asks the user, naming the page. Later uses, and calls that touch no tab, it leaves to
-/// Claude Code's own permission rules (no output). When the app can't say the tab is in
-/// use already, it asks too.
+/// The hook that asks the user before an agent first uses a tab from this terminal, naming
+/// the page. For Claude Code it is a PreToolUse hook: it asks, and leaves later uses and
+/// calls that touch no tab to Claude Code's own rules (no output). Codex can't ask from
+/// there, so it asks before every call of ours (see `setup`) and this is its
+/// PermissionRequest hook: it allows a tab in use already, opening a tab and letting one
+/// go, and leaves the rest to Codex's question, saying which page it is. When the app can't
+/// say the tab is in use already, it asks too.
 fn hook() -> ExitCode {
     let mut input = String::new();
     let _ = std::io::Read::read_to_string(&mut std::io::stdin(), &mut input);
     let Ok(input) = serde_json::from_str::<Value>(&input) else {
         return ExitCode::SUCCESS;
+    };
+    let codex = input["hook_event_name"] == "PermissionRequest";
+    let allow = || {
+        if codex {
+            let allow = json!({ "hookSpecificOutput": {
+                "hookEventName": "PermissionRequest",
+                "decision": { "behavior": "allow" },
+            } });
+            println!("{allow}");
+        }
+        ExitCode::SUCCESS
     };
     let tool = input["tool_name"].as_str().unwrap_or_default();
     let method = tool.rsplit("__").next().unwrap_or(tool);
@@ -126,7 +140,7 @@ fn hook() -> ExitCode {
         "click" | "fill" | "press_key" => "click and type in",
         "wait_for" => "watch",
         "close" => "close",
-        "release" => return ExitCode::SUCCESS,
+        "open" | "release" => return allow(),
         _ => "use",
     };
     let Some(tab) = input["tool_input"]["tab"].as_str() else {
@@ -134,7 +148,7 @@ fn hook() -> ExitCode {
     };
     let status = request("granted", json!({ "tab": tab })).unwrap_or_default();
     if status["granted"].as_bool() == Some(true) {
-        return ExitCode::SUCCESS;
+        return allow();
     }
     let (title, url) = (
         status["title"].as_str().unwrap_or_default(),
@@ -149,33 +163,62 @@ fn hook() -> ExitCode {
         "The agent wants to {verb} the bareframe browser tab {page}. Once allowed, it can \
          read, click and type there until it releases the tab; ask it to."
     );
-    let decision = json!({ "hookSpecificOutput": {
-        "hookEventName": "PreToolUse",
-        "permissionDecision": "ask",
-        "permissionDecisionReason": reason,
-    } });
-    println!("{decision}");
+    let question = if codex {
+        // No decision: Codex asks. Allowing for good would skip asking about other tabs.
+        json!({ "systemMessage": format!("{reason} Allow it once, not for the session or always.") })
+    } else {
+        json!({ "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "ask",
+            "permissionDecisionReason": reason,
+        } })
+    };
+    println!("{question}");
     ExitCode::SUCCESS
 }
 
-/// Prints how to register the MCP server and the hook with Claude Code, with this
-/// executable's own path. Nothing is changed here; the user adds them.
+/// Prints how to register the MCP server and the hook with Claude Code and with Codex, with
+/// this executable's own path. Nothing is changed here; the user adds them.
 fn setup() -> ExitCode {
     let path = std::env::current_exe()
         .map(|path| path.display().to_string())
         .unwrap_or_else(|_| "bareframe-browser".into());
     let quoted = format!("'{}'", path.replace('\'', "'\\''"));
-    let hooks = json!({ "hooks": { "PreToolUse": [{
-        "matcher": "mcp__bareframe-browser__.*",
-        "hooks": [{ "type": "command", "command": format!("{quoted} hook") }],
-    }] } });
+    let hook = format!("{quoted} hook");
+    let hooks = |event: &str, matcher: &str| {
+        json!({ "hooks": { event: [{
+            "matcher": matcher,
+            "hooks": [{ "type": "command", "command": hook }],
+        }] } })
+    };
+    let (claude, codex) = (
+        hooks("PreToolUse", "mcp__bareframe-browser__.*"),
+        hooks("PermissionRequest", "^mcp__bareframe-browser__"),
+    );
+    // A JSON string is a TOML string too.
+    let path = Value::from(path);
     println!(
-        "1. Register the MCP server for every project:\n\n   \
+        "Claude Code\n\n\
+         1. Register the MCP server for every project:\n\n   \
          claude mcp add --scope user bareframe-browser -- {quoted} mcp\n\n\
          2. Have Claude Code ask before an agent first uses a browser tab: add this to\n   \
-         ~/.claude/settings.json (merged with any \"hooks\" already there):\n\n{hooks:#}\n\n\
-         3. Turn on Settings › Features › Browser › \"Let agents in terminals control browser\n   \
-         tabs\" in bareframe, and start the agent in a terminal opened after that."
+         ~/.claude/settings.json (merged with any \"hooks\" already there):\n\n{claude:#}\n\n\
+         Codex\n\n\
+         1. Add this to ~/.codex/config.toml. Codex then asks before each browser call; the\n   \
+         server gets the terminal's socket and id, as Codex passes it no other variables.\n\n\
+         [mcp_servers.bareframe-browser]\n\
+         command = {path}\n\
+         args = [\"mcp\"]\n\
+         env_vars = [\"{endpoint}\", \"{terminal}\"]\n\
+         default_tools_approval_mode = \"prompt\"\n\n\
+         2. Have the hook answer for tabs in use already: add this to ~/.codex/hooks.json\n   \
+         (merged with any \"hooks\" there), then trust it when Codex asks (or in /hooks).\n   \
+         When Codex asks about a tab, allow it once: for the session or always would skip\n   \
+         asking about other tabs.\n\n{codex:#}\n\n\
+         Then turn on Settings › Features › Browser › \"Let agents in terminals control\n\
+         browser tabs\" in bareframe, and start the agent in a terminal opened after that.",
+        endpoint = protocol::ENDPOINT_VAR,
+        terminal = protocol::TERMINAL_VAR,
     );
     ExitCode::SUCCESS
 }
