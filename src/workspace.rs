@@ -109,6 +109,8 @@ pub struct WorkspaceView {
     frozen: bool,
     frozen_panes: Vec<PaneId>,
     renaming: Option<(RenameTarget, Entity<TextField>, Subscription)>,
+    /// The pane active before Settings was shown: closing Settings returns to it.
+    before_settings: Option<PaneId>,
     /// The sidebar's tab filter: the field plus its event and change subscriptions.
     search: Option<(Entity<TextField>, [Subscription; 2])>,
     /// Set only when it changes; render runs every frame.
@@ -195,6 +197,7 @@ impl WorkspaceView {
             frozen: false,
             frozen_panes: Vec::new(),
             renaming: None,
+            before_settings: None,
             search: None,
             window_title: String::new(),
             window_bounds: None,
@@ -440,10 +443,15 @@ impl WorkspaceView {
             return;
         }
         self.drop_clipboard_prompt_for(id, cx);
+        let settings = matches!(self.panes.get(&id), Some((PaneView::Settings(_), _)));
         if let Some((PaneView::Terminal(pane), _)) = self.panes.remove(&id) {
             pane.update(cx, |pane, cx| pane.shutdown(cx));
         }
-        match self.model.close(id) {
+        let closed = self.model.close(id);
+        if settings && let Some(before) = self.before_settings.take() {
+            self.model.focus(before);
+        }
+        match closed {
             Some(Closed::Replaced(fresh)) => {
                 let cwd = self.config.cwd.clone();
                 self.open_pane(fresh, cwd, window, cx);

@@ -39,7 +39,7 @@ MVP 1의 셸 실행 모드는 zsh를 기준으로 한다. 다른 셸을 지정�
 | `Cmd+W` | 현재 Pane 닫기. 탭의 마지막 Pane이면 탭을 닫는다. 마지막 탭이면 창을 닫지 않고 새 탭으로 바꾼다 |
 | `Cmd+G` / `Cmd+Shift+G` | 현재 탭으로 새 그룹 만들기 / 그룹에서 빼기 |
 | `Cmd+B`, `Cmd+Shift+B` | 탭 사이드바 열기·닫기(상단 바 왼쪽 버튼과 같음) |
-| `Cmd+,` | Settings 탭 열기(상단 바 오른쪽 톱니 버튼과 같음). 이미 열려 있으면 그 탭으로 이동 |
+| `Cmd+,` | Settings 탭 열기(상단 바 오른쪽 톱니 버튼과 같음). 이미 열려 있으면 그 탭으로 이동. 닫으면 열기 전에 있던 Pane으로 돌아간다 |
 | `Cmd+\` | Tools panel 열기·닫기(상단 바 렌치 버튼과 같음) |
 | `Ctrl+1` / `Ctrl+3` | Project explorer / Global search 열기. 이미 그 도구가 보이면 Tools panel을 닫는다 |
 | `Cmd+Shift+F` | Global search를 열고 검색 칸으로 이동 |
@@ -202,7 +202,7 @@ cursor-style = bar    # block | bar | underline
 
 | 키 / 메뉴 | 동작 |
 | --- | --- |
-| 메뉴바 | Warp의 구성(bareframe·File·Edit·View·Tab·Window)을 따르고, bareframe에 없는 Blocks·AI·Drive·Help는 뺐다. `Cmd+H`(숨기기), `Cmd+Alt+H`(다른 앱 숨기기), `Cmd+M`(최소화)도 macOS처럼 동작한다 |
+| 메뉴바 | Warp의 구성(bareframe·File·Edit·View·Tab·Window)을 따르고, bareframe에 없는 Blocks·AI·Drive·Help는 뺐다. `Cmd+H`(숨기기), `Cmd+Alt+H`(다른 앱 숨기기), `Cmd+M`(최소화), `Ctrl+Cmd+Space`(이모지 및 기호)도 macOS처럼 동작한다 |
 | View > Dark Theme / Light Theme | 테마를 바꾸고 설정 파일에 저장 |
 | `Cmd+=` / `Cmd+-` / `Cmd+0` | 모든 Pane의 폰트 크기 1pt 키우기 / 줄이기 / 설정 값으로 되돌리기(실행 중에만 유지) |
 

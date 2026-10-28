@@ -123,6 +123,10 @@ impl WorkspaceView {
             .iter()
             .find(|(_, (pane, _))| matches!(pane, PaneView::Settings(_)))
             .map(|(id, _)| *id);
+        let active = self.model.active_pane();
+        if existing != Some(active) {
+            self.before_settings = Some(active);
+        }
         if let Some(id) = existing {
             self.model.focus(id);
         } else {

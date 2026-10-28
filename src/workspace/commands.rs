@@ -82,6 +82,11 @@ impl WorkspaceView {
             )
             .on_action(cx.listener(|_, _: &Minimize, window, _| window.minimize_window()))
             .on_action(cx.listener(|_, _: &ZoomWindow, window, _| window.zoom_window()))
+            .on_action(
+                cx.listener(|_, _: &ShowCharacterPalette, window, _| {
+                    window.show_character_palette()
+                }),
+            )
             .on_action(cx.listener(|view, _: &RenameTab, window, cx| {
                 // The name is edited in place on the tab's card.
                 view.sidebar_open = true;

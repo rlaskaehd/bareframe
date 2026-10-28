@@ -66,6 +66,7 @@ actions!(
         ShowAll,
         Minimize,
         ZoomWindow,
+        ShowCharacterPalette,
         RenameTab,
         MoveTabUp,
         MoveTabDown,
@@ -142,6 +143,8 @@ pub fn bind_keys(settings: &Settings, cx: &mut App) {
         KeyBinding::new("cmd-h", Hide, None),
         KeyBinding::new("alt-cmd-h", HideOthers, None),
         KeyBinding::new("cmd-m", Minimize, None),
+        // Emoji & Symbols: the key reaches GPUI's bindings before the menu macOS adds it to.
+        KeyBinding::new("ctrl-cmd-space", ShowCharacterPalette, None),
     ]);
     cx.bind_keys(crate::text_field::key_bindings());
     cx.bind_keys(crate::explorer::key_bindings());
