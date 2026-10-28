@@ -10,6 +10,7 @@ use super::{
     engine, mac,
 };
 use crate::{
+    actions::{DecreaseFontSize, IncreaseFontSize, ResetFontSize},
     text_field::{TextField, TextFieldEvent},
     theme::{self, Theme, hsla},
 };
@@ -429,6 +430,12 @@ impl BrowserPane {
         }
     }
 
+    fn zoom(&self, command: ZoomCommand) {
+        if let Some(host) = self.browser.and_then(engine::host) {
+            host.zoom(command);
+        }
+    }
+
     fn edit(&self, edit: fn(&Frame)) {
         if let Some(frame) = self
             .browser
@@ -571,6 +578,10 @@ impl Render for BrowserPane {
                     browser.reload();
                 }
             }))
+            // The font size keys zoom the page instead, in Chromium's steps.
+            .on_action(cx.listener(|pane, _: &IncreaseFontSize, _, _| pane.zoom(ZoomCommand::IN)))
+            .on_action(cx.listener(|pane, _: &DecreaseFontSize, _, _| pane.zoom(ZoomCommand::OUT)))
+            .on_action(cx.listener(|pane, _: &ResetFontSize, _, _| pane.zoom(ZoomCommand::RESET)))
             .size_full()
             .flex()
             .flex_col()
