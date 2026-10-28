@@ -215,7 +215,15 @@ impl WorkspaceView {
     ) {
         let numbers = LineNumbers::from_setting(self.settings.get("editor-line-numbers"));
         let autosave = self.settings.flag("editor-autosave");
-        pane.update(cx, |pane, cx| pane.set_options(numbers, autosave, cx));
+        let width = if crate::markdown::is_markdown(pane.read(cx).path()) {
+            "markdown-tab-width"
+        } else {
+            "editor-tab-width"
+        };
+        let width = self.settings.get(width).parse().unwrap_or(4);
+        pane.update(cx, |pane, cx| {
+            pane.set_options(numbers, autosave, width, cx)
+        });
     }
 
     /// A file already open is shown again rather than opened twice. Otherwise it opens

@@ -7,9 +7,9 @@ use crate::{
 };
 use bareframe_core::text::Position;
 use gpui::{
-    App, Bounds, Context, ElementId, ElementInputHandler, Entity, GlobalElementId, LayoutId,
-    Pixels, ShapedLine, Style, TextRun, UnderlineStyle, Window, fill, point, prelude::*, px,
-    relative, size,
+    App, Bounds, Context, DispatchPhase, ElementId, ElementInputHandler, Entity, GlobalElementId,
+    LayoutId, MouseButton, MouseMoveEvent, MouseUpEvent, Pixels, ShapedLine, Style, TextRun,
+    UnderlineStyle, Window, fill, point, prelude::*, px, relative, size,
 };
 use std::{ops::Range, time::Duration};
 
@@ -314,6 +314,23 @@ impl Element for EditorElement {
         window: &mut Window,
         cx: &mut App,
     ) {
+        // A selecting drag is followed out of the text, and ends wherever the button comes up.
+        let entity = self.editor.clone();
+        window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
+            if phase == DispatchPhase::Bubble && event.pressed_button == Some(MouseButton::Left) {
+                entity.update(cx, |editor, cx| {
+                    if editor.selecting {
+                        editor.drag_to(event.position, cx);
+                    }
+                });
+            }
+        });
+        let entity = self.editor.clone();
+        window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
+            if phase == DispatchPhase::Bubble && event.button == MouseButton::Left {
+                entity.update(cx, |editor, _| editor.end_drag());
+            }
+        });
         let editor = self.editor.read(cx);
         let focus = editor.focus.clone();
         let focused = focus.is_focused(window);

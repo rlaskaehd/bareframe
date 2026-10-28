@@ -499,6 +499,27 @@ pub const DEFS: &[Def] = &[
     def(
         Features,
         "Editor",
+        "editor-tab-width",
+        "Indent width",
+        "Spaces a Tab inserts in code files, and Backspace takes back at once in an indent. \
+         Files indented with tabs keep tabs.",
+        Integer { min: 1, max: 8 },
+        "4",
+        App,
+    ),
+    def(
+        Features,
+        "Editor",
+        "markdown-tab-width",
+        "Markdown indent width",
+        "The same for Markdown files.",
+        Integer { min: 1, max: 8 },
+        "2",
+        App,
+    ),
+    def(
+        Features,
+        "Editor",
         "group-editor-files",
         "Group files into single editor pane",
         "Open files in the active tab's editor pane as file tabs instead of new panes.",

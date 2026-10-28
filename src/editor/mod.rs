@@ -134,6 +134,9 @@ pub struct EditorPane {
     scroll: Point<Pixels>,
     reveal: bool,
     selecting: bool,
+    /// The pointer of a selecting drag gone above or below the text: it keeps scrolling.
+    drag: Option<Point<Pixels>>,
+    autoscrolling: bool,
     focus: FocusHandle,
     theme: &'static Theme,
     font: String,
@@ -153,6 +156,8 @@ pub struct EditorPane {
     find: Option<FindBar>,
     go_to: Option<(Entity<TextField>, Subscription)>,
     line_numbers: LineNumbers,
+    /// Spaces a Tab inserts, and Backspace takes back at once in an indent.
+    tab_width: usize,
     autosave: bool,
     _autosave: Option<Task<()>>,
     /// Colors per line from the last parse; lines edited since have none until the next.
@@ -188,6 +193,8 @@ impl EditorPane {
             scroll: Point::default(),
             reveal: false,
             selecting: false,
+            drag: None,
+            autoscrolling: false,
             focus: cx.focus_handle(),
             theme,
             font,
@@ -201,6 +208,7 @@ impl EditorPane {
             find: None,
             go_to: None,
             line_numbers: LineNumbers::Absolute,
+            tab_width: 4,
             autosave: false,
             _autosave: None,
             syntax: Vec::new(),
@@ -252,10 +260,12 @@ impl EditorPane {
         &mut self,
         line_numbers: LineNumbers,
         autosave: bool,
+        tab_width: usize,
         cx: &mut Context<Self>,
     ) {
         self.line_numbers = line_numbers;
         self.autosave = autosave;
+        self.tab_width = tab_width.max(1);
         cx.notify();
     }
 
@@ -454,19 +464,67 @@ impl EditorPane {
     }
 
     fn on_mouse_move(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
-        if !self.selecting {
-            if event.pressed_button.is_none() {
-                self.hover_at(event.position, cx);
-            }
-            return;
+        // A drag is followed anywhere in the window (see `drag_to`).
+        if !self.selecting && event.pressed_button.is_none() {
+            self.hover_at(event.position, cx);
         }
-        if event.pressed_button != Some(MouseButton::Left) {
-            self.selecting = false;
-            return;
-        }
-        if let Some(position) = self.position_for(event.position) {
+    }
+
+    /// A selecting drag, wherever the pointer is: past the top or bottom of the text the
+    /// view keeps scrolling, faster the further out, until the pointer comes back or lets go.
+    fn drag_to(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
+        if let Some(position) = self.position_for(at) {
             self.select(position, true, cx);
         }
+        let outside = self
+            .layout
+            .as_ref()
+            .is_some_and(|layout| at.y < layout.bounds.top() || at.y > layout.bounds.bottom());
+        self.drag = outside.then_some(at);
+        if outside && !self.autoscrolling {
+            self.autoscrolling = true;
+            cx.spawn(async move |editor, cx| {
+                loop {
+                    cx.background_executor()
+                        .timer(std::time::Duration::from_millis(40))
+                        .await;
+                    let going = editor.update(cx, |editor, cx| editor.autoscroll(cx));
+                    if !going.unwrap_or(false) {
+                        break;
+                    }
+                }
+            })
+            .detach();
+        }
+    }
+
+    fn autoscroll(&mut self, cx: &mut Context<Self>) -> bool {
+        let (Some(at), Some(layout), true) = (self.drag, &self.layout, self.selecting) else {
+            self.drag = None;
+            self.autoscrolling = false;
+            return false;
+        };
+        let line = layout.line_height;
+        let beyond = if at.y < layout.bounds.top() {
+            at.y - layout.bounds.top()
+        } else {
+            at.y - layout.bounds.bottom()
+        };
+        // A line a tick near the edge, one more for every two lines further out.
+        let lines = (1.0 + (beyond.abs() / (line * 2.0)).floor()).min(10.0);
+        let step = if beyond < Pixels::ZERO { -lines } else { lines };
+        self.scroll.y = (self.scroll.y + line * step).max(Pixels::ZERO);
+        self.clamp_scroll();
+        if let Some(position) = self.position_for(at) {
+            self.select(position, true, cx);
+        }
+        true
+    }
+
+    /// The drag's button came up, wherever the pointer was.
+    fn end_drag(&mut self) {
+        self.selecting = false;
+        self.drag = None;
     }
 
     fn on_scroll(&mut self, event: &ScrollWheelEvent, _: &mut Window, cx: &mut Context<Self>) {
@@ -496,13 +554,30 @@ impl EditorPane {
         self.scroll.x = self.scroll.x.min(max_x);
     }
 
-    fn indent_unit(&self) -> &'static str {
+    /// What Tab inserts: a tab in a file indented with tabs, else spaces to the next stop.
+    fn indent_unit(&self) -> String {
         let tabs = self
             .buffer
             .lines()
             .take(500)
             .any(|line| line.starts_with('\t'));
-        if tabs { "\t" } else { "    " }
+        if tabs {
+            "\t".into()
+        } else {
+            " ".repeat(self.tab_width - self.head.column % self.tab_width)
+        }
+    }
+
+    /// Backspace: in an indent of spaces, back to the previous stop at once, taking what
+    /// Tab put there; anywhere else one character.
+    fn backspace(&mut self, cx: &mut Context<Self>) {
+        let (line, column) = (self.head.line, self.head.column);
+        match outdent(self.buffer.line(line), column, self.tab_width) {
+            Some(spaces) if self.anchor == self.head && !self.read_only => {
+                self.replace(Position::new(line, column - spaces)..self.head, "", cx);
+            }
+            _ => self.delete_with(Buffer::previous, cx),
+        }
     }
 }
 
@@ -600,7 +675,7 @@ impl EditorPane {
                 e.anchor = Position::default();
                 e.select(e.buffer.end(), true, cx)
             }))
-            .on_action(cx.listener(|e, _: &Backspace, _, cx| e.delete_with(Buffer::previous, cx)))
+            .on_action(cx.listener(|e, _: &Backspace, _, cx| e.backspace(cx)))
             .on_action(cx.listener(|e, _: &Delete, _, cx| e.delete_with(Buffer::next, cx)))
             .on_action(
                 cx.listener(|e, _: &DeleteWordLeft, _, cx| e.delete_with(Buffer::word_start, cx)),
@@ -613,7 +688,7 @@ impl EditorPane {
             }))
             .on_action(cx.listener(|e, _: &Tab, _, cx| {
                 let unit = e.indent_unit();
-                e.insert(unit, cx)
+                e.insert(&unit, cx)
             }))
             .on_action(cx.listener(|e, _: &Copy, _, cx| {
                 let text = copied(e);
@@ -658,10 +733,6 @@ impl EditorPane {
             }))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
             .on_mouse_move(cx.listener(Self::on_mouse_move))
-            .on_mouse_up(
-                MouseButton::Left,
-                cx.listener(|e, _, _, _| e.selecting = false),
-            )
             .on_scroll_wheel(cx.listener(Self::on_scroll))
             .child(EditorElement {
                 editor: cx.entity(),
@@ -799,6 +870,13 @@ pub fn key_bindings() -> Vec<gpui::KeyBinding> {
     ]
 }
 
+/// How many spaces Backspace takes at `column` of `line`, back to the previous multiple of
+/// `width`, when everything before the cursor is spaces; `None` otherwise.
+fn outdent(line: &str, column: usize, width: usize) -> Option<usize> {
+    let before = line.get(..column)?;
+    (column > 0 && before.bytes().all(|byte| byte == b' ')).then(|| (column - 1) % width + 1)
+}
+
 /// A file's contents, hashed to tell an outside edit from our own save.
 fn fingerprint(text: &str) -> u64 {
     use std::hash::{Hash, Hasher};
@@ -810,6 +888,16 @@ fn fingerprint(text: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn backspace_in_an_indent_goes_back_to_the_previous_stop() {
+        assert_eq!(outdent("    x", 4, 4), Some(4));
+        assert_eq!(outdent("      x", 6, 4), Some(2));
+        assert_eq!(outdent("    x", 4, 2), Some(2));
+        assert_eq!(outdent("  a x", 4, 2), None);
+        assert_eq!(outdent("\tx", 1, 4), None);
+        assert_eq!(outdent("x", 0, 4), None);
+    }
 
     #[test]
     fn line_start_toggles_between_indent_and_column_zero() {
