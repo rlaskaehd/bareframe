@@ -253,21 +253,31 @@ const FIND_VAR: &str = "BAREFRAME_BROWSER_FIND";
 const NOWHERE: &str = "no bareframe here: run this in a bareframe terminal opened after \
     turning on Settings › Features › Browser › \"Let agents in terminals control browser tabs\"";
 
-/// The socket of the one bareframe that answers, for a server started outside its terminals
-/// (see `FIND_VAR`). It can't tell which terminal its agent runs in, so the tabs it
+/// A connection to the one bareframe that answers, for a server started outside its
+/// terminals (see `FIND_VAR`): among the user's own sockets in the temporary folder, never
+/// one someone else put there. It can't tell which terminal its agent runs in, so the tabs it
 /// is allowed are those of every agent started that way.
-fn find() -> Result<String, String> {
-    let entries = std::fs::read_dir(std::env::temp_dir()).map_err(|error| error.to_string())?;
-    let live: Vec<String> = entries
+fn find() -> Result<UnixStream, String> {
+    use std::os::unix::fs::{FileTypeExt, MetadataExt};
+    // SAFETY: geteuid has no preconditions and cannot fail.
+    #[allow(unsafe_code)]
+    let me = unsafe { libc::geteuid() };
+    let folder = std::env::temp_dir();
+    let entries = std::fs::read_dir(&folder).map_err(|error| error.to_string())?;
+    let mut live: Vec<UnixStream> = entries
         .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
         .filter(|name| name.starts_with(protocol::SOCKET_PREFIX) && name.ends_with(".sock"))
-        .map(|name| std::env::temp_dir().join(name).display().to_string())
-        // Left behind by a bareframe that crashed, or a file of the same name.
-        .filter(|path| UnixStream::connect(path).is_ok())
+        .map(|name| folder.join(name))
+        .filter(|path| {
+            std::fs::symlink_metadata(path)
+                .is_ok_and(|meta| meta.uid() == me && meta.file_type().is_socket())
+        })
+        // Left behind by a bareframe that crashed.
+        .filter_map(|path| UnixStream::connect(path).ok())
         .collect();
-    match live.as_slice() {
-        [endpoint] => Ok(endpoint.clone()),
-        [] => Err(NOWHERE.to_owned()),
+    match live.len() {
+        1 => Ok(live.remove(0)),
+        0 => Err(NOWHERE.to_owned()),
         _ => Err(
             "several bareframes let agents use their tabs: start the agent in a \
                   bareframe terminal without a shared server (codex --no-daemon)"
@@ -279,16 +289,27 @@ fn find() -> Result<String, String> {
 /// One request to the app and its result; the terminal's id goes with it, since what the
 /// user allows is that terminal using a tab.
 fn request(method: &str, mut params: Value) -> Result<Value, String> {
-    let endpoint = match std::env::var(protocol::ENDPOINT_VAR) {
-        Ok(endpoint) => endpoint,
-        Err(_) if std::env::var_os(FIND_VAR).is_some() => find()?,
-        Err(_) => return Err(NOWHERE.to_owned()),
+    let given = std::env::var(protocol::ENDPOINT_VAR).ok();
+    let stream = match given
+        .as_deref()
+        .map(|endpoint| (endpoint, UnixStream::connect(endpoint)))
+    {
+        Some((_, Ok(stream))) => {
+            if let Ok(terminal) = std::env::var(protocol::TERMINAL_VAR) {
+                params["terminal"] = Value::from(terminal);
+            }
+            stream
+        }
+        // A shared server keeps the variables of the terminal it started in, even after that
+        // bareframe quit: it looks instead, as one of no terminal.
+        _ if std::env::var_os(FIND_VAR).is_some() => find()?,
+        Some((endpoint, Err(error))) => {
+            return Err(format!(
+                "{endpoint}: {error} (is that bareframe still running?)"
+            ));
+        }
+        None => return Err(NOWHERE.to_owned()),
     };
-    if let Ok(terminal) = std::env::var(protocol::TERMINAL_VAR) {
-        params["terminal"] = Value::from(terminal);
-    }
-    let stream = UnixStream::connect(&endpoint)
-        .map_err(|error| format!("{endpoint}: {error} (is that bareframe still running?)"))?;
     let mut writer = stream.try_clone().map_err(|error| error.to_string())?;
     let message = json!({ "id": 1, "method": method, "params": params });
     writeln!(writer, "{message}").map_err(|error| error.to_string())?;

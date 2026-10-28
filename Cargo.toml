@@ -27,6 +27,8 @@ raw-window-handle = "0.6"
 # Verifies the signature on downloaded updates; the release key lives with the maintainer.
 ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 futures = "0.3"
+# bareframe-browser looks for the app's socket only among the user's own files (geteuid).
+libc = "0.2"
 grep = "0.4"
 pulldown-cmark = { version = "0.13", default-features = false }
 trash = "5"

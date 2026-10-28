@@ -930,6 +930,7 @@ dependencies = [
  "grep",
  "ignore",
  "image",
+ "libc",
  "merman",
  "mimalloc",
  "notify",
