@@ -22,6 +22,9 @@ const USAGE: &str = "usage: bareframe-browser tabs
        bareframe-browser snapshot <tab>
        bareframe-browser screenshot <tab> [<file.png>]
        bareframe-browser click <tab> <ref> [<document>]
+       bareframe-browser double-click <tab> <ref> [<document>]
+       bareframe-browser right-click <tab> <ref> [<document>]
+       bareframe-browser drag <tab> <ref> <onto ref> [<document>]
        bareframe-browser fill <tab> <ref> <text> [<document>]
        bareframe-browser press <tab> <key>
        bareframe-browser select <tab> <ref> <value or label> [<document>]
@@ -59,6 +62,25 @@ fn main() -> ExitCode {
         ["click", tab, node, rest @ ..] if rest.len() <= 1 => (
             "click",
             json!({ "tab": tab, "ref": number(node), "document": rest.first().and_then(|d| number(d)) }),
+            None,
+        ),
+        [
+            kind @ ("double-click" | "right-click"),
+            tab,
+            node,
+            rest @ ..,
+        ] if rest.len() <= 1 => (
+            "click",
+            json!({ "tab": tab, "ref": number(node),
+                    "document": rest.first().and_then(|d| number(d)),
+                    "count": if *kind == "double-click" { 2 } else { 1 },
+                    "button": if *kind == "right-click" { "right" } else { "left" } }),
+            None,
+        ),
+        ["drag", tab, node, to, rest @ ..] if rest.len() <= 1 => (
+            "drag",
+            json!({ "tab": tab, "ref": number(node), "to": number(to),
+                    "document": rest.first().and_then(|d| number(d)) }),
             None,
         ),
         ["fill", tab, node, text, rest @ ..] if rest.len() <= 1 => (
@@ -155,7 +177,9 @@ fn hook() -> ExitCode {
     let verb = match method.strip_prefix("browser_").unwrap_or(method) {
         "snapshot" | "screenshot" | "diagnostics" => "read",
         "navigate" => "load another page in",
-        "click" | "fill" | "press_key" | "select" | "hover" | "scroll" => "click and type in",
+        "click" | "fill" | "press_key" | "select" | "hover" | "scroll" | "drag" => {
+            "click and type in"
+        }
         "wait_for" => "watch",
         "close" => "close",
         "release" => return allow(),
@@ -487,9 +511,20 @@ mod mcp {
             ),
             tool(
                 "browser_click",
-                "Click an element as a mouse would, at its middle; fails if something covers it.",
-                json!({ "tab": tab, "ref": node, "document": document }),
+                "Click an element as a mouse would, at its middle; fails if something covers it. \
+                 count 2 double-clicks; button right right-clicks (the page's contextmenu, without \
+                 the browser's own menu).",
+                json!({ "tab": tab, "ref": node, "document": document,
+                        "button": { "type": "string", "enum": ["left", "right", "middle"] },
+                        "count": { "type": "integer", "minimum": 1, "maximum": 3 } }),
                 &["tab", "ref", "document"],
+            ),
+            tool(
+                "browser_drag",
+                "Drag an element (ref) onto another (to) with the mouse: sortable lists, sliders, \
+                 drop zones and draggable items. Both must be on screen.",
+                json!({ "tab": tab, "ref": node, "to": node, "document": document }),
+                &["tab", "ref", "to", "document"],
             ),
             tool(
                 "browser_fill",

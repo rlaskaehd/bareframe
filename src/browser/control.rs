@@ -58,6 +58,8 @@ struct State {
     documents: HashMap<i32, u64>,
     /// What went wrong on each page since it was first asked for.
     logs: HashMap<i32, diagnostics::Log>,
+    /// A drag under way per page, waiting for Chromium to hand over the page's own drag.
+    drags: HashMap<i32, oneshot::Sender<Value>>,
 }
 
 struct Endpoint {
@@ -307,6 +309,7 @@ async fn on_tab(method: &str, params: &Value, cx: &mut AsyncApp) -> Result<Value
         "select",
         "hover",
         "scroll",
+        "drag",
         "wait_for",
         "diagnostics",
         "release",
@@ -386,7 +389,23 @@ async fn on_tab(method: &str, params: &Value, cx: &mut AsyncApp) -> Result<Value
             let url = address_for(string(params, "url")?);
             automation::navigate(browser, &url, cx).await?;
         }
-        "click" => automation::click(browser, node()?, cx).await?,
+        "click" => {
+            let button = params["button"].as_str().unwrap_or("left");
+            let count = params["count"].as_u64().unwrap_or(1);
+            automation::click(browser, node()?, button, count, cx).await?
+        }
+        "drag" => {
+            let to = params["to"].as_i64().ok_or((
+                "BAD_REQUEST",
+                "no `to`; take a ref from a snapshot".to_owned(),
+            ))?;
+            let (sender, intercepted) = oneshot::channel();
+            STATE.with_borrow_mut(|state| state.drags.insert(browser, sender));
+            let dragged = automation::drag(browser, node()?, to, intercepted, cx).await;
+            STATE.with_borrow_mut(|state| state.drags.remove(&browser));
+            // Dropped through the page's drag-and-drop events, not mouse moves alone.
+            result["dropped"] = Value::from(dragged?);
+        }
         "fill" => {
             let text = string(params, "text")?;
             automation::fill(browser, node()?, text, cx).await?;
@@ -546,6 +565,14 @@ fn on_event(event: engine::Event) {
         return;
     }
     let method = event.method.as_str();
+    if method == "Input.dragIntercepted" {
+        if let Some(sender) = STATE.with_borrow_mut(|state| state.drags.remove(&browser))
+            && let Ok(params) = serde_json::from_slice::<Value>(&event.params)
+        {
+            let _ = sender.send(params["data"].clone());
+        }
+        return;
+    }
     if method != "Page.frameNavigated" && !diagnostics::METHODS.contains(&method) {
         return;
     }

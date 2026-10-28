@@ -4,9 +4,14 @@
 use super::{engine, mac};
 use cef::*;
 use futures::channel::mpsc::UnboundedSender;
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::{Duration, Instant},
 };
 
 pub enum BrowserEvent {
@@ -28,6 +33,18 @@ pub enum BrowserEvent {
 
 /// Set while the pane has GPUI's focus on its page, so the page may take the keyboard.
 pub type Keyboard = Arc<AtomicBool>;
+
+thread_local! {
+    /// Browsers an agent just right-clicked, and when (see `quiet_menu`).
+    static AGENT_MENUS: RefCell<HashMap<i32, Instant>> = RefCell::default();
+}
+
+/// An agent is about to right-click `browser`: the page gets its `contextmenu`, but the
+/// menu Chromium would show next, which no agent can use, stays shut. A page that shows
+/// its own menu leaves nothing behind past a few seconds for the user's right-clicks.
+pub fn quiet_menu(browser: i32) {
+    AGENT_MENUS.with_borrow_mut(|menus| menus.insert(browser, Instant::now()));
+}
 
 pub fn client(events: UnboundedSender<BrowserEvent>, keyboard: Keyboard) -> Client {
     PaneClient::new(events, keyboard)
@@ -54,6 +71,41 @@ wrap_client! {
 
         fn load_handler(&self) -> Option<LoadHandler> {
             Some(PaneLoad::new(self.events.clone()))
+        }
+
+        fn context_menu_handler(&self) -> Option<ContextMenuHandler> {
+            Some(PaneMenu::new())
+        }
+    }
+}
+
+wrap_context_menu_handler! {
+    struct PaneMenu;
+
+    impl ContextMenuHandler {
+        fn on_before_context_menu(
+            &self,
+            browser: Option<&mut Browser>,
+            _frame: Option<&mut Frame>,
+            _params: Option<&mut ContextMenuParams>,
+            model: Option<&mut MenuModel>,
+        ) {
+            let (Some(browser), Some(model)) = (browser, model) else {
+                return;
+            };
+            let id = browser.identifier();
+            let quiet = AGENT_MENUS
+                .try_with(|menus| {
+                    let at = menus.try_borrow_mut().ok()?.remove(&id)?;
+                    Some(at.elapsed() < Duration::from_secs(3))
+                })
+                .ok()
+                .flatten()
+                .unwrap_or(false);
+            // An empty menu is not shown.
+            if quiet {
+                model.clear();
+            }
         }
     }
 }

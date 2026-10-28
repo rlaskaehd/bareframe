@@ -198,76 +198,197 @@ async fn on_object(
     Ok(result["result"]["value"].clone())
 }
 
-/// Where a mouse reaches the element `node` (a snapshot's ref): scrolled into view, its
-/// middle, after checking nothing covers that point.
-async fn reach(browser: i32, node: i64, cx: &mut AsyncApp) -> Result<(f64, f64), Failure> {
+/// Where the element `node` (a snapshot's ref) is for the mouse, in the viewport's CSS
+/// pixels that mouse events take: its middle, brought to the middle of the screen first
+/// when off it (unless `stay`), whether a press there would land on it rather than on
+/// something covering it, and whether the point is on screen at all.
+async fn locate(
+    browser: i32,
+    node: i64,
+    stay: bool,
+    cx: &mut AsyncApp,
+) -> Result<(f64, f64, bool, bool), Failure> {
     let element = object(browser, node, cx).await?;
-    let _ = call(
+    let found = on_object(
         browser,
-        "DOM.scrollIntoViewIfNeeded",
-        json!({ "backendNodeId": node }),
-        cx,
-    )
-    .await;
-    let model = call(
-        browser,
-        "DOM.getBoxModel",
-        json!({ "backendNodeId": node }),
-        cx,
-    )
-    .await
-    .map_err(|_| ("NOT_VISIBLE", format!("ref={node} has no box on the page")))?;
-    let quad: Vec<f64> = model["model"]["content"]
-        .as_array()
-        .map(|quad| quad.iter().filter_map(Value::as_f64).collect())
-        .unwrap_or_default();
-    if quad.len() != 8 {
-        return Err(("NOT_VISIBLE", format!("ref={node} has no box on the page")));
-    }
-    let x = (quad[0] + quad[2] + quad[4] + quad[6]) / 4.0;
-    let y = (quad[1] + quad[3] + quad[5] + quad[7]) / 4.0;
-    // What a click there would reach must be the element or inside it.
-    let hit = call(
-        browser,
-        "DOM.getNodeForLocation",
-        json!({ "x": x as i64, "y": y as i64, "includeUserAgentShadowDOM": false }),
+        &element,
+        "function(stay) {
+            const box = () => {
+                if (this.nodeType === 1) return this.getBoundingClientRect();
+                const range = document.createRange();
+                range.selectNode(this);
+                return range.getBoundingClientRect();
+            };
+            const middle = b => [b.left + b.width / 2, b.top + b.height / 2];
+            const shown = ([x, y]) => x >= 0 && y >= 0 && x < innerWidth && y < innerHeight;
+            let rect = box();
+            if (!stay && !shown(middle(rect))) {
+                (this.nodeType === 1 ? this : this.parentElement)
+                    ?.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+                rect = box();
+            }
+            if (rect.width === 0 && rect.height === 0) return null;
+            const [x, y] = middle(rect);
+            // Into open shadow roots, as a press goes.
+            let hit = document.elementFromPoint(x, y);
+            while (hit && hit.shadowRoot) {
+                const inner = hit.shadowRoot.elementFromPoint(x, y);
+                if (!inner || inner === hit) break;
+                hit = inner;
+            }
+            const reached = !!hit
+                && (hit === this || this.contains(hit) || (this.nodeType !== 1 && hit.contains(this)));
+            return { x, y, reached, shown: shown([x, y]) };
+        }",
+        json!([{ "value": stay }]),
         cx,
     )
     .await?;
-    let hit = hit["backendNodeId"].as_i64().unwrap_or_default();
-    if hit != node {
-        let hit = object(browser, hit, cx).await?;
-        let inside = on_object(
-            browser,
-            &element,
-            "function(other) { return this === other || this.contains(other); }",
-            json!([{ "objectId": hit }]),
-            cx,
-        )
-        .await?;
-        if inside != Value::Bool(true) {
-            return Err((
-                "OBSCURED",
-                format!("something covers ref={node} at its middle"),
-            ));
-        }
+    let (Some(x), Some(y)) = (found["x"].as_f64(), found["y"].as_f64()) else {
+        return Err(("NOT_VISIBLE", format!("ref={node} has no box on the page")));
+    };
+    Ok((x, y, found["reached"] == true, found["shown"] == true))
+}
+
+/// Where a mouse reaches the element `node`: on screen, at its middle, with nothing
+/// covering that point.
+async fn reach(browser: i32, node: i64, cx: &mut AsyncApp) -> Result<(f64, f64), Failure> {
+    let (x, y, reached, _) = locate(browser, node, false, cx).await?;
+    if !reached {
+        return Err((
+            "OBSCURED",
+            format!("something covers ref={node} at its middle"),
+        ));
     }
     Ok((x, y))
 }
 
-/// Clicks the element `node` as a mouse would, where `reach` finds it.
-pub async fn click(browser: i32, node: i64, cx: &mut AsyncApp) -> Result<(), Failure> {
+/// Clicks the element `node` as a mouse would, where `reach` finds it: `count` times
+/// (2 is a double-click) with `button` (`left`, `right` or `middle`).
+pub async fn click(
+    browser: i32,
+    node: i64,
+    button: &str,
+    count: u64,
+    cx: &mut AsyncApp,
+) -> Result<(), Failure> {
+    if !matches!(button, "left" | "right" | "middle") {
+        return Err((
+            "BAD_REQUEST",
+            format!("{button:?} is not left, right or middle"),
+        ));
+    }
     let (x, y) = reach(browser, node, cx).await?;
-    for kind in ["mouseMoved", "mousePressed", "mouseReleased"] {
+    if button == "right" {
+        super::client::quiet_menu(browser);
+    }
+    let moved = json!({ "type": "mouseMoved", "x": x, "y": y });
+    input(browser, "Input.dispatchMouseEvent", moved, cx).await?;
+    // Each press counts up, as a person's quick presses do: the page sees click, then
+    // dblclick.
+    for clicks in 1..=count.clamp(1, 3) {
+        for kind in ["mousePressed", "mouseReleased"] {
+            let event = json!({ "type": kind, "x": x, "y": y, "button": button,
+                                "clickCount": clicks });
+            input(browser, "Input.dispatchMouseEvent", event, cx).await?;
+        }
+    }
+    Ok(())
+}
+
+/// Drags the element `from` onto the element `to` with the left button, as a mouse would.
+/// A page's own dragging (sliders, sortable lists) follows the moves; a drag the page
+/// hands to Chromium (`draggable`) comes back as `intercepted` instead of starting the
+/// system's, and is dropped on `to` from here: `true` then.
+pub async fn drag(
+    browser: i32,
+    from: i64,
+    to: i64,
+    intercepted: futures::channel::oneshot::Receiver<Value>,
+    cx: &mut AsyncApp,
+) -> Result<bool, Failure> {
+    let (x1, y1) = reach(browser, from, cx).await?;
+    let (x2, y2, reached, shown) = locate(browser, to, true, cx).await?;
+    if !shown {
+        return Err((
+            "NOT_VISIBLE",
+            format!("ref={to} is off the screen while ref={from} is on it; scroll so both show"),
+        ));
+    }
+    if !reached {
+        return Err((
+            "OBSCURED",
+            format!("something covers ref={to} at its middle, where the drop would land"),
+        ));
+    }
+    call(
+        browser,
+        "Input.setInterceptDrags",
+        json!({ "enabled": true }),
+        cx,
+    )
+    .await?;
+    // The button is down from the press until the release.
+    let mouse = |kind: &str, x: f64, y: f64| {
+        let buttons = if kind == "mouseReleased" { 0 } else { 1 };
+        json!({ "type": kind, "x": x, "y": y, "button": "left", "buttons": buttons,
+                "clickCount": 1 })
+    };
+    let dragged = async {
         input(
             browser,
             "Input.dispatchMouseEvent",
-            json!({ "type": kind, "x": x, "y": y, "button": "left", "clickCount": 1 }),
+            mouse("mouseMoved", x1, y1),
             cx,
         )
         .await?;
+        input(
+            browser,
+            "Input.dispatchMouseEvent",
+            mouse("mousePressed", x1, y1),
+            cx,
+        )
+        .await?;
+        for step in 1..=10 {
+            let f = f64::from(step) / 10.0;
+            let (x, y) = (x1 + (x2 - x1) * f, y1 + (y2 - y1) * f);
+            input(
+                browser,
+                "Input.dispatchMouseEvent",
+                mouse("mouseMoved", x, y),
+                cx,
+            )
+            .await?;
+        }
+        let wait = cx.background_executor().timer(Duration::from_millis(300));
+        let handed = match futures::future::select(intercepted, std::pin::pin!(wait)).await {
+            Either::Left((Ok(data), _)) => Some(data),
+            _ => None,
+        };
+        if let Some(data) = &handed {
+            for kind in ["dragEnter", "dragOver", "drop"] {
+                let event = json!({ "type": kind, "x": x2, "y": y2, "data": data });
+                input(browser, "Input.dispatchDragEvent", event, cx).await?;
+            }
+        }
+        input(
+            browser,
+            "Input.dispatchMouseEvent",
+            mouse("mouseReleased", x2, y2),
+            cx,
+        )
+        .await?;
+        Ok(handed.is_some())
     }
-    Ok(())
+    .await;
+    let _ = call(
+        browser,
+        "Input.setInterceptDrags",
+        json!({ "enabled": false }),
+        cx,
+    )
+    .await;
+    dragged
 }
 
 /// Moves the mouse onto the element `node` without pressing: menus and tips that open on
