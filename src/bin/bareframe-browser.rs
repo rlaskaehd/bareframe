@@ -229,7 +229,11 @@ fn setup() -> ExitCode {
          args = [\"mcp\"]\n\
          env_vars = [\"{endpoint}\", \"{terminal}\"]\n\
          env = {{ {find} = \"1\" }}\n\
-         default_tools_approval_mode = \"prompt\"\n\n\
+         default_tools_approval_mode = \"prompt\"\n\n   \
+         Codex keeps MCP tools out of sight until searched for, and its agent then reaches\n   \
+         for screen control instead; this lists bareframe's from the start:\n\n\
+         [features.code_mode]\n\
+         direct_only_tool_namespaces = [\"mcp__bareframe_browser\"]\n\n\
          2. Have the hook answer for tabs in use already: add this to ~/.codex/hooks.json\n   \
          (merged with any \"hooks\" there), then trust it when Codex asks (or in /hooks).\n   \
          When Codex asks about a tab, allow it once: for the session or always would skip\n   \
@@ -348,7 +352,8 @@ mod mcp {
     use std::{io::Write, process::ExitCode};
 
     const INSTRUCTIONS: &str = "These tools drive the browser tabs of the bareframe window \
-        this agent runs in: the same pages the user sees. Start with browser_tabs, or \
+        this agent runs in: the same pages the user sees. For those pages use these, not \
+        screenshots or clicks on the screen: they read and act on the page itself. Start with browser_tabs, or \
         browser_open for a tab of your own. browser_snapshot gives the page as an outline \
         whose elements carry [ref=N]; pass a ref and the snapshot's document number to \
         browser_click or browser_fill. When the page changes to another document, refs go \
