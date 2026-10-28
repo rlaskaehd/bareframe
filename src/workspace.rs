@@ -111,6 +111,9 @@ pub struct WorkspaceView {
     renaming: Option<(RenameTarget, Entity<TextField>, Subscription)>,
     /// The pane active before Settings was shown: closing Settings returns to it.
     before_settings: Option<PaneId>,
+    /// Panes in the order they last had focus, latest last: closing the active pane of a
+    /// split returns to the one used before it, not to its neighbour.
+    recent: Vec<PaneId>,
     /// The sidebar's tab filter: the field plus its event and change subscriptions.
     search: Option<(Entity<TextField>, [Subscription; 2])>,
     /// Set only when it changes; render runs every frame.
@@ -198,6 +201,7 @@ impl WorkspaceView {
             frozen_panes: Vec::new(),
             renaming: None,
             before_settings: None,
+            recent: Vec::new(),
             search: None,
             window_title: String::new(),
             window_bounds: None,
@@ -351,6 +355,11 @@ impl WorkspaceView {
 
     /// Shows only the active tab's surfaces and gives the active pane keyboard focus.
     fn sync(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let active = self.model.active_pane();
+        if self.recent.last() != Some(&active) {
+            self.recent.retain(|pane| *pane != active);
+            self.recent.push(active);
+        }
         if self.frozen {
             self.palette = None;
             self.dismiss_menu(cx);
@@ -444,12 +453,26 @@ impl WorkspaceView {
         }
         self.drop_clipboard_prompt_for(id, cx);
         let settings = matches!(self.panes.get(&id), Some((PaneView::Settings(_), _)));
+        let active = self.model.active_pane() == id;
         if let Some((PaneView::Terminal(pane), _)) = self.panes.remove(&id) {
             pane.update(cx, |pane, cx| pane.shutdown(cx));
         }
         let closed = self.model.close(id);
+        self.recent.retain(|pane| *pane != id);
         if settings && let Some(before) = self.before_settings.take() {
             self.model.focus(before);
+        }
+        if active && matches!(closed, Some(Closed::Pane)) {
+            let tab = self.model.tab_of(self.model.active_pane());
+            let back = self
+                .recent
+                .iter()
+                .rev()
+                .find(|pane| self.model.tab_of(**pane) == tab)
+                .copied();
+            if let Some(back) = back {
+                self.model.focus(back);
+            }
         }
         match closed {
             Some(Closed::Replaced(fresh)) => {
