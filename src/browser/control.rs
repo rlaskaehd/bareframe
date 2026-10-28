@@ -304,6 +304,9 @@ async fn on_tab(method: &str, params: &Value, cx: &mut AsyncApp) -> Result<Value
         "click",
         "fill",
         "press_key",
+        "select",
+        "hover",
+        "scroll",
         "wait_for",
         "diagnostics",
         "release",
@@ -389,6 +392,19 @@ async fn on_tab(method: &str, params: &Value, cx: &mut AsyncApp) -> Result<Value
             automation::fill(browser, node()?, text, cx).await?;
         }
         "press_key" => automation::press(browser, string(params, "key")?, cx).await?,
+        "select" => {
+            let choice = string(params, "value")?;
+            result["selected"] = automation::select(browser, node()?, choice, cx)
+                .await?
+                .into();
+        }
+        "hover" => automation::hover(browser, node()?, cx).await?,
+        "scroll" => {
+            let direction = params["direction"].as_str().unwrap_or("down");
+            let pages = params["pages"].as_f64().unwrap_or(1.0);
+            let over = params["ref"].as_i64();
+            automation::scroll(browser, over, direction, pages, cx).await?;
+        }
         "wait_for" => {
             let text = string(params, "text")?;
             let limit = params["timeout_ms"]

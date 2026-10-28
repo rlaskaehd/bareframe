@@ -198,9 +198,9 @@ async fn on_object(
     Ok(result["result"]["value"].clone())
 }
 
-/// Clicks the element `node` (a snapshot's ref) as a mouse would: scrolled into view, at
-/// its middle, after checking nothing covers that point.
-pub async fn click(browser: i32, node: i64, cx: &mut AsyncApp) -> Result<(), Failure> {
+/// Where a mouse reaches the element `node` (a snapshot's ref): scrolled into view, its
+/// middle, after checking nothing covers that point.
+async fn reach(browser: i32, node: i64, cx: &mut AsyncApp) -> Result<(f64, f64), Failure> {
     let element = object(browser, node, cx).await?;
     let _ = call(
         browser,
@@ -252,6 +252,12 @@ pub async fn click(browser: i32, node: i64, cx: &mut AsyncApp) -> Result<(), Fai
             ));
         }
     }
+    Ok((x, y))
+}
+
+/// Clicks the element `node` as a mouse would, where `reach` finds it.
+pub async fn click(browser: i32, node: i64, cx: &mut AsyncApp) -> Result<(), Failure> {
+    let (x, y) = reach(browser, node, cx).await?;
     for kind in ["mouseMoved", "mousePressed", "mouseReleased"] {
         input(
             browser,
@@ -262,6 +268,94 @@ pub async fn click(browser: i32, node: i64, cx: &mut AsyncApp) -> Result<(), Fai
         .await?;
     }
     Ok(())
+}
+
+/// Moves the mouse onto the element `node` without pressing: menus and tips that open on
+/// hover open.
+pub async fn hover(browser: i32, node: i64, cx: &mut AsyncApp) -> Result<(), Failure> {
+    let (x, y) = reach(browser, node, cx).await?;
+    let moved = json!({ "type": "mouseMoved", "x": x, "y": y });
+    input(browser, "Input.dispatchMouseEvent", moved, cx).await?;
+    Ok(())
+}
+
+/// Turns the mouse wheel `pages` screens toward `direction` (`up`, `down`, `left`, `right`)
+/// over the element `node`, or the middle of the page: what scrolls is what a user's wheel
+/// would scroll there, inner panes and pages that load more as they go included.
+pub async fn scroll(
+    browser: i32,
+    node: Option<i64>,
+    direction: &str,
+    pages: f64,
+    cx: &mut AsyncApp,
+) -> Result<(), Failure> {
+    let metrics = call(browser, "Page.getLayoutMetrics", json!({}), cx).await?;
+    let view = &metrics["cssVisualViewport"];
+    let width = view["clientWidth"].as_f64().unwrap_or(800.0);
+    let height = view["clientHeight"].as_f64().unwrap_or(600.0);
+    let (dx, dy) = match direction {
+        "down" => (0.0, height * pages),
+        "up" => (0.0, -height * pages),
+        "right" => (width * pages, 0.0),
+        "left" => (-width * pages, 0.0),
+        _ => {
+            return Err((
+                "BAD_REQUEST",
+                format!("{direction:?} is not up, down, left or right"),
+            ));
+        }
+    };
+    let (x, y) = match node {
+        Some(node) => reach(browser, node, cx).await?,
+        None => (width / 2.0, height / 2.0),
+    };
+    let wheel = json!({ "type": "mouseWheel", "x": x, "y": y, "deltaX": dx, "deltaY": dy });
+    input(browser, "Input.dispatchMouseEvent", wheel, cx).await?;
+    Ok(())
+}
+
+/// Picks the option of the drop-down `node` whose value or label is `choice`, as a user
+/// would: the page gets `input` and `change`. The option's label comes back.
+pub async fn select(
+    browser: i32,
+    node: i64,
+    choice: &str,
+    cx: &mut AsyncApp,
+) -> Result<String, Failure> {
+    let element = object(browser, node, cx).await?;
+    let picked = on_object(
+        browser,
+        &element,
+        "function(choice) {
+            if (!(this instanceof HTMLSelectElement)) return { error: 'NOT_SELECT' };
+            const options = [...this.options];
+            const option = options.find(o => o.value === choice)
+                || options.find(o => o.label.trim() === choice.trim());
+            if (!option || option.disabled) {
+                return { error: 'NO_OPTION', options: options.filter(o => !o.disabled)
+                    .slice(0, 50).map(o => o.label.trim()) };
+            }
+            this.focus();
+            option.selected = true;
+            this.dispatchEvent(new Event('input', { bubbles: true }));
+            this.dispatchEvent(new Event('change', { bubbles: true }));
+            return { label: option.label.trim() };
+        }",
+        json!([{ "value": choice }]),
+        cx,
+    )
+    .await?;
+    match picked["error"].as_str() {
+        None => Ok(picked["label"].as_str().unwrap_or_default().to_owned()),
+        Some("NOT_SELECT") => Err((
+            "NOT_SELECT",
+            format!("ref={node} is not a drop-down; click a custom one open instead"),
+        )),
+        Some(_) => Err((
+            "NO_OPTION",
+            format!("no option {choice:?}; there are {}", picked["options"]),
+        )),
+    }
 }
 
 /// Replaces the text of the field `node` with `text`, typed in as input: the page sees the

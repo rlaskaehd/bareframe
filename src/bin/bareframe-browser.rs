@@ -24,6 +24,9 @@ const USAGE: &str = "usage: bareframe-browser tabs
        bareframe-browser click <tab> <ref> [<document>]
        bareframe-browser fill <tab> <ref> <text> [<document>]
        bareframe-browser press <tab> <key>
+       bareframe-browser select <tab> <ref> <value or label> [<document>]
+       bareframe-browser hover <tab> <ref> [<document>]
+       bareframe-browser scroll <tab> <up|down|left|right> [<pages> [<ref> <document>]]
        bareframe-browser wait <tab> <text> [<timeout_ms>]
        bareframe-browser diagnostics <tab> [<cursor>]
        bareframe-browser release <tab>
@@ -65,6 +68,25 @@ fn main() -> ExitCode {
             None,
         ),
         ["press", tab, key] => ("press_key", json!({ "tab": tab, "key": key }), None),
+        ["select", tab, node, value, rest @ ..] if rest.len() <= 1 => (
+            "select",
+            json!({ "tab": tab, "ref": number(node), "value": value,
+                    "document": rest.first().and_then(|d| number(d)) }),
+            None,
+        ),
+        ["hover", tab, node, rest @ ..] if rest.len() <= 1 => (
+            "hover",
+            json!({ "tab": tab, "ref": number(node), "document": rest.first().and_then(|d| number(d)) }),
+            None,
+        ),
+        ["scroll", tab, direction, rest @ ..] if matches!(rest.len(), 0 | 1 | 3) => (
+            "scroll",
+            json!({ "tab": tab, "direction": direction,
+                    "pages": rest.first().and_then(|p| p.parse::<f64>().ok()),
+                    "ref": rest.get(1).and_then(|n| number(n)),
+                    "document": rest.get(2).and_then(|d| number(d)) }),
+            None,
+        ),
         ["wait", tab, text, rest @ ..] if rest.len() <= 1 => (
             "wait_for",
             json!({ "tab": tab, "text": text, "timeout_ms": rest.first().and_then(|t| number(t)) }),
@@ -133,7 +155,7 @@ fn hook() -> ExitCode {
     let verb = match method.strip_prefix("browser_").unwrap_or(method) {
         "snapshot" | "screenshot" | "diagnostics" => "read",
         "navigate" => "load another page in",
-        "click" | "fill" | "press_key" => "click and type in",
+        "click" | "fill" | "press_key" | "select" | "hover" | "scroll" => "click and type in",
         "wait_for" => "watch",
         "close" => "close",
         "release" => return allow(),
@@ -480,6 +502,26 @@ mod mcp {
                 "Press a key: Enter, Tab, Escape, Backspace, Delete, arrows, Home, End, PageUp, PageDown, or one character.",
                 json!({ "tab": tab, "key": { "type": "string" } }),
                 &["tab", "key"],
+            ),
+            tool(
+                "browser_select",
+                "Pick an option of a drop-down (<select>) by its value or label, as a user would.",
+                json!({ "tab": tab, "ref": node, "value": { "type": "string" }, "document": document }),
+                &["tab", "ref", "value", "document"],
+            ),
+            tool(
+                "browser_hover",
+                "Move the mouse onto an element without clicking, opening menus or tips shown on hover.",
+                json!({ "tab": tab, "ref": node, "document": document }),
+                &["tab", "ref", "document"],
+            ),
+            tool(
+                "browser_scroll",
+                "Turn the mouse wheel: up, down, left or right by pages (screens, default 1), over an element (ref and document) or the page.",
+                json!({ "tab": tab,
+                        "direction": { "type": "string", "enum": ["up", "down", "left", "right"] },
+                        "pages": { "type": "number" }, "ref": node, "document": document }),
+                &["tab", "direction"],
             ),
             tool(
                 "browser_wait_for",
