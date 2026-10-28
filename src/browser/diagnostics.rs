@@ -29,11 +29,28 @@ pub struct Log {
     entries: VecDeque<Value>,
     /// Addresses of requests in flight: a failure names only its request.
     requests: HashMap<String, String>,
+    /// No agent may use the page: nothing is noted.
+    paused: bool,
 }
 
 impl Log {
+    /// Forgets what was noted and notes nothing until `resume`, while no agent may use the
+    /// page. Cursors go on from where they were, so an old one misses nothing new.
+    pub fn pause(&mut self) {
+        self.entries.clear();
+        self.requests.clear();
+        self.paused = true;
+    }
+
+    pub fn resume(&mut self) {
+        self.paused = false;
+    }
+
     /// Notes a DevTools event from the `Runtime` or `Network` domain, if it tells of a fault.
     pub fn record(&mut self, method: &str, params: &Value, document: u64) {
+        if self.paused {
+            return;
+        }
         let mut entry = match method {
             "Runtime.consoleAPICalled" => {
                 let level = params["type"].as_str().unwrap_or_default();
@@ -209,6 +226,15 @@ mod tests {
         }
         assert_eq!(log.since(0)["missed"], 3);
         assert_eq!(log.since(3)["missed"], 0);
+
+        // Released: what happens meanwhile is not kept, and numbering goes on after.
+        log.pause();
+        let fault = json!({ "exceptionDetails": { "text": "y" } });
+        log.record("Runtime.exceptionThrown", &fault, 3);
+        assert_eq!(log.since(0)["entries"].as_array().unwrap().len(), 0);
+        log.resume();
+        log.record("Runtime.exceptionThrown", &fault, 3);
+        assert_eq!(log.since(203)["entries"][0]["cursor"], 204);
     }
 
     #[test]

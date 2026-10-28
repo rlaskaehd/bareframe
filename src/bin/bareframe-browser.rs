@@ -362,7 +362,7 @@ mod mcp {
             ),
             tool(
                 "browser_diagnostics",
-                "What went wrong on the page since you first used the tab: console errors and \
+                "What went wrong on the page while agents may use the tab: console errors and \
                  warnings, uncaught exceptions, HTTP errors (status 400 and up) and failed \
                  requests. Pass the cursor of an earlier call as since to get only what came \
                  after it.",

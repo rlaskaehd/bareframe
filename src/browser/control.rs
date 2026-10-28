@@ -306,7 +306,23 @@ async fn on_tab(method: &str, params: &Value, cx: &mut AsyncApp) -> Result<Value
         .as_str()
         .ok_or(("BAD_REQUEST", "no `tab`; list them with `tabs`".to_owned()))?;
     if method == "release" {
-        STATE.with_borrow_mut(|state| state.grants.remove(&(terminal, tab.to_owned())));
+        let (left, known) = STATE.with_borrow_mut(|state| {
+            state.grants.remove(&(terminal, tab.to_owned()));
+            let left = state.grants.iter().any(|(_, used)| used == tab);
+            (left, find(state, tab))
+        });
+        // What the page does while no agent may use it is not for agents to read.
+        let browser = known.and_then(|known| {
+            known
+                .pane
+                .read_with(cx, |pane, _| pane.browser_id())
+                .ok()
+                .flatten()
+        });
+        if !left && let Some(browser) = browser {
+            STATE
+                .with_borrow_mut(|state| state.logs.get_mut(&browser).map(diagnostics::Log::pause));
+        }
         return Ok(json!({ "tab": tab, "released": true }));
     }
     let known = STATE
@@ -488,6 +504,7 @@ fn close(terminal: &str, tab: &Tab, cx: &mut AsyncApp) -> Result<Value, Failure>
 /// Starts counting `browser`'s documents and noting what goes wrong there, and has its page
 /// act focused, once: input from an agent reaches it while the user types in the terminal.
 async fn watch(browser: i32, cx: &mut AsyncApp) -> Result<(), Failure> {
+    STATE.with_borrow_mut(|state| state.logs.entry(browser).or_default().resume());
     if STATE.with_borrow(|state| state.documents.contains_key(&browser)) {
         return Ok(());
     }
@@ -503,7 +520,6 @@ async fn watch(browser: i32, cx: &mut AsyncApp) -> Result<(), Failure> {
     .await?;
     STATE.with_borrow_mut(|state| {
         state.documents.entry(browser).or_insert(1);
-        state.logs.entry(browser).or_default();
     });
     Ok(())
 }
