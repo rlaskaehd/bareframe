@@ -96,6 +96,8 @@ pub struct MarkdownPane {
     error: Option<String>,
     theme: &'static Theme,
     mono: String,
+    /// Cmd+= and Cmd+- on the font size, as a factor on the text and its width.
+    zoom: f32,
     focus: FocusHandle,
     /// The blocks as a list that lays out only those in view: a long document stays quick
     /// to scroll and to redraw.
@@ -152,6 +154,7 @@ impl MarkdownPane {
         path: PathBuf,
         theme: &'static Theme,
         mono: String,
+        zoom: f32,
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -161,6 +164,7 @@ impl MarkdownPane {
             error: None,
             theme,
             mono,
+            zoom,
             focus: cx.focus_handle(),
             list: ListState::new(0, ListAlignment::Top, px(600.0)),
             links: Default::default(),
@@ -195,9 +199,19 @@ impl MarkdownPane {
         self.focus.focus(window, cx);
     }
 
-    pub fn set_theme(&mut self, theme: &'static Theme, mono: String, cx: &mut Context<Self>) {
+    pub fn set_style(
+        &mut self,
+        theme: &'static Theme,
+        mono: String,
+        zoom: f32,
+        cx: &mut Context<Self>,
+    ) {
         self.theme = theme;
         self.mono = mono;
+        if zoom != self.zoom {
+            self.zoom = zoom;
+            self.relayout();
+        }
         // Diagrams carry their colors, so a switch between dark and light redraws them.
         if is_dark(theme) != self.diagrams_dark {
             self.diagrams_dark = is_dark(theme);
@@ -350,6 +364,11 @@ impl MarkdownPane {
         self.relayout();
     }
 
+    /// A size in the document, zoomed.
+    pub(super) fn size(&self, size: f32) -> gpui::Pixels {
+        px(size * self.zoom)
+    }
+
     /// Measures every block again, keeping the reader's place.
     fn relayout(&mut self) {
         let top = self.list.logical_scroll_top();
@@ -407,7 +426,7 @@ impl Render for MarkdownPane {
                         .child(
                             div()
                                 .w_full()
-                                .max_w(px(MAX_WIDTH))
+                                .max_w(pane.size(MAX_WIDTH))
                                 .px_6()
                                 .when(index == 0, |this| this.pt_5())
                                 .pb(px(if last { 20.0 } else { 12.0 }))
@@ -427,7 +446,7 @@ impl Render for MarkdownPane {
             .track_focus(&self.focus)
             .bg(hsla(theme.terminal_background))
             .font_family(theme::UI_FONT)
-            .text_size(px(TEXT_SIZE))
+            .text_size(self.size(TEXT_SIZE))
             .line_height(gpui::relative(1.55))
             .text_color(hsla(theme.text))
             .on_action(cx.listener(|_, _: &ToggleRaw, _, cx| cx.emit(MarkdownEvent::ShowRaw)))

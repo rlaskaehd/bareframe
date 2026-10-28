@@ -256,8 +256,8 @@ impl WorkspaceView {
         cx: &mut Context<Self>,
     ) {
         let theme = self.theme();
-        let mono = self.mono_font();
-        let pane = cx.new(|cx| MarkdownPane::new(path, theme, mono, window, cx));
+        let (mono, zoom) = (self.mono_font(), self.text_zoom());
+        let pane = cx.new(|cx| MarkdownPane::new(path, theme, mono, zoom, window, cx));
         let events = cx.subscribe_in(
             &pane,
             window,

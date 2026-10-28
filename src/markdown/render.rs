@@ -39,7 +39,7 @@ impl MarkdownPane {
                 };
                 div()
                     .pt(px(if *level <= 2 { 12.0 } else { 6.0 }))
-                    .text_size(px(TEXT_SIZE * scale))
+                    .text_size(self.size(TEXT_SIZE * scale))
                     .line_height(gpui::relative(1.25))
                     .when(*level <= 4, |this| this.font_weight(FontWeight::SEMIBOLD))
                     .when(*level == 6, |this| this.text_color(hsla(theme.text_muted)))
@@ -192,7 +192,7 @@ impl MarkdownPane {
                         .child(self.render_source(language, text, ids, cx))
                         .child(
                             div()
-                                .text_size(px(12.0))
+                                .text_size(self.size(12.0))
                                 .text_color(hsla(theme.text_muted))
                                 .child(error),
                         )
@@ -215,12 +215,13 @@ impl MarkdownPane {
         let id = *ids;
         let copied = text.to_owned();
         let inserted = text.to_owned();
+        let small = self.size(11.0);
         let button = |id: (&'static str, usize), label: &'static str| {
             widgets::ghost_button(theme, id, label)
                 .px_2()
                 .py(px(2.0))
                 .rounded_sm()
-                .text_size(px(11.0))
+                .text_size(small)
                 .font_family(theme::UI_FONT)
         };
         div()
@@ -241,7 +242,7 @@ impl MarkdownPane {
                     .child(
                         div()
                             .flex_1()
-                            .text_size(px(11.0))
+                            .text_size(small)
                             .text_color(hsla(theme.text_muted))
                             .child(language.to_owned()),
                     )
@@ -265,7 +266,7 @@ impl MarkdownPane {
                     .pb_3()
                     .pt_1()
                     .font_family(self.mono.clone())
-                    .text_size(px(13.0))
+                    .text_size(self.size(13.0))
                     .whitespace_nowrap()
                     .child(self.selectable(
                         id,

@@ -48,6 +48,11 @@ impl WorkspaceView {
         self.settings.font_family().unwrap_or("Menlo").to_owned()
     }
 
+    /// Cmd+= and Cmd+- as a factor, for panes whose text sizes don't come from the setting.
+    pub(super) fn text_zoom(&self) -> f32 {
+        self.settings.font_size() / self.base_font_size
+    }
+
     pub(super) fn apply_settings(&mut self, cx: &mut Context<Self>) {
         self.update_tools(cx);
         let theme = self.terminal_theme();
@@ -63,8 +68,8 @@ impl WorkspaceView {
                 }),
                 PaneView::Browser(pane) => pane.update(cx, |pane, cx| pane.set_theme(ui, cx)),
                 PaneView::Markdown(pane) => {
-                    let mono = self.mono_font();
-                    pane.update(cx, |pane, cx| pane.set_theme(ui, mono, cx))
+                    let (mono, zoom) = (self.mono_font(), self.text_zoom());
+                    pane.update(cx, |pane, cx| pane.set_style(ui, mono, zoom, cx))
                 }
                 PaneView::Editor(tabs) => {
                     tabs.update(cx, |tabs, cx| tabs.set_theme(ui, cx));
