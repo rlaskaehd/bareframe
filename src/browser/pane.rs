@@ -87,6 +87,8 @@ pub struct BrowserPane {
     theme: &'static Theme,
     page: FocusHandle,
     keyboard: Keyboard,
+    /// The id agents in terminals know this tab by (see control).
+    tab: String,
     _events: Option<Task<()>>,
     /// Snapshots no longer shown; GPUI keeps their textures until the window drops them.
     stale: Vec<Arc<RenderImage>>,
@@ -104,7 +106,7 @@ impl BrowserPane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        super::control::register(cx.weak_entity());
+        let tab = super::control::register(cx.weak_entity());
         let address = cx.new(|cx| {
             let mut field = TextField::search(theme.accent, window, cx);
             field.select_on_focus();
@@ -161,6 +163,7 @@ impl BrowserPane {
             theme,
             page,
             keyboard,
+            tab,
             _events: None,
             stale: Vec::new(),
             _snapshot: None,
@@ -173,6 +176,15 @@ impl BrowserPane {
         if let Some(id) = self.browser.take() {
             engine::close(id);
         }
+    }
+
+    pub fn tab(&self) -> &str {
+        &self.tab
+    }
+
+    /// Why there is no page, if there isn't one.
+    pub fn error(&self) -> Option<String> {
+        self.error.clone()
     }
 
     pub fn browser_id(&self) -> Option<i32> {

@@ -4,8 +4,8 @@ use crate::{
     browser::{self, BrowserPane, BrowserPaneEvent},
     files,
 };
-use bareframe_core::layout::PaneId;
-use gpui::{AppContext, Context, Window};
+use bareframe_core::layout::{Axis, PaneId};
+use gpui::{AppContext, Context, Entity, Window};
 
 impl WorkspaceView {
     /// File › New Browser Tab: a blank page waiting for an address.
@@ -61,5 +61,41 @@ impl WorkspaceView {
         );
         self.panes
             .insert(id, (PaneView::Browser(pane), Some(events)));
+    }
+
+    /// A page an agent in a terminal opens (see browser::control): split beside the active
+    /// pane, so the user watches it next to the agent, while the keyboard stays where the
+    /// user was typing.
+    pub fn open_agent_tab(
+        &mut self,
+        url: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<BrowserPane> {
+        let typing = self.model.active_pane();
+        let id = self.model.split(Axis::Horizontal);
+        self.insert_browser_pane(id, url, window, cx);
+        self.model.focus(typing);
+        self.sync(window, cx);
+        match self.panes.get(&id) {
+            Some((PaneView::Browser(pane), _)) => pane.clone(),
+            _ => unreachable!("inserted above"),
+        }
+    }
+
+    /// Closes the pane showing `pane`, if this window has it.
+    pub fn close_browser_pane(
+        &mut self,
+        pane: &Entity<BrowserPane>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let id = self.panes.iter().find_map(|(id, (view, _))| match view {
+            PaneView::Browser(shown) if shown == pane => Some(*id),
+            _ => None,
+        });
+        if let Some(id) = id {
+            self.close_pane(id, window, cx);
+        }
     }
 }

@@ -1,18 +1,23 @@
 //! Programs in bareframe's terminals (Claude Code, Codex) reach the browser tabs through
 //! here: `bareframe-browser` connects to a Unix socket (see protocol.rs), and its requests
 //! are answered on the UI thread, where the tabs and Chromium live. Off unless Settings ›
-//! Features › Browser turns it on; terminals opened meanwhile learn the socket's path.
-use super::{BrowserPane, engine, protocol};
+//! Features › Browser turns it on; terminals opened meanwhile learn the socket's path and
+//! their own id.
+//!
+//! The user allows a terminal's agent to use a tab in the agent itself: Claude Code asks
+//! before the first use, through `bareframe-browser hook` (which reads `granted` here). The
+//! user manages the agent's tabs by telling it: it releases tabs, and opens and closes its own.
+use super::{BrowserPane, automation, automation::Failure, engine, protocol};
+use crate::workspace::WorkspaceView;
 use futures::{
     StreamExt,
     channel::{mpsc, oneshot},
-    future::Either,
 };
-use gpui::{App, AsyncApp, WeakEntity};
+use gpui::{AnyWindowHandle, App, AsyncApp, Entity, WeakEntity};
 use serde_json::{Value, json};
 use std::{
     cell::RefCell,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     io::{BufReader, Write},
     os::unix::{
         fs::PermissionsExt,
@@ -26,15 +31,30 @@ use std::{
     time::Duration,
 };
 
-/// How long a page has to answer one DevTools call.
-const DEADLINE: Duration = Duration::from_secs(10);
-/// The most lines a snapshot gives; a page's whole tree can run to tens of thousands.
-const SNAPSHOT_LINES: usize = 4000;
-
 type Request = (Value, oneshot::Sender<Value>);
+
 /// A browser pane and the id agents know it by.
-type Tab = (String, WeakEntity<BrowserPane>);
-type Failure = (&'static str, String);
+#[derive(Clone)]
+struct Tab {
+    id: String,
+    pane: WeakEntity<BrowserPane>,
+}
+
+#[derive(Default)]
+struct State {
+    next_tab: u64,
+    tabs: Vec<Tab>,
+    next_terminal: u64,
+    /// Windows a tab can be opened in.
+    workspaces: Vec<(WeakEntity<WorkspaceView>, AnyWindowHandle)>,
+    /// (terminal, tab) pairs in use: the tab was used from that terminal, or opened there.
+    grants: HashSet<(String, String)>,
+    /// Tabs a terminal opened, which it may also close.
+    owners: HashMap<String, String>,
+    /// Documents each browser has loaded, counted from when it was first asked for: a
+    /// snapshot's references hold only for the document it was taken in.
+    documents: HashMap<i32, u64>,
+}
 
 struct Endpoint {
     path: PathBuf,
@@ -44,31 +64,52 @@ struct Endpoint {
 }
 
 thread_local! {
-    /// Every browser pane made, by the id agents see; dead ones are dropped as new ones come.
-    static TABS: RefCell<(u64, Vec<Tab>)> = const { RefCell::new((0, Vec::new())) };
+    static STATE: RefCell<State> = RefCell::default();
     static ENDPOINT: RefCell<Option<Endpoint>> = const { RefCell::new(None) };
-    /// Documents each browser has loaded, counted from when it was first asked for: a
-    /// snapshot's references hold only for the document it was taken in.
-    static DOCUMENTS: RefCell<HashMap<i32, u64>> = RefCell::new(HashMap::new());
 }
 
 /// Gives a new browser pane the id agents use for it, for the app's run.
-pub fn register(pane: WeakEntity<BrowserPane>) {
-    TABS.with_borrow_mut(|(next, tabs)| {
-        *next += 1;
-        tabs.retain(|(_, pane)| pane.upgrade().is_some());
-        tabs.push((format!("tab-{next}"), pane));
+pub fn register(pane: WeakEntity<BrowserPane>) -> String {
+    STATE.with_borrow_mut(|state| {
+        state.next_tab += 1;
+        let id = format!("tab-{}", state.next_tab);
+        state.tabs.retain(|tab| tab.pane.upgrade().is_some());
+        state.tabs.push(Tab {
+            id: id.clone(),
+            pane,
+        });
+        id
+    })
+}
+
+/// A window agents may open tabs in.
+pub fn register_workspace(view: WeakEntity<WorkspaceView>, window: AnyWindowHandle) {
+    STATE.with_borrow_mut(|state| {
+        state
+            .workspaces
+            .retain(|(view, _)| view.upgrade().is_some());
+        state.workspaces.push((view, window));
     });
 }
 
-/// `/usr/bin/env` with the socket for a new terminal's command, while control is on.
+fn find(state: &State, tab: &str) -> Option<Tab> {
+    state.tabs.iter().find(|known| known.id == tab).cloned()
+}
+
+/// `/usr/bin/env` with the socket and a new terminal's id, while control is on.
 pub fn launch_env() -> Option<String> {
     let path = ENDPOINT.with_borrow(|endpoint| endpoint.as_ref().map(|e| e.path.clone()))?;
+    let terminal = STATE.with_borrow_mut(|state| {
+        state.next_terminal += 1;
+        format!("terminal-{}", state.next_terminal)
+    });
     let quote = bareframe_core::config::quote;
     let mut env = format!(
-        "/usr/bin/env {}={}",
+        "/usr/bin/env {}={} {}={}",
         protocol::ENDPOINT_VAR,
-        quote(path.to_str()?)
+        quote(path.to_str()?),
+        protocol::TERMINAL_VAR,
+        quote(&terminal)
     );
     let cli = std::env::current_exe()
         .ok()?
@@ -182,9 +223,9 @@ async fn answer(request: Value, cx: &mut AsyncApp) -> Value {
     let params = &request["params"];
     let result = match request["method"].as_str().unwrap_or_default() {
         "tabs" => Ok(tabs(cx)),
-        "snapshot" => snapshot(params, cx).await,
-        "screenshot" => screenshot(params, cx).await,
-        method => Err(("UNKNOWN_METHOD", format!("no method `{method}`"))),
+        "granted" => granted(params, cx),
+        "open" => open(params, cx).await,
+        method => on_tab(method, params, cx).await,
     };
     match result {
         Ok(result) => json!({ "id": id, "result": result }),
@@ -197,73 +238,255 @@ fn failure(id: Value, (code, message): Failure) -> Value {
 }
 
 fn tabs(cx: &mut AsyncApp) -> Value {
-    let tabs = TABS.with_borrow(|(_, tabs)| tabs.clone());
+    let tabs = STATE.with_borrow(|state| state.tabs.clone());
     let list: Vec<Value> = tabs
         .into_iter()
-        .filter_map(|(id, pane)| {
-            pane.read_with(cx, |pane, _| {
-                json!({
-                    "tab": id,
-                    "title": pane.title(),
-                    "url": pane.url(),
-                    "ready": pane.browser_id().is_some(),
-                    "visible": pane.is_visible(),
-                    "loading": pane.is_loading(),
+        .filter_map(|tab| {
+            tab.pane
+                .read_with(cx, |pane, _| {
+                    json!({
+                        "tab": tab.id,
+                        "title": pane.title(),
+                        "url": pane.url(),
+                        "ready": pane.browser_id().is_some(),
+                        "visible": pane.is_visible(),
+                        "loading": pane.is_loading(),
+                    })
                 })
-            })
-            .ok()
+                .ok()
         })
         .collect();
     Value::Array(list)
 }
 
-/// The browser of the tab `params` names.
-fn browser_of(params: &Value, cx: &mut AsyncApp) -> Result<i32, Failure> {
+/// Whether this terminal uses `tab` already, for the hook deciding to ask the user; and
+/// what the tab shows, for the question.
+fn granted(params: &Value, cx: &mut AsyncApp) -> Result<Value, Failure> {
+    let pair = (
+        terminal_of(params),
+        params["tab"].as_str().unwrap_or_default().to_owned(),
+    );
+    let (granted, tab) =
+        STATE.with_borrow(|state| (state.grants.contains(&pair), find(state, &pair.1)));
+    let tab = tab.ok_or(("TAB_NOT_FOUND", format!("no tab `{}`", pair.1)))?;
+    let (title, url) = tab
+        .pane
+        .read_with(cx, |pane, _| (pane.title(), pane.url().to_owned()))
+        .map_err(|_| ("TAB_CLOSED", format!("`{}` is closed", pair.1)))?;
+    Ok(json!({ "tab": pair.1, "granted": granted, "title": title, "url": url }))
+}
+
+fn terminal_of(params: &Value) -> String {
+    params["terminal"].as_str().unwrap_or_default().to_owned()
+}
+
+/// A request about one tab: allowed first, then done.
+async fn on_tab(method: &str, params: &Value, cx: &mut AsyncApp) -> Result<Value, Failure> {
+    let known = [
+        "snapshot",
+        "screenshot",
+        "navigate",
+        "click",
+        "fill",
+        "press_key",
+        "wait_for",
+        "release",
+        "close",
+    ];
+    if !known.contains(&method) {
+        return Err(("UNKNOWN_METHOD", format!("no method `{method}`")));
+    }
+    let terminal = terminal_of(params);
     let tab = params["tab"]
         .as_str()
         .ok_or(("BAD_REQUEST", "no `tab`; list them with `tabs`".to_owned()))?;
-    let pane = TABS
-        .with_borrow(|(_, tabs)| {
-            tabs.iter()
-                .find(|(id, _)| id == tab)
-                .map(|(_, p)| p.clone())
-        })
+    if method == "release" {
+        STATE.with_borrow_mut(|state| state.grants.remove(&(terminal, tab.to_owned())));
+        return Ok(json!({ "tab": tab, "released": true }));
+    }
+    let known = STATE
+        .with_borrow(|state| find(state, tab))
         .ok_or(("TAB_NOT_FOUND", format!("no tab `{tab}`")))?;
-    pane.read_with(cx, |pane, _| pane.browser_id())
+    // Claude Code asked the user already, before the first use (see the module's note).
+    STATE.with_borrow_mut(|state| state.grants.insert((terminal.clone(), known.id.clone())));
+    if method == "close" {
+        return close(&terminal, &known, cx);
+    }
+    let browser = known
+        .pane
+        .read_with(cx, |pane, _| pane.browser_id())
         .map_err(|_| ("TAB_CLOSED", format!("`{tab}` is closed")))?
         .ok_or((
             "TAB_NOT_READY",
             format!("`{tab}` has no page yet: show it once"),
-        ))
-}
-
-/// A DevTools call on `browser`, within `DEADLINE`.
-async fn call(
-    browser: i32,
-    method: &str,
-    params: Value,
-    cx: &mut AsyncApp,
-) -> Result<Value, Failure> {
-    let reply = engine::devtools(browser, method, params);
-    let deadline = cx.background_executor().timer(DEADLINE);
-    match futures::future::select(std::pin::pin!(reply), deadline).await {
-        Either::Left((Ok(result), _)) => Ok(result),
-        Either::Left((Err(error), _)) if error.starts_with("the page") => {
-            Err(("TAB_CLOSED", error))
-        }
-        Either::Left((Err(error), _)) => Err(("DEVTOOLS_ERROR", error)),
-        Either::Right(_) => Err(("TIMEOUT", format!("{method} took over {DEADLINE:?}"))),
+        ))?;
+    watch(browser, cx).await?;
+    // Actions on a snapshot's refs check it is still the same document.
+    if let Some(expected) = params["document"].as_u64()
+        && expected != document(browser)
+    {
+        return Err((
+            "STALE_DOCUMENT",
+            format!("the page changed since document {expected}; take a new snapshot"),
+        ));
     }
+    let node = || {
+        params["ref"].as_i64().ok_or((
+            "BAD_REQUEST",
+            "no `ref`; take one from a snapshot".to_owned(),
+        ))
+    };
+    let mut result = json!({ "tab": tab });
+    match method {
+        "snapshot" => {
+            let (text, truncated) = automation::snapshot(browser, cx).await?;
+            result["text"] = Value::from(text);
+            result["truncated"] = Value::from(truncated);
+        }
+        "screenshot" => {
+            result["format"] = Value::from("png");
+            result["data"] = automation::screenshot(browser, cx).await?;
+        }
+        "navigate" => {
+            let url = params["url"]
+                .as_str()
+                .ok_or(("BAD_REQUEST", "no `url`".to_owned()))?;
+            automation::navigate(browser, url, cx).await?;
+        }
+        "click" => automation::click(browser, node()?, cx).await?,
+        "fill" => {
+            let text = params["text"]
+                .as_str()
+                .ok_or(("BAD_REQUEST", "no `text`".to_owned()))?;
+            automation::fill(browser, node()?, text, cx).await?;
+        }
+        "press_key" => {
+            let key = params["key"]
+                .as_str()
+                .ok_or(("BAD_REQUEST", "no `key`".to_owned()))?;
+            automation::press(browser, key, cx).await?;
+        }
+        "wait_for" => {
+            let text = params["text"]
+                .as_str()
+                .ok_or(("BAD_REQUEST", "no `text`".to_owned()))?;
+            let limit = params["timeout_ms"]
+                .as_u64()
+                .map_or(automation::WAIT, Duration::from_millis);
+            automation::wait_for_text(browser, text, limit, cx).await?;
+            result["found"] = Value::from(true);
+        }
+        _ => unreachable!("checked above"),
+    }
+    // What the page is now: actions can move it to another document.
+    result["document"] = Value::from(document(browser));
+    Ok(result)
 }
 
-/// Starts counting `browser`'s documents, once.
+/// Opens `url` in a new browser tab, owned by the asking terminal, and waits for it to load.
+async fn open(params: &Value, cx: &mut AsyncApp) -> Result<Value, Failure> {
+    let url = params["url"]
+        .as_str()
+        .ok_or(("BAD_REQUEST", "no `url`".to_owned()))?
+        .to_owned();
+    let terminal = terminal_of(params);
+    let (view, window) = STATE
+        .with_borrow(|state| {
+            state
+                .workspaces
+                .iter()
+                .find(|(view, _)| view.upgrade().is_some())
+                .cloned()
+        })
+        .ok_or(("NO_WINDOW", "bareframe has no window open".to_owned()))?;
+    let (sender, opened) = oneshot::channel::<Entity<BrowserPane>>();
+    let open = {
+        let mut cx = cx.clone();
+        move || {
+            let pane = window.update(&mut cx, |_, window, cx| {
+                view.update(cx, |view, cx| view.open_agent_tab(url, window, cx))
+            });
+            if let Ok(Ok(pane)) = pane {
+                let _ = sender.send(pane);
+            }
+        }
+    };
+    // Chromium starts only between events (see engine::start), as from a menu.
+    if engine::needs_start() && super::in_run_loop() {
+        super::between_events(open).map_err(|error| ("OPEN_FAILED", error))?;
+    } else {
+        open();
+    }
+    let pane = opened
+        .await
+        .map_err(|_| ("OPEN_FAILED", "the window went away".to_owned()))?;
+    let tab = pane.read_with(cx, |pane, _| pane.tab().to_owned());
+    STATE.with_borrow_mut(|state| {
+        state.grants.insert((terminal.clone(), tab.clone()));
+        state.owners.insert(tab.clone(), terminal);
+    });
+    // The page exists once its tab has been laid out, a frame or so away.
+    let start = std::time::Instant::now();
+    let browser = loop {
+        if let Some(browser) = pane.read_with(cx, |pane, _| pane.browser_id()) {
+            break browser;
+        }
+        if let Some(error) = pane.read_with(cx, |pane, _| pane.error()) {
+            return Err(("OPEN_FAILED", error));
+        }
+        if start.elapsed() > automation::WAIT {
+            return Err(("TIMEOUT", format!("`{tab}` did not get a page")));
+        }
+        cx.background_executor()
+            .timer(Duration::from_millis(50))
+            .await;
+    };
+    watch(browser, cx).await?;
+    automation::loaded(browser, cx).await?;
+    Ok(json!({ "tab": tab, "document": document(browser) }))
+}
+
+/// Closes a tab the terminal opened; a tab the user opened stays theirs to close.
+fn close(terminal: &str, tab: &Tab, cx: &mut AsyncApp) -> Result<Value, Failure> {
+    let owner = STATE.with_borrow(|state| state.owners.get(&tab.id).cloned());
+    if owner.as_deref() != Some(terminal) {
+        return Err((
+            "PERMISSION_DENIED",
+            "only tabs this terminal opened can be closed; release this one instead".into(),
+        ));
+    }
+    let Some(pane) = tab.pane.upgrade() else {
+        return Err(("TAB_CLOSED", format!("`{}` is closed", tab.id)));
+    };
+    let views = STATE.with_borrow(|state| state.workspaces.clone());
+    for (view, window) in views {
+        let _ = window.update(cx, |_, window, cx| {
+            view.update(cx, |view, cx| view.close_browser_pane(&pane, window, cx))
+        });
+    }
+    STATE.with_borrow_mut(|state| {
+        state.owners.remove(&tab.id);
+        state.grants.retain(|(_, granted)| *granted != tab.id);
+    });
+    Ok(json!({ "tab": tab.id, "closed": true }))
+}
+
+/// Starts counting `browser`'s documents and has its page act focused, once: input from an
+/// agent reaches it while the user types in the terminal.
 async fn watch(browser: i32, cx: &mut AsyncApp) -> Result<(), Failure> {
-    if DOCUMENTS.with_borrow(|documents| documents.contains_key(&browser)) {
+    if STATE.with_borrow(|state| state.documents.contains_key(&browser)) {
         return Ok(());
     }
-    call(browser, "Page.enable", json!({}), cx).await?;
-    DOCUMENTS.with_borrow_mut(|documents| {
-        documents.entry(browser).or_insert(1);
+    automation::call(browser, "Page.enable", json!({}), cx).await?;
+    automation::call(
+        browser,
+        "Emulation.setFocusEmulationEnabled",
+        json!({ "enabled": true }),
+        cx,
+    )
+    .await?;
+    STATE.with_borrow_mut(|state| {
+        state.documents.entry(browser).or_insert(1);
     });
     Ok(())
 }
@@ -277,8 +500,8 @@ fn on_event(event: engine::Event) {
     };
     // The page itself, not a frame inside it.
     if params["frame"]["parentId"].is_null() {
-        DOCUMENTS.with_borrow_mut(|documents| {
-            if let Some(count) = documents.get_mut(&event.browser) {
+        STATE.with_borrow_mut(|state| {
+            if let Some(count) = state.documents.get_mut(&event.browser) {
                 *count += 1;
             }
         });
@@ -286,121 +509,5 @@ fn on_event(event: engine::Event) {
 }
 
 fn document(browser: i32) -> u64 {
-    DOCUMENTS.with_borrow(|documents| documents.get(&browser).copied().unwrap_or(0))
-}
-
-async fn snapshot(params: &Value, cx: &mut AsyncApp) -> Result<Value, Failure> {
-    let browser = browser_of(params, cx)?;
-    watch(browser, cx).await?;
-    let tree = call(browser, "Accessibility.getFullAXTree", json!({}), cx).await?;
-    let (text, truncated) = outline(&tree["nodes"]);
-    Ok(json!({
-        "tab": params["tab"],
-        "document": document(browser),
-        "text": text,
-        "truncated": truncated,
-    }))
-}
-
-async fn screenshot(params: &Value, cx: &mut AsyncApp) -> Result<Value, Failure> {
-    let browser = browser_of(params, cx)?;
-    watch(browser, cx).await?;
-    let shot = call(
-        browser,
-        "Page.captureScreenshot",
-        json!({ "format": "png" }),
-        cx,
-    )
-    .await?;
-    Ok(json!({
-        "tab": params["tab"],
-        "document": document(browser),
-        "format": "png",
-        "data": shot["data"],
-    }))
-}
-
-/// The accessibility tree as an indented outline, one element a line:
-/// `button "Save" [ref=12]`, where `ref` is the element's DOM node for later actions.
-/// Nodes Chromium marks ignored, and roles that only group (`generic`, `none`), show their
-/// children in their place. Returns the text and whether it was cut at `SNAPSHOT_LINES`.
-fn outline(nodes: &Value) -> (String, bool) {
-    let nodes = nodes.as_array().map(Vec::as_slice).unwrap_or_default();
-    let by_id: HashMap<&str, &Value> = nodes
-        .iter()
-        .filter_map(|node| Some((node["nodeId"].as_str()?, node)))
-        .collect();
-    let mut lines = Vec::new();
-    let mut truncated = false;
-    // Depth-first from the roots, kept on a stack in reading order.
-    let mut stack: Vec<(&Value, usize)> = nodes
-        .iter()
-        .filter(|node| node["parentId"].is_null())
-        .rev()
-        .map(|node| (node, 0))
-        .collect();
-    while let Some((node, depth)) = stack.pop() {
-        let role = node["role"]["value"].as_str().unwrap_or_default();
-        let name = node["name"]["value"].as_str().unwrap_or_default().trim();
-        let shown = !node["ignored"].as_bool().unwrap_or(false)
-            && !matches!(
-                role,
-                "generic" | "none" | "InlineTextBox" | "LineBreak" | ""
-            )
-            && !(role == "StaticText" && name.is_empty());
-        let children = if shown { depth + 1 } else { depth };
-        if shown {
-            if lines.len() == SNAPSHOT_LINES {
-                truncated = true;
-                break;
-            }
-            let mut line = format!("{}{role}", "  ".repeat(depth));
-            if !name.is_empty() {
-                let name: String = name.chars().take(200).collect();
-                line.push_str(&format!(" {}", Value::from(name)));
-            }
-            if let Some(node) = node["backendDOMNodeId"].as_i64() {
-                line.push_str(&format!(" [ref={node}]"));
-            }
-            lines.push(line);
-        }
-        let ids = node["childIds"]
-            .as_array()
-            .map(Vec::as_slice)
-            .unwrap_or_default();
-        for id in ids.iter().rev() {
-            if let Some(child) = id.as_str().and_then(|id| by_id.get(id)) {
-                stack.push((child, children));
-            }
-        }
-    }
-    (lines.join("\n"), truncated)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::outline;
-    use serde_json::json;
-
-    #[test]
-    fn outline_keeps_meaningful_nodes_in_reading_order() {
-        let nodes = json!([
-            {"nodeId": "1", "role": {"value": "RootWebArea"}, "name": {"value": "Fixture"},
-             "childIds": ["2", "5"], "backendDOMNodeId": 1},
-            {"nodeId": "2", "parentId": "1", "role": {"value": "generic"}, "childIds": ["3", "4"]},
-            {"nodeId": "3", "parentId": "2", "role": {"value": "button"},
-             "name": {"value": "Save \"now\""}, "backendDOMNodeId": 12},
-            {"nodeId": "4", "parentId": "2", "role": {"value": "StaticText"}, "name": {"value": ""}},
-            {"nodeId": "5", "parentId": "1", "ignored": true, "role": {"value": "paragraph"},
-             "childIds": ["6"]},
-            {"nodeId": "6", "parentId": "5", "role": {"value": "StaticText"},
-             "name": {"value": "hello"}, "backendDOMNodeId": 20},
-        ]);
-        let (text, truncated) = outline(&nodes);
-        assert_eq!(
-            text,
-            "RootWebArea \"Fixture\" [ref=1]\n  button \"Save \\\"now\\\"\" [ref=12]\n  StaticText \"hello\" [ref=20]"
-        );
-        assert!(!truncated);
-    }
+    STATE.with_borrow(|state| state.documents.get(&browser).copied().unwrap_or(0))
 }

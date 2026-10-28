@@ -228,6 +228,17 @@ wrap_browser_process_handler! {
                 let _ = pump.unbounded_send(delay_ms);
             }
         }
+
+        fn on_already_running_app_relaunch(
+            &self,
+            _command_line: Option<&mut CommandLine>,
+            _current_directory: Option<&CefString>,
+        ) -> ::std::os::raw::c_int {
+            // A second bareframe using the same browser folder (a dev build beside the
+            // installed one) can't start Chromium; left to itself, Chromium here would answer
+            // it with a Chrome window of its own. That bareframe's panes say what failed.
+            1
+        }
     }
 }
 

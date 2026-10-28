@@ -6,6 +6,8 @@ use std::io::{self, BufRead, Read};
 
 /// The socket's path, given to every terminal bareframe opens while control is on.
 pub const ENDPOINT_VAR: &str = "BAREFRAME_BROWSER_ENDPOINT";
+/// The terminal's own id: what the user allows is a terminal using a tab.
+pub const TERMINAL_VAR: &str = "BAREFRAME_BROWSER_TERMINAL";
 /// The `bareframe-browser` executable, for registering it with an agent.
 pub const CLI_VAR: &str = "BAREFRAME_BROWSER_CLI";
 

@@ -132,11 +132,13 @@ MVP 1의 셸 실행 모드는 zsh를 기준으로 한다. 다른 셸을 지정�
 - 사용자가 누른 링크가 새 창(`target=_blank`)을 열면 새 브라우저 탭으로 연다. 웹 주소(`http`, `https`)만 열고, 스크립트나 페이지 안 프레임이 스스로 여는 창은 막는다.
 - 팔레트나 메뉴가 페이지 위에 열리는 동안은 페이지의 스냅샷을 대신 보인다. 페이지 뷰는 GPUI 위에 놓인 native view라 그 위로 그릴 수 없기 때문이다.
 - Chromium은 앱 안에서만 DevTools 프로토콜로 조작하고(`src/browser/engine.rs`의 `devtools`), 원격 디버깅 포트는 열지 않는다.
-- 터미널의 agent(Claude Code, Codex 등)가 브라우저 탭을 읽게 할 수 있다(Settings › Features › Browser › `Let agents in terminals control browser tabs`, 기본 끔). 켠 뒤 연 터미널에는 `BAREFRAME_BROWSER_ENDPOINT`(앱의 소켓)와 `BAREFRAME_BROWSER_CLI`(`bareframe-browser` 경로)가 들어간다.
-  - `"$BAREFRAME_BROWSER_CLI" tabs`: 탭 ID·제목·주소·준비/표시 여부를 JSON으로.
-  - `"$BAREFRAME_BROWSER_CLI" snapshot <tab>`: 페이지의 접근성 트리를 `button "Save" [ref=12]`처럼 한 줄에 하나씩(최대 4000줄).
-  - `"$BAREFRAME_BROWSER_CLI" screenshot <tab> [file.png]`: 그 탭의 화면을 PNG로(숨은 탭도 가능).
-  - 소켓은 사용자 전용 임시 폴더에 0600으로 만들고 끝낼 때 지운다. 별도 Chrome이나 원격 디버깅 포트는 쓰지 않고, 사용자가 보는 바로 그 탭을 읽는다. 아직 읽기만 하며, 클릭·입력과 MCP 연결은 다음 단계다.
+- 터미널의 agent(Claude Code, Codex 등)가 브라우저 탭을 읽고 조작하게 할 수 있다(Settings › Features › Browser › `Let agents in terminals control browser tabs`, 기본 끔). 켠 뒤 연 터미널에는 `BAREFRAME_BROWSER_ENDPOINT`(앱의 소켓), `BAREFRAME_BROWSER_TERMINAL`(그 터미널의 ID), `BAREFRAME_BROWSER_CLI`(`bareframe-browser` 경로)가 들어간다.
+  - `"$BAREFRAME_BROWSER_CLI" setup`: Claude Code에 MCP 서버(`bareframe-browser mcp`)와 hook을 등록하는 명령과 설정을 출력한다. 설정은 바꾸지 않으며 사용자가 직접 넣는다.
+  - 명령: `tabs`, `open <url>`(오른쪽에 새 Pane으로 열고 다 불러올 때까지 기다림), `navigate`, `snapshot`(접근성 트리를 `button "Save" [ref=12]`처럼 한 줄에 하나씩, 최대 4000줄), `screenshot`(숨은 탭도 가능), `click`, `fill`, `press`, `wait`, `release`, `close`. MCP 도구는 같은 이름의 `browser_*`다.
+  - `click`·`fill`은 snapshot의 ref와 문서 번호를 받는다. 그 사이 페이지가 다른 문서로 바뀌었으면 `STALE_DOCUMENT`, 요소가 다른 것에 가려졌으면 `OBSCURED`로 실패한다.
+  - 권한: 터미널이 사용자가 연 탭을 처음 쓰기 전에 Claude Code가 hook(`bareframe-browser hook`)으로 탭 제목·주소를 보이며 묻는다. 한 번 허용한 탭은 그 터미널이 `release`할 때까지 다시 묻지 않는다. agent가 `open`으로 연 탭은 묻지 않고, 닫기(`close`)는 그 터미널이 연 탭만 된다.
+  - 탭 관리는 agent에게 말로 맡긴다. agent는 일을 마치면 자기가 연 탭은 닫고 허용받은 탭은 `release`하되, "확인하게 띄워놔"처럼 결과를 보고 싶다고 하면 탭을 남기고 어느 탭인지 알려 준다.
+  - 소켓은 사용자 전용 임시 폴더에 0600으로 만들고 끝낼 때 지운다. 별도 Chrome이나 원격 디버깅 포트는 쓰지 않고, 사용자가 보는 바로 그 탭을 조작한다.
 - 처음 브라우저 Pane을 열 때 Chromium이 시작된다(0.1초 안팎). 설치나 업데이트 직후 macOS는 Chromium 프레임워크를 한 번 검사하는데(수 초), 앱이 시작할 때 별도 프로세스에서 미리 받아 둔다. 그 검사가 끝나기 전에 복원된 브라우저 Pane이 있으면 그 실행에서만 창이 잠깐 늦게 뜬다.
 - `script/bundle` 없이 `cargo run`으로 실행한 빌드에는 Chromium이 없어 Pane에 그 사실을 보인다.
 

@@ -227,6 +227,10 @@ impl WorkspaceView {
         };
         // Before any terminal starts, so restored ones get the socket too.
         view.apply_browser_control(cx);
+        crate::browser::control::register_workspace(
+            cx.entity().downgrade(),
+            window.window_handle(),
+        );
         match saved {
             Some(saved) => view.restore(saved, window, cx),
             None => {
