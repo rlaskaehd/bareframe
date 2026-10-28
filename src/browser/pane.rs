@@ -16,8 +16,9 @@ use crate::{
 use cef::*;
 use futures::{StreamExt, future::Either};
 use gpui::{
-    Bounds, Context, Entity, EventEmitter, FocusHandle, Image, ImageFormat, KeyBinding, Pixels,
-    RenderImage, Subscription, Task, Window, actions, canvas, div, img, prelude::*, px,
+    Bounds, Context, Entity, EventEmitter, FocusHandle, Image, ImageFormat, KeyBinding,
+    MouseButton, NavigationDirection, Pixels, RenderImage, Subscription, Task, Window, actions,
+    canvas, div, img, prelude::*, px,
 };
 use std::{
     path::Path,
@@ -366,6 +367,15 @@ impl BrowserPane {
         cx.notify();
     }
 
+    /// Back or forward from the mouse; the page takes the keyboard, so the address bar shows
+    /// where it went (a field being typed in keeps its text).
+    fn navigate(&self, go: fn(&Browser), window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(browser) = self.browser.and_then(engine::browser) {
+            go(&browser);
+            self.page.focus(window, cx);
+        }
+    }
+
     fn edit(&self, edit: fn(&Frame)) {
         if let Some(frame) = self
             .browser
@@ -492,6 +502,16 @@ impl Render for BrowserPane {
         };
         div()
             .key_context(PANE_CONTEXT)
+            // A mouse's back and forward buttons, and the swipes some send instead (Logitech
+            // MX Master through Logi Options+), which GPUI turns into the same buttons.
+            .on_mouse_down(
+                MouseButton::Navigate(NavigationDirection::Back),
+                cx.listener(|pane, _, window, cx| pane.navigate(Browser::go_back, window, cx)),
+            )
+            .on_mouse_down(
+                MouseButton::Navigate(NavigationDirection::Forward),
+                cx.listener(|pane, _, window, cx| pane.navigate(Browser::go_forward, window, cx)),
+            )
             .on_action(cx.listener(|pane, _: &Reload, _, _| {
                 if let Some(browser) = pane.browser.and_then(engine::browser) {
                     browser.reload();
