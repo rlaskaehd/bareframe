@@ -112,9 +112,9 @@ fn main() -> ExitCode {
 /// the page. For Claude Code it is a PreToolUse hook: it asks, and leaves later uses and
 /// calls that touch no tab to Claude Code's own rules (no output). Codex can't ask from
 /// there, so it asks before every call of ours (see `setup`) and this is its
-/// PermissionRequest hook: it allows a tab in use already, opening a tab and letting one
-/// go, and leaves the rest to Codex's question, saying which page it is. When the app can't
-/// say the tab is in use already, it asks too.
+/// PermissionRequest hook: it allows a tab in use already and letting one go, and leaves the
+/// rest to Codex's question, saying which page it is. When the app can't say the tab is in
+/// use already, it asks too.
 fn hook() -> ExitCode {
     let mut input = String::new();
     let _ = std::io::Read::read_to_string(&mut std::io::stdin(), &mut input);
@@ -140,7 +140,18 @@ fn hook() -> ExitCode {
         "click" | "fill" | "press_key" => "click and type in",
         "wait_for" => "watch",
         "close" => "close",
-        "open" | "release" => return allow(),
+        "release" => return allow(),
+        // A new tab shares the sign-ins of the user's own tabs: Codex asks, as Claude Code
+        // does for a tool it has not been allowed.
+        "open" if codex => {
+            let url = input["tool_input"]["url"].as_str().unwrap_or_default();
+            let note = format!(
+                "The agent wants to open {url} in a new bareframe browser tab, signed in as \
+                 your other tabs are, and use it."
+            );
+            println!("{}", json!({ "systemMessage": note }));
+            return ExitCode::SUCCESS;
+        }
         _ => "use",
     };
     let Some(tab) = input["tool_input"]["tab"].as_str() else {
