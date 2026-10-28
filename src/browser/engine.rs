@@ -449,15 +449,40 @@ impl Drop for Pending {
     }
 }
 
-/// Closes every browser, lets Chromium finish closing them, then shuts it down.
-fn shut_down() {
-    PUMPING.set(true);
+fn close_all() {
     let browsers: Vec<i32> = ENGINE.with_borrow(|engine| engine.browsers.keys().copied().collect());
     for id in browsers {
         close(id);
     }
+}
+
+fn live() -> usize {
+    ENGINE.with_borrow(|engine| engine.live)
+}
+
+/// Quits once every browser is closed. Chromium finishes closing them only while the run
+/// loop turns, which it doesn't once the app is quitting: `shut_down` would wait out CLOSING
+/// under a spinning cursor. So they close first, while it still turns.
+pub fn quit(cx: &mut Gpui) {
+    close_all();
     let until = Instant::now() + CLOSING;
-    while ENGINE.with_borrow(|engine| engine.live) > 0 && Instant::now() < until {
+    cx.spawn(async move |cx| {
+        while live() > 0 && Instant::now() < until {
+            cx.background_executor()
+                .timer(Duration::from_millis(10))
+                .await;
+        }
+        cx.update(|cx| cx.quit());
+    })
+    .detach();
+}
+
+/// Closes every browser, lets Chromium finish closing them, then shuts it down.
+fn shut_down() {
+    PUMPING.set(true);
+    close_all();
+    let until = Instant::now() + CLOSING;
+    while live() > 0 && Instant::now() < until {
         do_message_loop_work();
         std::thread::sleep(Duration::from_millis(5));
     }

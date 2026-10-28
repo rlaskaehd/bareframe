@@ -21,7 +21,7 @@ impl WorkspaceView {
             return;
         }
         match exit {
-            Exit::Quit => cx.quit(),
+            Exit::Quit => crate::browser::engine::quit(cx),
             Exit::CloseWindow => {
                 self.shutdown(cx);
                 window.remove_window();

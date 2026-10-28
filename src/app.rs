@@ -34,7 +34,7 @@ pub fn run(config: LaunchConfig, restore: bool) {
     gpui_platform::application()
         .with_assets(crate::assets::Assets)
         .run(move |cx: &mut App| {
-            cx.on_action(|_: &Quit, cx| cx.quit());
+            cx.on_action(|_: &Quit, cx| crate::browser::engine::quit(cx));
             bind_keys(&settings, cx);
             cx.on_action(|_: &Hide, cx| cx.hide());
             cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
@@ -48,7 +48,7 @@ pub fn run(config: LaunchConfig, restore: bool) {
             });
             cx.on_window_closed(|cx, _| {
                 if cx.windows().is_empty() {
-                    cx.quit();
+                    crate::browser::engine::quit(cx);
                 }
             })
             .detach();
