@@ -47,6 +47,8 @@ if [[ "$profile" == release ]]; then
 fi
 # The updater compares this with the release tag, so it follows Cargo.toml.
 version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)
+# macOS ends an app that reaches for Bluetooth, the camera or the microphone without saying
+# why in its usage descriptions. Chromium does: passkeys on a phone (sign-in pages), calls.
 cat > "$bundle_dir/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -60,6 +62,9 @@ cat > "$bundle_dir/Info.plist" <<PLIST
 <key>CFBundleVersion</key><string>1</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>NSHighResolutionCapable</key><true/>
+<key>NSBluetoothAlwaysUsageDescription</key><string>Web pages use Bluetooth to sign in with a passkey on your phone.</string>
+<key>NSCameraUsageDescription</key><string>Web pages you allow can use the camera.</string>
+<key>NSMicrophoneUsageDescription</key><string>Web pages you allow can use the microphone.</string>
 </dict></plist>
 PLIST
 # The icon is drawn from the brand artwork, which stays out of the repository; without it
