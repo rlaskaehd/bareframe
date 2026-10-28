@@ -464,13 +464,8 @@ impl WorkspaceView {
         }
         if active && matches!(closed, Some(Closed::Pane)) {
             let tab = self.model.tab_of(self.model.active_pane());
-            let back = self
-                .recent
-                .iter()
-                .rev()
-                .find(|pane| self.model.tab_of(**pane) == tab)
-                .copied();
-            if let Some(back) = back {
+            let mut used = self.recent.iter().rev();
+            if let Some(&back) = used.find(|pane| self.model.tab_of(**pane) == tab) {
                 self.model.focus(back);
             }
         }

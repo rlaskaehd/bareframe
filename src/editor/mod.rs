@@ -686,10 +686,7 @@ impl EditorPane {
                 let indent = e.buffer.indent(e.head.line).to_owned();
                 e.insert(&format!("\n{indent}"), cx)
             }))
-            .on_action(cx.listener(|e, _: &Tab, _, cx| {
-                let unit = e.indent_unit();
-                e.insert(&unit, cx)
-            }))
+            .on_action(cx.listener(|e, _: &Tab, _, cx| e.insert(&e.indent_unit(), cx)))
             .on_action(cx.listener(|e, _: &Copy, _, cx| {
                 let text = copied(e);
                 cx.write_to_clipboard(ClipboardItem::new_string(text));

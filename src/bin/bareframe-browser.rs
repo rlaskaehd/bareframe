@@ -48,6 +48,8 @@ fn main() -> ExitCode {
         _ => {}
     }
     let number = |text: &str| text.parse::<i64>().ok().map(Value::from);
+    // The optional number after the required arguments.
+    let trailing = |rest: &[&str]| rest.first().and_then(|text| number(text));
     let (method, params, file) = match args.as_slice() {
         ["tabs"] => ("tabs", json!({}), None),
         ["open", url] => ("open", json!({ "url": url }), None),
@@ -61,7 +63,7 @@ fn main() -> ExitCode {
         ["screenshot", tab, file] => ("screenshot", json!({ "tab": tab }), Some(file.to_string())),
         ["click", tab, node, rest @ ..] if rest.len() <= 1 => (
             "click",
-            json!({ "tab": tab, "ref": number(node), "document": rest.first().and_then(|d| number(d)) }),
+            json!({ "tab": tab, "ref": number(node), "document": trailing(rest) }),
             None,
         ),
         [
@@ -71,34 +73,30 @@ fn main() -> ExitCode {
             rest @ ..,
         ] if rest.len() <= 1 => (
             "click",
-            json!({ "tab": tab, "ref": number(node),
-                    "document": rest.first().and_then(|d| number(d)),
+            json!({ "tab": tab, "ref": number(node), "document": trailing(rest),
                     "count": if *kind == "double-click" { 2 } else { 1 },
                     "button": if *kind == "right-click" { "right" } else { "left" } }),
             None,
         ),
         ["drag", tab, node, to, rest @ ..] if rest.len() <= 1 => (
             "drag",
-            json!({ "tab": tab, "ref": number(node), "to": number(to),
-                    "document": rest.first().and_then(|d| number(d)) }),
+            json!({ "tab": tab, "ref": number(node), "to": number(to), "document": trailing(rest) }),
             None,
         ),
         ["fill", tab, node, text, rest @ ..] if rest.len() <= 1 => (
             "fill",
-            json!({ "tab": tab, "ref": number(node), "text": text,
-                    "document": rest.first().and_then(|d| number(d)) }),
+            json!({ "tab": tab, "ref": number(node), "text": text, "document": trailing(rest) }),
             None,
         ),
         ["press", tab, key] => ("press_key", json!({ "tab": tab, "key": key }), None),
         ["select", tab, node, value, rest @ ..] if rest.len() <= 1 => (
             "select",
-            json!({ "tab": tab, "ref": number(node), "value": value,
-                    "document": rest.first().and_then(|d| number(d)) }),
+            json!({ "tab": tab, "ref": number(node), "value": value, "document": trailing(rest) }),
             None,
         ),
         ["hover", tab, node, rest @ ..] if rest.len() <= 1 => (
             "hover",
-            json!({ "tab": tab, "ref": number(node), "document": rest.first().and_then(|d| number(d)) }),
+            json!({ "tab": tab, "ref": number(node), "document": trailing(rest) }),
             None,
         ),
         ["scroll", tab, direction, rest @ ..] if matches!(rest.len(), 0 | 1 | 3) => (
@@ -111,12 +109,12 @@ fn main() -> ExitCode {
         ),
         ["wait", tab, text, rest @ ..] if rest.len() <= 1 => (
             "wait_for",
-            json!({ "tab": tab, "text": text, "timeout_ms": rest.first().and_then(|t| number(t)) }),
+            json!({ "tab": tab, "text": text, "timeout_ms": trailing(rest) }),
             None,
         ),
         ["diagnostics", tab, rest @ ..] if rest.len() <= 1 => (
             "diagnostics",
-            json!({ "tab": tab, "since": rest.first().and_then(|c| number(c)) }),
+            json!({ "tab": tab, "since": trailing(rest) }),
             None,
         ),
         ["release", tab] => ("release", json!({ "tab": tab }), None),

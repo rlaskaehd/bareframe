@@ -94,16 +94,12 @@ wrap_context_menu_handler! {
                 return;
             };
             let id = browser.identifier();
-            let quiet = AGENT_MENUS
-                .try_with(|menus| {
-                    let at = menus.try_borrow_mut().ok()?.remove(&id)?;
-                    Some(at.elapsed() < Duration::from_secs(3))
-                })
-                .ok()
-                .flatten()
-                .unwrap_or(false);
+            let quiet = AGENT_MENUS.try_with(|menus| {
+                let at = menus.try_borrow_mut().ok()?.remove(&id)?;
+                Some(at.elapsed() < Duration::from_secs(3))
+            });
             // An empty menu is not shown.
-            if quiet {
+            if quiet == Ok(Some(true)) {
                 model.clear();
             }
         }

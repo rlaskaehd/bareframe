@@ -381,30 +381,14 @@ pub async fn drag(
                 "clickCount": 1 })
     };
     let dragged = async {
-        input(
-            browser,
-            "Input.dispatchMouseEvent",
-            mouse("mouseMoved", x1, y1),
-            cx,
-        )
-        .await?;
-        input(
-            browser,
-            "Input.dispatchMouseEvent",
-            mouse("mousePressed", x1, y1),
-            cx,
-        )
-        .await?;
-        for step in 1..=10 {
+        // Onto `from`, press, then over to `to` in ten steps.
+        let steps = (1..=10).map(|step| {
             let f = f64::from(step) / 10.0;
-            let (x, y) = (x1 + (x2 - x1) * f, y1 + (y2 - y1) * f);
-            input(
-                browser,
-                "Input.dispatchMouseEvent",
-                mouse("mouseMoved", x, y),
-                cx,
-            )
-            .await?;
+            mouse("mouseMoved", x1 + (x2 - x1) * f, y1 + (y2 - y1) * f)
+        });
+        let start = [mouse("mouseMoved", x1, y1), mouse("mousePressed", x1, y1)];
+        for event in start.into_iter().chain(steps) {
+            input(browser, "Input.dispatchMouseEvent", event, cx).await?;
         }
         let wait = cx.background_executor().timer(Duration::from_millis(300));
         let handed = match futures::future::select(intercepted, std::pin::pin!(wait)).await {
@@ -417,13 +401,8 @@ pub async fn drag(
                 input(browser, "Input.dispatchDragEvent", event, cx).await?;
             }
         }
-        input(
-            browser,
-            "Input.dispatchMouseEvent",
-            mouse("mouseReleased", x2, y2),
-            cx,
-        )
-        .await?;
+        let released = mouse("mouseReleased", x2, y2);
+        input(browser, "Input.dispatchMouseEvent", released, cx).await?;
         Ok(handed.is_some())
     }
     .await;
