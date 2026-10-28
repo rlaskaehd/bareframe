@@ -180,7 +180,6 @@ impl WorkspaceView {
                 // it beside.
                 let into = dragging
                     && matches!(view.pane(id), Some(PaneView::Browser(_)))
-                    && bounds.contains(&at)
                     && in_middle(bounds, at);
                 view.hover_page(id, into.then_some(at), cx);
                 view.hover_drop(id, opens && !into, bounds, at, cx)
@@ -197,8 +196,7 @@ impl WorkspaceView {
                 if let Some((_, at)) = view.page_drop.filter(|(pane, _)| *pane == id) {
                     view.end_drag(cx);
                     if let Some(PaneView::Browser(browser)) = view.pane(id) {
-                        let paths = [dragged.path.clone()];
-                        browser.update(cx, |browser, cx| browser.drop_files(&paths, at, cx));
+                        browser.update(cx, |browser, cx| browser.drop_file(&dragged.path, at, cx));
                     }
                 } else if let Some(side) = view.take_drop(id, cx) {
                     view.open_file_beside(&dragged.path, id, side, window, cx);

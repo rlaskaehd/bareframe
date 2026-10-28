@@ -21,7 +21,7 @@ use gpui::{
     actions, canvas, div, img, prelude::*, px,
 };
 use std::{
-    path::{Path, PathBuf},
+    path::Path,
     sync::{Arc, atomic::Ordering},
     time::Duration,
 };
@@ -185,19 +185,15 @@ impl BrowserPane {
         &self.tab
     }
 
-    /// Files dropped on the page from the explorer, as from Finder: the page under `at` (in
-    /// the window) gets dragenter, dragover and drop carrying them, and an upload area
-    /// takes them.
-    pub fn drop_files(&self, paths: &[PathBuf], at: Point<Pixels>, cx: &mut Context<Self>) {
+    /// A file dropped on the page from the explorer, as from Finder: the page under `at` (in
+    /// the window) gets dragenter, dragover and drop carrying it, and an upload area takes it.
+    pub fn drop_file(&self, path: &Path, at: Point<Pixels>, cx: &mut Context<Self>) {
         let Some(browser) = self.browser else {
             return;
         };
         let at = at - self.page_bounds.origin;
         let (x, y) = (f32::from(at.x), f32::from(at.y));
-        let files: Vec<String> = paths
-            .iter()
-            .map(|path| path.display().to_string())
-            .collect();
+        let files = [path.display().to_string()];
         // Copy, as Finder offers.
         let data = serde_json::json!({ "items": [], "files": files, "dragOperationsMask": 1 });
         cx.spawn(async move |_, _| {
