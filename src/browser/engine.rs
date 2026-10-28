@@ -42,8 +42,8 @@ struct Engine {
     /// program of the user's could read.
     /// ponytail: a profile on disk with a Keychain-held key when logins must survive quitting.
     memory: Option<RequestContext>,
-    /// DevTools calls waiting for their result, by message id.
-    replies: HashMap<i32, Reply>,
+    /// DevTools calls waiting for their result, by message id, with the browser asked.
+    replies: HashMap<i32, (i32, Reply)>,
     next_message: i32,
 }
 
@@ -56,6 +56,8 @@ thread_local! {
     static PUMPING: Cell<bool> = const { Cell::new(false) };
     /// Chromium is shut down: nothing may call it again.
     static DOWN: Cell<bool> = const { Cell::new(false) };
+    /// Where DevTools events go (see `set_events`), if anywhere.
+    static EVENTS: RefCell<Option<mpsc::UnboundedSender<Event>>> = const { RefCell::new(None) };
 }
 
 /// Chromium's requests for a turn, from any of its threads: in how many milliseconds.
@@ -240,8 +242,11 @@ wrap_dev_tools_message_observer! {
             success: ::std::os::raw::c_int,
             result: Option<&[u8]>,
         ) {
-            let Some(reply) = ENGINE.with_borrow_mut(|engine| engine.replies.remove(&message_id))
-            else {
+            // `try_` all the way: a panic in Chromium's callback would abort the app.
+            let reply = ENGINE.try_with(|engine| {
+                engine.try_borrow_mut().ok()?.replies.remove(&message_id)
+            });
+            let Ok(Some((_, reply))) = reply else {
                 return;
             };
             let result = result.unwrap_or(b"{}");
@@ -251,7 +256,44 @@ wrap_dev_tools_message_observer! {
                 Err(String::from_utf8_lossy(result).into_owned())
             });
         }
+
+        fn on_dev_tools_event(
+            &self,
+            browser: Option<&mut Browser>,
+            method: Option<&CefString>,
+            params: Option<&[u8]>,
+        ) {
+            let (Some(browser), Some(method)) = (browser, method) else {
+                return;
+            };
+            let event = Event {
+                browser: browser.identifier(),
+                method: method.to_string(),
+                params: params.unwrap_or(b"{}").to_vec(),
+            };
+            let _ = EVENTS.try_with(|events| {
+                if let Ok(events) = events.try_borrow()
+                    && let Some(events) = events.as_ref()
+                {
+                    let _ = events.unbounded_send(event);
+                }
+            });
+        }
     }
+}
+
+/// A DevTools event a page sent (`Page.frameNavigated` and so on): only the domains asked
+/// for with their `enable` method send any.
+pub struct Event {
+    pub browser: i32,
+    pub method: String,
+    /// The event's JSON parameters, parsed by whoever wants them, off Chromium's callback.
+    pub params: Vec<u8>,
+}
+
+/// Sends every DevTools event from now on to `events`.
+pub fn set_events(events: mpsc::UnboundedSender<Event>) {
+    EVENTS.set(Some(events));
 }
 
 /// Opens a browser as a child of `parent` (GPUI's view), its events going to `events`.
@@ -321,6 +363,8 @@ pub fn view(id: i32) -> Option<*mut std::ffi::c_void> {
 pub(super) fn closing(id: i32) {
     let gone = ENGINE.with_borrow_mut(|engine| {
         engine.observers.remove(&id);
+        // Calls waiting on it end now ("the page closed"), not never.
+        engine.replies.retain(|_, (browser, _)| *browser != id);
         engine.browsers.remove(&id)
     });
     drop(gone);
@@ -342,6 +386,7 @@ pub fn close(id: i32) {
 }
 
 /// Runs a DevTools `method` on browser `id`, inside the process, and resolves to its result.
+/// Dropping the future (a timeout, say) forgets the call; a late result is ignored.
 pub fn devtools(
     id: i32,
     method: &str,
@@ -352,20 +397,33 @@ pub fn devtools(
         let host = browser.host()?;
         let message_id = ENGINE.with_borrow_mut(|engine| {
             engine.next_message += 1;
-            engine.replies.insert(engine.next_message, reply);
+            engine.replies.insert(engine.next_message, (id, reply));
             engine.next_message
         });
         let message = serde_json::json!({ "id": message_id, "method": method, "params": params });
         if host.send_dev_tools_message(Some(message.to_string().as_bytes())) != 0 {
-            Some(())
+            Some(Pending(message_id))
         } else {
             ENGINE.with_borrow_mut(|engine| engine.replies.remove(&message_id));
             None
         }
     });
     async move {
-        sent.ok_or("the page is closed")?;
+        let _pending = sent.ok_or("the page is closed")?;
         result.await.map_err(|_| "the page closed".to_owned())?
+    }
+}
+
+/// A DevTools call in flight; dropped unanswered, it leaves the engine's list.
+struct Pending(i32);
+
+impl Drop for Pending {
+    fn drop(&mut self) {
+        let _ = ENGINE.try_with(|engine| {
+            if let Ok(mut engine) = engine.try_borrow_mut() {
+                engine.replies.remove(&self.0);
+            }
+        });
     }
 }
 
