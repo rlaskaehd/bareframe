@@ -10,6 +10,8 @@ pub const ENDPOINT_VAR: &str = "BAREFRAME_BROWSER_ENDPOINT";
 pub const TERMINAL_VAR: &str = "BAREFRAME_BROWSER_TERMINAL";
 /// The `bareframe-browser` executable, for registering it with an agent.
 pub const CLI_VAR: &str = "BAREFRAME_BROWSER_CLI";
+/// The socket's name in the temporary folder, before the app's process id.
+pub const SOCKET_PREFIX: &str = "bareframe-browser-";
 
 /// The longest line either side reads: a Retina screenshot in base64 fits well within it.
 pub const MAX_LINE: u64 = 64 << 20;

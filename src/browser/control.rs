@@ -139,7 +139,11 @@ pub fn set_enabled(enabled: bool, cx: &mut App) {
         return;
     }
     // The temporary folder macOS gives each user is readable by that user alone.
-    let path = std::env::temp_dir().join(format!("bareframe-browser-{}.sock", std::process::id()));
+    let path = std::env::temp_dir().join(format!(
+        "{}{}.sock",
+        protocol::SOCKET_PREFIX,
+        std::process::id()
+    ));
     let _ = std::fs::remove_file(&path);
     let listener = match UnixListener::bind(&path) {
         Ok(listener) => listener,

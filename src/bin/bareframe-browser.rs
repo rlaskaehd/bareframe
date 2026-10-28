@@ -195,16 +195,24 @@ fn setup() -> ExitCode {
         .map(|path| path.display().to_string())
         .unwrap_or_else(|_| "bareframe-browser".into());
     let quoted = format!("'{}'", path.replace('\'', "'\\''"));
-    let hook = format!("{quoted} hook");
-    let hooks = |event: &str, matcher: &str| {
+    let hooks = |event: &str, matcher: &str, command: String| {
         json!({ "hooks": { event: [{
             "matcher": matcher,
-            "hooks": [{ "type": "command", "command": hook }],
+            "hooks": [{ "type": "command", "command": command }],
         }] } })
     };
+    let find = FIND_VAR;
     let (claude, codex) = (
-        hooks("PreToolUse", "mcp__bareframe-browser__.*"),
-        hooks("PermissionRequest", "^mcp__bareframe-browser__"),
+        hooks(
+            "PreToolUse",
+            "mcp__bareframe-browser__.*",
+            format!("{quoted} hook"),
+        ),
+        hooks(
+            "PermissionRequest",
+            "^mcp__bareframe-browser__",
+            format!("{find}=1 {quoted} hook"),
+        ),
     );
     // A JSON string is a TOML string too.
     let path = Value::from(path);
@@ -215,12 +223,16 @@ fn setup() -> ExitCode {
          2. Have Claude Code ask before an agent first uses a browser tab: add this to\n   \
          ~/.claude/settings.json (merged with any \"hooks\" already there):\n\n{claude:#}\n\n\
          Codex\n\n\
-         1. Add this to ~/.codex/config.toml. Codex then asks before each browser call; the\n   \
-         server gets the terminal's socket and id, as Codex passes it no other variables.\n\n\
+         1. Add this to ~/.codex/config.toml. Codex then asks before each browser call. The\n   \
+         server gets the terminal's socket and id; Codex's shared server (its daemon) runs\n   \
+         outside bareframe's terminals and gets neither, so it finds the socket itself and\n   \
+         the tabs one Codex is allowed are allowed to all. `codex --no-daemon` in a\n   \
+         bareframe terminal keeps them to that terminal.\n\n\
          [mcp_servers.bareframe-browser]\n\
          command = {path}\n\
          args = [\"mcp\"]\n\
          env_vars = [\"{endpoint}\", \"{terminal}\"]\n\
+         env = {{ {find} = \"1\" }}\n\
          default_tools_approval_mode = \"prompt\"\n\n\
          2. Have the hook answer for tabs in use already: add this to ~/.codex/hooks.json\n   \
          (merged with any \"hooks\" there), then trust it when Codex asks (or in /hooks).\n   \
@@ -234,14 +246,44 @@ fn setup() -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// Set in an agent's config for a server started outside bareframe's terminals, which gets
+/// none of their variables (Codex's shared one): it looks for the socket instead.
+const FIND_VAR: &str = "BAREFRAME_BROWSER_FIND";
+
+const NOWHERE: &str = "no bareframe here: run this in a bareframe terminal opened after \
+    turning on Settings › Features › Browser › \"Let agents in terminals control browser tabs\"";
+
+/// The socket of the one bareframe that answers, for a server started outside its terminals
+/// (see `FIND_VAR`). It can't tell which terminal its agent runs in, so the tabs it
+/// is allowed are those of every agent started that way.
+fn find() -> Result<String, String> {
+    let entries = std::fs::read_dir(std::env::temp_dir()).map_err(|error| error.to_string())?;
+    let live: Vec<String> = entries
+        .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
+        .filter(|name| name.starts_with(protocol::SOCKET_PREFIX) && name.ends_with(".sock"))
+        .map(|name| std::env::temp_dir().join(name).display().to_string())
+        // Left behind by a bareframe that crashed, or a file of the same name.
+        .filter(|path| UnixStream::connect(path).is_ok())
+        .collect();
+    match live.as_slice() {
+        [endpoint] => Ok(endpoint.clone()),
+        [] => Err(NOWHERE.to_owned()),
+        _ => Err(
+            "several bareframes let agents use their tabs: start the agent in a \
+                  bareframe terminal without a shared server (codex --no-daemon)"
+                .to_owned(),
+        ),
+    }
+}
+
 /// One request to the app and its result; the terminal's id goes with it, since what the
 /// user allows is that terminal using a tab.
 fn request(method: &str, mut params: Value) -> Result<Value, String> {
-    let endpoint = std::env::var(protocol::ENDPOINT_VAR).map_err(|_| {
-        "no bareframe here: run this in a bareframe terminal opened after turning on \
-         Settings › Features › Browser › \"Let agents in terminals control browser tabs\""
-            .to_owned()
-    })?;
+    let endpoint = match std::env::var(protocol::ENDPOINT_VAR) {
+        Ok(endpoint) => endpoint,
+        Err(_) if std::env::var_os(FIND_VAR).is_some() => find()?,
+        Err(_) => return Err(NOWHERE.to_owned()),
+    };
     if let Ok(terminal) = std::env::var(protocol::TERMINAL_VAR) {
         params["terminal"] = Value::from(terminal);
     }
