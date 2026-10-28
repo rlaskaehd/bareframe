@@ -7,7 +7,9 @@
 //! The user allows a terminal's agent to use a tab in the agent itself: Claude Code asks
 //! before the first use, through `bareframe-browser hook` (which reads `granted` here). The
 //! user manages the agent's tabs by telling it: it releases tabs, and opens and closes its own.
-use super::{BrowserPane, automation, automation::Failure, engine, pane::address_for, protocol};
+use super::{
+    BrowserPane, automation, automation::Failure, diagnostics, engine, pane::address_for, protocol,
+};
 use crate::workspace::WorkspaceView;
 use futures::{
     StreamExt,
@@ -54,6 +56,8 @@ struct State {
     /// Documents each browser has loaded, counted from when it was first asked for: a
     /// snapshot's references hold only for the document it was taken in.
     documents: HashMap<i32, u64>,
+    /// What went wrong on each page since it was first asked for.
+    logs: HashMap<i32, diagnostics::Log>,
 }
 
 struct Endpoint {
@@ -290,6 +294,7 @@ async fn on_tab(method: &str, params: &Value, cx: &mut AsyncApp) -> Result<Value
         "fill",
         "press_key",
         "wait_for",
+        "diagnostics",
         "release",
         "close",
     ];
@@ -375,6 +380,14 @@ async fn on_tab(method: &str, params: &Value, cx: &mut AsyncApp) -> Result<Value
                 .map_or(automation::WAIT, Duration::from_millis);
             automation::wait_for_text(browser, text, limit, cx).await?;
             result["found"] = Value::from(true);
+        }
+        "diagnostics" => {
+            let since = params["since"].as_u64().unwrap_or(0);
+            let log =
+                STATE.with_borrow(|state| state.logs.get(&browser).map(|log| log.since(since)));
+            if let (Some(result), Some(Value::Object(log))) = (result.as_object_mut(), log) {
+                result.extend(log);
+            }
         }
         _ => unreachable!("checked above"),
     }
@@ -472,13 +485,15 @@ fn close(terminal: &str, tab: &Tab, cx: &mut AsyncApp) -> Result<Value, Failure>
     Ok(json!({ "tab": tab.id, "closed": true }))
 }
 
-/// Starts counting `browser`'s documents and has its page act focused, once: input from an
-/// agent reaches it while the user types in the terminal.
+/// Starts counting `browser`'s documents and noting what goes wrong there, and has its page
+/// act focused, once: input from an agent reaches it while the user types in the terminal.
 async fn watch(browser: i32, cx: &mut AsyncApp) -> Result<(), Failure> {
     if STATE.with_borrow(|state| state.documents.contains_key(&browser)) {
         return Ok(());
     }
-    automation::call(browser, "Page.enable", json!({}), cx).await?;
+    for domain in ["Page", "Runtime", "Network"] {
+        automation::call(browser, &format!("{domain}.enable"), json!({}), cx).await?;
+    }
     automation::call(
         browser,
         "Emulation.setFocusEmulationEnabled",
@@ -488,25 +503,40 @@ async fn watch(browser: i32, cx: &mut AsyncApp) -> Result<(), Failure> {
     .await?;
     STATE.with_borrow_mut(|state| {
         state.documents.entry(browser).or_insert(1);
+        state.logs.entry(browser).or_default();
     });
     Ok(())
 }
 
 fn on_event(event: engine::Event) {
-    if event.method != "Page.frameNavigated" {
+    let browser = event.browser;
+    if event.method == engine::CLOSED {
+        STATE.with_borrow_mut(|state| {
+            state.documents.remove(&browser);
+            state.logs.remove(&browser);
+        });
+        return;
+    }
+    let method = event.method.as_str();
+    if method != "Page.frameNavigated" && !diagnostics::METHODS.contains(&method) {
         return;
     }
     let Ok(params) = serde_json::from_slice::<Value>(&event.params) else {
         return;
     };
-    // The page itself, not a frame inside it.
-    if params["frame"]["parentId"].is_null() {
-        STATE.with_borrow_mut(|state| {
-            if let Some(count) = state.documents.get_mut(&event.browser) {
+    STATE.with_borrow_mut(|state| {
+        let Some(count) = state.documents.get_mut(&browser) else {
+            return;
+        };
+        if method == "Page.frameNavigated" {
+            // The page itself, not a frame inside it.
+            if params["frame"]["parentId"].is_null() {
                 *count += 1;
             }
-        });
-    }
+        } else if let Some(log) = state.logs.get_mut(&browser) {
+            log.record(method, &params, *count);
+        }
+    });
 }
 
 fn document(browser: i32) -> u64 {

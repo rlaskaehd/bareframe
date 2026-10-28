@@ -3,6 +3,7 @@
 mod automation;
 mod client;
 pub mod control;
+mod diagnostics;
 pub mod engine;
 mod mac;
 mod pane;

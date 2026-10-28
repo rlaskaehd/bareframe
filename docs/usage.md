@@ -134,8 +134,10 @@ MVP 1의 셸 실행 모드는 zsh를 기준으로 한다. 다른 셸을 지정�
 - Chromium은 앱 안에서만 DevTools 프로토콜로 조작하고(`src/browser/engine.rs`의 `devtools`), 원격 디버깅 포트는 열지 않는다.
 - 터미널의 agent(Claude Code, Codex 등)가 브라우저 탭을 읽고 조작하게 할 수 있다(Settings › Features › Browser › `Let agents in terminals control browser tabs`, 기본 끔). 켠 뒤 연 터미널에는 `BAREFRAME_BROWSER_ENDPOINT`(앱의 소켓), `BAREFRAME_BROWSER_TERMINAL`(그 터미널의 ID), `BAREFRAME_BROWSER_CLI`(`bareframe-browser` 경로)가 들어간다.
   - `"$BAREFRAME_BROWSER_CLI" setup`: Claude Code에 MCP 서버(`bareframe-browser mcp`)와 hook을 등록하는 명령과 설정을 출력한다. 설정은 바꾸지 않으며 사용자가 직접 넣는다.
-  - 명령: `tabs`, `open <url>`(오른쪽에 새 Pane으로 열고 다 불러올 때까지 기다림), `navigate`, `snapshot`(접근성 트리를 `button "Save" [ref=12]`처럼 한 줄에 하나씩, 최대 4000줄), `screenshot`(숨은 탭도 가능), `click`, `fill`, `press`, `wait`, `release`, `close`. MCP 도구는 같은 이름의 `browser_*`다.
+  - 명령: `tabs`, `open <url>`(오른쪽에 새 Pane으로 열고 다 불러올 때까지 기다림), `navigate`, `snapshot`(접근성 트리를 `button "Save" [ref=12]`처럼 한 줄에 하나씩, 최대 4000줄), `screenshot`(숨은 탭도 가능), `click`, `fill`, `press`, `wait`, `diagnostics`, `release`, `close`. MCP 도구는 같은 이름의 `browser_*`다.
   - `click`·`fill`은 snapshot의 ref와 문서 번호를 받는다. 그 사이 페이지가 다른 문서로 바뀌었으면 `STALE_DOCUMENT`, 요소가 다른 것에 가려졌으면 `OBSCURED`로 실패한다.
+  - 입력을 보낸 뒤 페이지가 답하지 않으면(10초) `OUTCOME_UNKNOWN`이다. 클릭이나 제출이 이미 일어났을 수 있으니 다시 하기 전에 페이지를 확인하라는 뜻이다.
+  - `diagnostics <tab> [<cursor>]`: agent가 그 탭을 처음 쓴 뒤의 console 오류·경고, 잡히지 않은 예외, HTTP 400 이상 응답, 연결 자체가 실패한 요청을 탭마다 최근 200개까지 번호(cursor)와 함께 준다. 동작 전에 cursor를 받아 두고 그 뒤만 읽으면 그 동작이 낸 문제만 보인다. 주소에서는 사용자·비밀번호, query, fragment를 뺀다.
   - 권한: 터미널이 사용자가 연 탭을 처음 쓰기 전에 Claude Code가 hook(`bareframe-browser hook`)으로 탭 제목·주소를 보이며 묻는다. 한 번 허용한 탭은 그 터미널이 `release`할 때까지 다시 묻지 않는다. agent가 `open`으로 연 탭은 묻지 않고, 닫기(`close`)는 그 터미널이 연 탭만 된다.
   - 탭 관리는 agent에게 말로 맡긴다. agent는 일을 마치면 자기가 연 탭은 닫고 허용받은 탭은 `release`하되, "확인하게 띄워놔"처럼 결과를 보고 싶다고 하면 탭을 남기고 어느 탭인지 알려 준다.
   - 소켓은 사용자 전용 임시 폴더에 0600으로 만들고 끝낼 때 지운다. 별도 Chrome이나 원격 디버깅 포트는 쓰지 않고, 사용자가 보는 바로 그 탭을 조작한다.

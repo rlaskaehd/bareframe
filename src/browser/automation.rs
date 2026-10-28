@@ -37,6 +37,26 @@ pub async fn call(
     }
 }
 
+/// Input for the page, as `call`. Once it is on its way the page may act on it even when no
+/// answer comes, so a failure then is `OUTCOME_UNKNOWN`: look before clicking or submitting
+/// again.
+async fn input(
+    browser: i32,
+    method: &str,
+    params: Value,
+    cx: &mut AsyncApp,
+) -> Result<Value, Failure> {
+    call(browser, method, params, cx)
+        .await
+        .map_err(|(code, error)| match code {
+            "TAB_CLOSED" => (code, error),
+            _ => (
+                "OUTCOME_UNKNOWN",
+                format!("{error}; the page may have acted on it: look before trying again"),
+            ),
+        })
+}
+
 /// The value a page expression evaluates to.
 async fn evaluate(browser: i32, expression: &str, cx: &mut AsyncApp) -> Result<Value, Failure> {
     let result = call(
@@ -233,7 +253,7 @@ pub async fn click(browser: i32, node: i64, cx: &mut AsyncApp) -> Result<(), Fai
         }
     }
     for kind in ["mouseMoved", "mousePressed", "mouseReleased"] {
-        call(
+        input(
             browser,
             "Input.dispatchMouseEvent",
             json!({ "type": kind, "x": x, "y": y, "button": "left", "clickCount": 1 }),
@@ -273,7 +293,7 @@ pub async fn fill(browser: i32, node: i64, text: &str, cx: &mut AsyncApp) -> Res
     if text.is_empty() {
         press(browser, "Backspace", cx).await
     } else {
-        call(browser, "Input.insertText", json!({ "text": text }), cx).await?;
+        input(browser, "Input.insertText", json!({ "text": text }), cx).await?;
         Ok(())
     }
 }
@@ -294,14 +314,14 @@ pub async fn press(browser: i32, key: &str, cx: &mut AsyncApp) -> Result<(), Fai
     if !text.is_empty() {
         down["text"] = Value::from(text);
     }
-    call(browser, "Input.dispatchKeyEvent", down, cx).await?;
+    input(browser, "Input.dispatchKeyEvent", down, cx).await?;
     let up = json!({
         "type": "keyUp",
         "key": key,
         "code": code,
         "windowsVirtualKeyCode": virtual_key,
     });
-    call(browser, "Input.dispatchKeyEvent", up, cx).await?;
+    input(browser, "Input.dispatchKeyEvent", up, cx).await?;
     Ok(())
 }
 

@@ -25,6 +25,7 @@ const USAGE: &str = "usage: bareframe-browser tabs
        bareframe-browser fill <tab> <ref> <text> [<document>]
        bareframe-browser press <tab> <key>
        bareframe-browser wait <tab> <text> [<timeout_ms>]
+       bareframe-browser diagnostics <tab> [<cursor>]
        bareframe-browser release <tab>
        bareframe-browser close <tab>
        bareframe-browser mcp        (an MCP server over stdio)
@@ -67,6 +68,11 @@ fn main() -> ExitCode {
         ["wait", tab, text, rest @ ..] if rest.len() <= 1 => (
             "wait_for",
             json!({ "tab": tab, "text": text, "timeout_ms": rest.first().and_then(|t| number(t)) }),
+            None,
+        ),
+        ["diagnostics", tab, rest @ ..] if rest.len() <= 1 => (
+            "diagnostics",
+            json!({ "tab": tab, "since": rest.first().and_then(|c| number(c)) }),
             None,
         ),
         ["release", tab] => ("release", json!({ "tab": tab }), None),
@@ -115,7 +121,7 @@ fn hook() -> ExitCode {
     let tool = input["tool_name"].as_str().unwrap_or_default();
     let method = tool.rsplit("__").next().unwrap_or(tool);
     let verb = match method.strip_prefix("browser_").unwrap_or(method) {
-        "snapshot" | "screenshot" => "read",
+        "snapshot" | "screenshot" | "diagnostics" => "read",
         "navigate" => "load another page in",
         "click" | "fill" | "press_key" => "click and type in",
         "wait_for" => "watch",
@@ -228,8 +234,11 @@ mod mcp {
         is asked to allow it. The user manages your tabs through you: when you are done, \
         close the tabs you opened and release the ones you were allowed, unless the user \
         wants to see the result (\"leave it open\"); then leave it and say which tab it is. \
-        Release or close a tab whenever the user asks you to stop using it. Check outcomes with browser_wait_for or a new snapshot rather than \
-        assuming an action worked.";
+        Release or close a tab whenever the user asks you to stop using it. Check outcomes \
+        with browser_wait_for or a new snapshot rather than assuming an action worked, and \
+        with browser_diagnostics: take its cursor before an action and read what came after. \
+        OUTCOME_UNKNOWN means the input may have reached the page: look before clicking or \
+        submitting again.";
 
     pub fn serve() -> ExitCode {
         let mut stdin = std::io::stdin().lock();
@@ -299,7 +308,7 @@ mod mcp {
         vec![
             tool(
                 "browser_tabs",
-                "List the browser tabs: id, title, URL, whether shown and controlled.",
+                "List the browser tabs: id, title, URL, whether ready, shown and loading.",
                 json!({}),
                 &[],
             ),
@@ -350,6 +359,15 @@ mod mcp {
                 "Wait until the page shows some text (default up to 15 s).",
                 json!({ "tab": tab, "text": { "type": "string" }, "timeout_ms": { "type": "integer" } }),
                 &["tab", "text"],
+            ),
+            tool(
+                "browser_diagnostics",
+                "What went wrong on the page since you first used the tab: console errors and \
+                 warnings, uncaught exceptions, HTTP errors (status 400 and up) and failed \
+                 requests. Pass the cursor of an earlier call as since to get only what came \
+                 after it.",
+                json!({ "tab": tab, "since": { "type": "integer" } }),
+                &["tab"],
             ),
             tool(
                 "browser_release",

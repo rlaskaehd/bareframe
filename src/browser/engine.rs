@@ -277,17 +277,10 @@ wrap_dev_tools_message_observer! {
             let (Some(browser), Some(method)) = (browser, method) else {
                 return;
             };
-            let event = Event {
+            emit(Event {
                 browser: browser.identifier(),
                 method: method.to_string(),
                 params: params.unwrap_or(b"{}").to_vec(),
-            };
-            let _ = EVENTS.try_with(|events| {
-                if let Ok(events) = events.try_borrow()
-                    && let Some(events) = events.as_ref()
-                {
-                    let _ = events.unbounded_send(event);
-                }
             });
         }
     }
@@ -302,9 +295,22 @@ pub struct Event {
     pub params: Vec<u8>,
 }
 
+/// The method of the event a browser sends last, as it closes: what was kept about it can go.
+pub const CLOSED: &str = "bareframe.closed";
+
 /// Sends every DevTools event from now on to `events`.
 pub fn set_events(events: mpsc::UnboundedSender<Event>) {
     EVENTS.set(Some(events));
+}
+
+fn emit(event: Event) {
+    let _ = EVENTS.try_with(|events| {
+        if let Ok(events) = events.try_borrow()
+            && let Some(events) = events.as_ref()
+        {
+            let _ = events.unbounded_send(event);
+        }
+    });
 }
 
 /// Opens a browser as a child of `parent` (GPUI's view), its events going to `events`.
@@ -379,6 +385,11 @@ pub(super) fn closing(id: i32) {
         engine.browsers.remove(&id)
     });
     drop(gone);
+    emit(Event {
+        browser: id,
+        method: CLOSED.into(),
+        params: Vec::new(),
+    });
 }
 
 /// Browser `id` is gone.
