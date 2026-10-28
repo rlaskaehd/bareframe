@@ -595,8 +595,8 @@ fn is_web(url: &str) -> bool {
 }
 
 /// What was typed in the address bar as a URL: kept if it names a scheme, made `https://`
-/// if it looks like a host, else searched for.
-fn address_for(text: &str) -> String {
+/// if it looks like a host, else searched for. Agents' addresses go the same way.
+pub(super) fn address_for(text: &str) -> String {
     let text = text.trim();
     if text.contains("://")
         || ["about:", "data:", "file:"]
@@ -652,6 +652,8 @@ mod tests {
         assert_eq!(address_for("about:blank"), "about:blank");
         assert_eq!(address_for("example.com/x"), "https://example.com/x");
         assert_eq!(address_for("localhost:3000"), "http://localhost:3000");
+        // An agent's `javascript:` is a search, not a script run in the user's page.
+        assert!(address_for("javascript:alert(1)").starts_with("https://www.google.com/"));
         assert_eq!(
             address_for("rust gpui 한"),
             "https://www.google.com/search?q=rust+gpui+%ED%95%9C"

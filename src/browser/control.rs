@@ -7,7 +7,7 @@
 //! The user allows a terminal's agent to use a tab in the agent itself: Claude Code asks
 //! before the first use, through `bareframe-browser hook` (which reads `granted` here). The
 //! user manages the agent's tabs by telling it: it releases tabs, and opens and closes its own.
-use super::{BrowserPane, automation, automation::Failure, engine, protocol};
+use super::{BrowserPane, automation, automation::Failure, engine, pane::address_for, protocol};
 use crate::workspace::WorkspaceView;
 use futures::{
     StreamExt,
@@ -351,7 +351,7 @@ async fn on_tab(method: &str, params: &Value, cx: &mut AsyncApp) -> Result<Value
             let url = params["url"]
                 .as_str()
                 .ok_or(("BAD_REQUEST", "no `url`".to_owned()))?;
-            automation::navigate(browser, url, cx).await?;
+            automation::navigate(browser, &address_for(url), cx).await?;
         }
         "click" => automation::click(browser, node()?, cx).await?,
         "fill" => {
@@ -385,10 +385,11 @@ async fn on_tab(method: &str, params: &Value, cx: &mut AsyncApp) -> Result<Value
 
 /// Opens `url` in a new browser tab, owned by the asking terminal, and waits for it to load.
 async fn open(params: &Value, cx: &mut AsyncApp) -> Result<Value, Failure> {
-    let url = params["url"]
-        .as_str()
-        .ok_or(("BAD_REQUEST", "no `url`".to_owned()))?
-        .to_owned();
+    let url = address_for(
+        params["url"]
+            .as_str()
+            .ok_or(("BAD_REQUEST", "no `url`".to_owned()))?,
+    );
     let terminal = terminal_of(params);
     let (view, window) = STATE
         .with_borrow(|state| {

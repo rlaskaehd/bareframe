@@ -104,8 +104,8 @@ fn main() -> ExitCode {
 
 /// Claude Code's PreToolUse hook: before the agent first uses a tab from this terminal, it
 /// asks the user, naming the page. Later uses, and calls that touch no tab, it leaves to
-/// Claude Code's own permission rules (no output). Anything unexpected also says nothing:
-/// the call then fails or succeeds on its own terms.
+/// Claude Code's own permission rules (no output). When the app can't say the tab is in
+/// use already, it asks too.
 fn hook() -> ExitCode {
     let mut input = String::new();
     let _ = std::io::Read::read_to_string(&mut std::io::stdin(), &mut input);
@@ -120,20 +120,19 @@ fn hook() -> ExitCode {
         "click" | "fill" | "press_key" => "click and type in",
         "wait_for" => "watch",
         "close" => "close",
-        _ => return ExitCode::SUCCESS,
+        "release" => return ExitCode::SUCCESS,
+        _ => "use",
     };
     let Some(tab) = input["tool_input"]["tab"].as_str() else {
         return ExitCode::SUCCESS;
     };
-    let Ok(status) = request("granted", json!({ "tab": tab })) else {
-        return ExitCode::SUCCESS;
-    };
-    if status["granted"].as_bool() != Some(false) {
+    let status = request("granted", json!({ "tab": tab })).unwrap_or_default();
+    if status["granted"].as_bool() == Some(true) {
         return ExitCode::SUCCESS;
     }
     let (title, url) = (
         status["title"].as_str().unwrap_or_default(),
-        status["url"].as_str().unwrap_or_default(),
+        status["url"].as_str().unwrap_or(tab),
     );
     let page = if title.is_empty() || title == url {
         url.to_owned()
