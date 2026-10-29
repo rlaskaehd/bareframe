@@ -1,6 +1,7 @@
 //! Warp's Markdown viewer: a `.md` file rendered read-only in a pane and read again when it
 //! changes on disk. Inline HTML is left out; Mermaid blocks are drawn as diagrams.
 use crate::{
+    actions::{DecreaseFontSize, IncreaseFontSize, ResetFontSize},
     theme::{self, Theme, hsla},
     watch::{Watch, watch_file},
 };
@@ -79,6 +80,12 @@ pub fn view_switch(
 }
 
 pub(super) const TEXT_SIZE: f32 = 14.0;
+/// Chrome's zoom levels, which the browser pane steps through too.
+const ZOOMS: [f32; 13] = [
+    0.5, 0.67, 0.75, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0,
+];
+/// 100% in `ZOOMS`.
+const ACTUAL_SIZE: usize = 5;
 /// Readable line length; wider panes center the text, as Warp does.
 const MAX_WIDTH: f32 = 860.0;
 
@@ -96,8 +103,9 @@ pub struct MarkdownPane {
     error: Option<String>,
     theme: &'static Theme,
     mono: String,
-    /// Cmd+= and Cmd+- on the font size, as a factor on the text and its width.
-    zoom: f32,
+    /// Cmd+= and Cmd+- in this pane, as a place in `ZOOMS`: a factor on the text and its
+    /// width, apart from the font size other panes use, as in a browser.
+    zoom: usize,
     focus: FocusHandle,
     /// The blocks as a list that lays out only those in view: a long document stays quick
     /// to scroll and to redraw.
@@ -154,7 +162,6 @@ impl MarkdownPane {
         path: PathBuf,
         theme: &'static Theme,
         mono: String,
-        zoom: f32,
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -164,7 +171,7 @@ impl MarkdownPane {
             error: None,
             theme,
             mono,
-            zoom,
+            zoom: ACTUAL_SIZE,
             focus: cx.focus_handle(),
             list: ListState::new(0, ListAlignment::Top, px(600.0)),
             links: Default::default(),
@@ -199,19 +206,9 @@ impl MarkdownPane {
         self.focus.focus(window, cx);
     }
 
-    pub fn set_style(
-        &mut self,
-        theme: &'static Theme,
-        mono: String,
-        zoom: f32,
-        cx: &mut Context<Self>,
-    ) {
+    pub fn set_theme(&mut self, theme: &'static Theme, mono: String, cx: &mut Context<Self>) {
         self.theme = theme;
         self.mono = mono;
-        if zoom != self.zoom {
-            self.zoom = zoom;
-            self.relayout();
-        }
         // Diagrams carry their colors, so a switch between dark and light redraws them.
         if is_dark(theme) != self.diagrams_dark {
             self.diagrams_dark = is_dark(theme);
@@ -366,7 +363,16 @@ impl MarkdownPane {
 
     /// A size in the document, zoomed.
     pub(super) fn size(&self, size: f32) -> gpui::Pixels {
-        px(size * self.zoom)
+        px(size * ZOOMS[self.zoom])
+    }
+
+    fn set_zoom(&mut self, zoom: usize, cx: &mut Context<Self>) {
+        let zoom = zoom.min(ZOOMS.len() - 1);
+        if zoom != self.zoom {
+            self.zoom = zoom;
+            self.relayout();
+            cx.notify();
+        }
     }
 
     /// Measures every block again, keeping the reader's place.
@@ -451,6 +457,14 @@ impl Render for MarkdownPane {
             .text_color(hsla(theme.text))
             .on_action(cx.listener(|_, _: &ToggleRaw, _, cx| cx.emit(MarkdownEvent::ShowRaw)))
             .on_action(cx.listener(|pane, _: &CopySelection, _, cx| pane.copy_selection(cx)))
+            // The font size keys zoom this document alone, as in the browser pane.
+            .on_action(
+                cx.listener(|pane, _: &IncreaseFontSize, _, cx| pane.set_zoom(pane.zoom + 1, cx)),
+            )
+            .on_action(cx.listener(|pane, _: &DecreaseFontSize, _, cx| {
+                pane.set_zoom(pane.zoom.saturating_sub(1), cx)
+            }))
+            .on_action(cx.listener(|pane, _: &ResetFontSize, _, cx| pane.set_zoom(ACTUAL_SIZE, cx)))
             .on_mouse_up(
                 gpui::MouseButton::Left,
                 cx.listener(|pane, _, _, _| pane.end_selection()),

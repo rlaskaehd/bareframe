@@ -91,6 +91,7 @@ MVP 1의 셸 실행 모드는 zsh를 기준으로 한다. 다른 셸을 지정�
 - 링크: 웹(`https://`, `http://`, `mailto:`)은 기본 브라우저로, 다른 Markdown 파일은 같은 Pane에서, 그 밖의 로컬 파일은 Project explorer처럼 연다. 문서 안 앵커(`#…`)와 다른 스킴은 따르지 않는다.
 - 이미지는 문서 옆의 로컬 파일만 보인다. 웹 이미지는 그 서버에 파일을 연 사실이 알려지지 않도록 불러오지 않고 `[image: 설명]`으로 표시한다.
 - 파일이 디스크에서 바뀌면(다른 편집기에서 저장) 다시 읽는다. 열린 문서는 레이아웃과 함께 저장·복원된다.
+- `Cmd+=`/`Cmd+-`/`Cmd+0`(View › `Zoom In`/`Zoom Out`/`Reset Zoom`)은 브라우저처럼 그 Pane의 문서만 Chrome과 같은 단계(50%–300%)로 확대·축소·원래대로 한다. 다른 Pane의 글자 크기와 따로 가고, 앱을 다시 켜면 100%로 돌아간다.
 - 위쪽 `Rendered | Raw`나 `Cmd+E`로 같은 Pane에서 Markdown 원문 편집기(Code editor)와 오간다. 저장하지 않은 변경이 있으면 Rendered로 돌아가기 전에 `Save` / `Don't Save` / `Cancel`을 묻는다. 스크롤 위치는 이어지지 않는다.
 
 ### Code editor
@@ -205,7 +206,7 @@ cursor-style = bar    # block | bar | underline
 | --- | --- |
 | 메뉴바 | Warp의 구성(bareframe·File·Edit·View·Tab·Window)을 따르고, bareframe에 없는 Blocks·AI·Drive·Help는 뺐다. `Cmd+H`(숨기기), `Cmd+Alt+H`(다른 앱 숨기기), `Cmd+M`(최소화), `Ctrl+Cmd+Space`(이모지 및 기호)도 macOS처럼 동작한다 |
 | View > Dark Theme / Light Theme | 테마를 바꾸고 설정 파일에 저장 |
-| `Cmd+=` / `Cmd+-` / `Cmd+0` | 모든 Pane의 폰트 크기 1pt 키우기 / 줄이기 / 설정 값으로 되돌리기(실행 중에만 유지). 브라우저 Pane에서는 페이지 확대·축소 |
+| `Cmd+=` / `Cmd+-` / `Cmd+0` | 모든 Pane의 폰트 크기 1pt 키우기 / 줄이기 / 설정 값으로 되돌리기(실행 중에만 유지). 브라우저 Pane과 Markdown viewer에서는 그 Pane만 확대·축소 |
 
 ## 업데이트
 
