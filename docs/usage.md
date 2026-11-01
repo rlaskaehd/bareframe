@@ -33,7 +33,7 @@ MVP 1의 셸 실행 모드는 zsh를 기준으로 한다. 다른 셸을 지정�
 | `Cmd+Shift+T` | 새 브라우저 탭(빈 페이지, 주소창에서 시작) |
 | `Cmd+D` / `Cmd+Shift+D` | 오른쪽 / 아래로 분할 |
 | `Cmd+Option+방향키` | 그 방향의 Pane으로 포커스 이동 |
-| `Cmd+Shift+Enter` | 활성 Pane 최대화 / 되돌리기. 분할·닫기·다른 Pane으로 포커스 이동 시 풀린다 |
+| `Cmd+Shift+Enter` | 활성 Pane 최대화 / 되돌리기. 분할·닫기 시 풀린다. 최대화한 채로 Pane 이동 키를 누르면 옮겨 간 Pane이 최대화된다 |
 | `Cmd+Shift+[` / `Cmd+Shift+]` | 이전 / 다음 탭 |
 | `Cmd+1`–`Cmd+8`, `Cmd+9` | 번호로 탭 선택, 마지막 탭 |
 | `Cmd+W` | 현재 Pane 닫기. 탭의 마지막 Pane이면 탭을 닫는다. 마지막 탭이면 창을 닫지 않고 새 탭으로 바꾼다 |
@@ -86,7 +86,7 @@ MVP 1의 셸 실행 모드는 zsh를 기준으로 한다. 다른 셸을 지정�
 
 - Project explorer나 Global search에서 `.md`(`.markdown` 등 포함) 파일을 열면 bareframe 안에서 렌더링해 보여 준다. Settings › Features › Files의 `Open Markdown files in the Markdown viewer`(기본 켬)를 끄면 기본 앱으로 연다. `Choose a layout to open files`로 활성 Pane 오른쪽 분할(기본)과 새 탭 중에 고른다. 이미 열린 파일은 그 Pane으로 이동한다.
 - 제목(Warp와 같은 크기 비율), 문단, 굵게·기울임·취소선, 인라인 코드, 코드 블록, 목록·체크 목록, 인용, 구분선, 표, 링크, 이미지를 보인다. 인라인 HTML과 HTML 블록은 보이지 않는다. ` ```mermaid ` 코드 블록은 다이어그램으로 그린다(merman). 색은 앱 테마를 따르고 VS Code·cmux처럼 노드는 바탕과 다른 채움색에 또렷한 테두리, 묶음(subgraph)은 회색 바탕, 선 라벨은 회색 상자로 그린다. ER 표의 줄은 두 가지 차분한 색으로 번갈아 칠하고, 파이 조각·마인드맵·타임라인 구간·git 브랜치는 앱의 강조색들로 구분한다. flowchart, sequence, state, ER, class, gantt, git graph, journey, mindmap, pie, timeline을 지원하고, 그리지 못하면 원문과 이유를 보인다.
-- Rendered 화면의 글자(코드 블록 포함)는 마우스로 끌어 선택하고 `Cmd+C`로 복사한다. `Shift`+클릭은 선택을 그 자리까지 늘린다. 여러 덩어리(문단·목록 항목·표 칸)에 걸치면 한 줄에 하나씩 복사된다. 다른 글자를 누르면 선택이 풀린다.
+- Rendered 화면의 글자(코드 블록 포함)는 마우스로 끌어 선택하고 `Cmd+C`로 복사한다. `Shift`+클릭은 선택을 그 자리까지 늘린다. 여러 덩어리(문단·목록 항목·표 칸)에 걸치면 한 줄에 하나씩 복사된다. 끌면서 화면 위·아래 밖으로 나가면 잡고 있는 동안 계속 스크롤하며 선택이 늘어난다(멀리 끌수록 빠르다). 다른 글자를 누르면 선택이 풀린다.
 - 코드 블록 오른쪽 위 `Copy`는 내용을 클립보드에 복사한다. 셸 코드 블록(`sh`, `bash`, `zsh`, `shell`, `console`, `fish`)에는 `Insert into terminal`이 있어, 같은 탭의 터미널에 붙여 넣는다(실행하지는 않는다). Ghostty의 붙여넣기 경로를 쓰므로 위험한 붙여넣기 확인이 그대로 적용되고, 내용은 클립보드에도 남는다.
 - 링크: 웹(`https://`, `http://`, `mailto:`)은 기본 브라우저로, 다른 Markdown 파일은 같은 Pane에서, 그 밖의 로컬 파일은 Project explorer처럼 연다. 문서 안 앵커(`#…`)와 다른 스킴은 따르지 않는다.
 - 이미지는 문서 옆의 로컬 파일만 보인다. 웹 이미지는 그 서버에 파일을 연 사실이 알려지지 않도록 불러오지 않고 `[image: 설명]`으로 표시한다.
@@ -130,6 +130,8 @@ MVP 1의 셸 실행 모드는 zsh를 기준으로 한다. 다른 셸을 지정�
 - `Cmd+Shift+T`, 사이드바 위쪽 `+`의 `New browser tab`, File › `New Browser Tab`, 팔레트의 `New browser tab`으로 Chromium(CEF) 페이지를 Pane으로 연다. 위쪽 줄에 뒤로·앞으로·새로고침(불러오는 중에는 멈춤)과 주소창이 있다. 주소창은 다른 브라우저처럼 처음 누르면 주소 전체가 선택되어 바로 고쳐 쓸 수 있다. 끌면 끈 만큼 선택된다(처음 누를 때도, 주소창 밖으로 끌어도). 주소를 넣고 `Enter`: 스킴이 없으면 `https://`(localhost·127.0.0.1은 `http://`)를 붙이고, 주소처럼 보이지 않으면 Google에서 찾는다.
 - 페이지 제목과 주소가 탭·Pane 제목에 보이고, 주소는 레이아웃과 함께 저장·복원된다. 쿠키·방문 기록·캐시는 메모리에만 두고 디스크에 남기지 않아, 앱을 끝내면 로그인이 풀린다(Chromium의 쿠키 키를 키체인에 두지 않으므로 키체인 암호도 묻지 않는다). 설정 파일 옆 `browser/`에는 Chromium 자체의 파일만 둔다.
 - 키보드는 누른 곳을 따른다: 페이지를 누르면 페이지가, 주소창·터미널·편집기를 누르면 그쪽이 받는다(한글 입력 포함). 페이지 안에서 `Cmd+C/X/V`, `Cmd+A`, `Cmd+Z`/`Cmd+Shift+Z`는 페이지의 편집 명령이다. `Cmd+R`은 페이지를 새로 고친다(주소창에 있을 때도). `Cmd+=`/`Cmd+-`/`Cmd+0`(View › `Zoom In`/`Zoom Out`/`Reset Zoom`)은 브라우저 Pane에서는 글자 크기 대신 페이지를 Chrome과 같은 단계로 확대·축소·원래대로 한다.
+- 다운로드는 `~/Downloads`에 저장한다. 같은 이름이 있으면 Chrome처럼 `이름 (1).확장자`로 저장하고, 다 받으면 Dock의 다운로드 스택이 튀어 오른다.
+- 페이지에는 시스템 언어(System Settings › General › Language & Region의 순서, 예: `ko-KR,ko,en-US,en`)를 알려, 사이트가 언어를 다시 묻지 않는다.
 - 사용자가 누른 링크가 새 창(`target=_blank`)을 열면 새 브라우저 탭으로 연다. 웹 주소(`http`, `https`)만 열고, 스크립트나 페이지 안 프레임이 스스로 여는 창은 막는다.
 - 팔레트나 메뉴가 페이지 위에 열리는 동안은 페이지의 스냅샷을 대신 보인다. 페이지 뷰는 GPUI 위에 놓인 native view라 그 위로 그릴 수 없기 때문이다.
 - Chromium은 앱 안에서만 DevTools 프로토콜로 조작하고(`src/browser/engine.rs`의 `devtools`), 원격 디버깅 포트는 열지 않는다.
