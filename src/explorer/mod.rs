@@ -175,10 +175,16 @@ impl Explorer {
     }
 
     fn watch(&mut self, cx: &mut Context<Self>) {
-        let (sender, mut receiver) = futures::channel::mpsc::unbounded::<PathBuf>();
+        // A path, and whether everything under it may have changed: macOS sends that instead
+        // of each file when changes come too fast (a checkout, a build).
+        let (sender, mut receiver) = futures::channel::mpsc::unbounded::<(PathBuf, bool)>();
         let watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
-            for path in event.map(|event| event.paths).unwrap_or_default() {
-                let _ = sender.unbounded_send(path);
+            let Ok(event) = event else {
+                return;
+            };
+            let rescan = event.need_rescan();
+            for path in event.paths {
+                let _ = sender.unbounded_send((path, rescan));
             }
         });
         let mut watcher = match watcher {
@@ -214,10 +220,14 @@ impl Explorer {
         self.watcher = Some((watcher, task));
     }
 
-    fn invalidate(&mut self, changed: &[PathBuf], cx: &mut Context<Self>) {
+    fn invalidate(&mut self, changed: &[(PathBuf, bool)], cx: &mut Context<Self>) {
         // A read still in flight is redone too, so it can't bring back what just changed.
         let before = self.listings.len() + self.loading.len();
-        for path in changed {
+        for (path, rescan) in changed {
+            if *rescan {
+                self.listings.retain(|dir, _| !dir.starts_with(path));
+                self.loading.retain(|dir, _| !dir.starts_with(path));
+            }
             self.listings.remove(path);
             self.loading.remove(path);
             if let Some(parent) = path.parent() {

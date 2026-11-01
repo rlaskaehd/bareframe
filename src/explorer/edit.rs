@@ -151,7 +151,7 @@ impl Explorer {
 
     /// Reads `path`'s folder again now rather than when the watcher reports it.
     fn changed(&mut self, path: &Path, cx: &mut Context<Self>) {
-        self.invalidate(&[path.to_path_buf()], cx);
+        self.invalidate(&[(path.to_path_buf(), false)], cx);
         cx.notify();
     }
 
