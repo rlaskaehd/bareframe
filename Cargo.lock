@@ -916,7 +916,7 @@ dependencies = [
 
 [[package]]
 name = "bareframe"
-version = "0.2.10"
+version = "0.2.11"
 dependencies = [
  "arborium",
  "bareframe-core",
