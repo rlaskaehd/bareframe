@@ -70,6 +70,8 @@ struct Endpoint {
 }
 
 thread_local! {
+    /// Settings › Browser: Codex's hook allows every call but a first use of the user's tab.
+    static CODEX_TOOLS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static STATE: RefCell<State> = RefCell::default();
     static ENDPOINT: RefCell<Option<Endpoint>> = const { RefCell::new(None) };
 }
@@ -124,6 +126,10 @@ pub fn launch_env() -> Option<String> {
         env.push_str(&format!(" {}={}", protocol::CLI_VAR, quote(cli)));
     }
     Some(env)
+}
+
+pub fn set_codex_tools(allowed: bool) {
+    CODEX_TOOLS.set(allowed);
 }
 
 /// Opens or closes the socket, following the setting.
@@ -270,8 +276,12 @@ fn tabs(cx: &mut AsyncApp) -> Value {
 }
 
 /// Whether this terminal uses `tab` already, for the hook deciding to ask the user; and
-/// what the tab shows, for the question.
+/// what the tab shows, for the question. `tools`: whether Codex need not ask otherwise.
 fn granted(params: &Value, cx: &mut AsyncApp) -> Result<Value, Failure> {
+    let tools = CODEX_TOOLS.get();
+    if params["tab"].is_null() {
+        return Ok(json!({ "tools": tools }));
+    }
     let pair = (
         terminal_of(params),
         params["tab"].as_str().unwrap_or_default().to_owned(),
@@ -283,7 +293,7 @@ fn granted(params: &Value, cx: &mut AsyncApp) -> Result<Value, Failure> {
         .pane
         .read_with(cx, |pane, _| (pane.title(), pane.url().to_owned()))
         .map_err(|_| ("TAB_CLOSED", format!("`{}` is closed", pair.1)))?;
-    Ok(json!({ "tab": pair.1, "granted": granted, "title": title, "url": url }))
+    Ok(json!({ "tab": pair.1, "granted": granted, "title": title, "url": url, "tools": tools }))
 }
 
 fn terminal_of(params: &Value) -> String {

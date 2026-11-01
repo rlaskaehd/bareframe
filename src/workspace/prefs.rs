@@ -96,6 +96,7 @@ impl WorkspaceView {
     pub(super) fn apply_browser_control(&self, cx: &mut Context<Self>) {
         let enabled = self.settings.flag("browser-agent-control");
         crate::browser::control::set_enabled(enabled, cx);
+        crate::browser::control::set_codex_tools(self.settings.flag("browser-agent-codex-tools"));
     }
 
     pub(super) fn apply_update_setting(&self, cx: &mut Context<Self>) {

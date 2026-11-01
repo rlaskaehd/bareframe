@@ -454,6 +454,16 @@ pub const DEFS: &[Def] = &[
     ),
     def(
         Features,
+        "Browser",
+        "browser-agent-codex-tools",
+        "Let Codex use the browser tools without asking each call",
+        "As allowing bareframe-browser for good in Claude Code: Codex then asks only before an agent first uses a tab you opened, not to list tabs, open its own or use one already allowed.",
+        Toggle,
+        "false",
+        App,
+    ),
+    def(
+        Features,
         "Code review",
         "code-review-button",
         "Show the code review button",

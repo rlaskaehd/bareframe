@@ -160,6 +160,9 @@ fn hook() -> ExitCode {
         return ExitCode::SUCCESS;
     };
     let codex = input["hook_event_name"] == "PermissionRequest";
+    // Settings › Browser lets Codex go without asking but before a first use of a user's tab.
+    let codex_tools =
+        || codex && request("granted", json!({})).is_ok_and(|status| status["tools"] == true);
     let allow = || {
         if codex {
             let allow = json!({ "hookSpecificOutput": {
@@ -183,6 +186,7 @@ fn hook() -> ExitCode {
         "release" => return allow(),
         // A new tab shares the sign-ins of the user's own tabs: Codex asks, as Claude Code
         // does for a tool it has not been allowed.
+        "open" if codex_tools() => return allow(),
         "open" if codex => {
             let url = input["tool_input"]["url"].as_str().unwrap_or_default();
             let note = format!(
@@ -195,7 +199,11 @@ fn hook() -> ExitCode {
         _ => "use",
     };
     let Some(tab) = input["tool_input"]["tab"].as_str() else {
-        return ExitCode::SUCCESS;
+        return if codex_tools() {
+            allow()
+        } else {
+            ExitCode::SUCCESS
+        };
     };
     let status = request("granted", json!({ "tab": tab })).unwrap_or_default();
     if status["granted"].as_bool() == Some(true) {
@@ -281,7 +289,9 @@ fn setup() -> ExitCode {
          2. Have the hook answer for tabs in use already: add this to ~/.codex/hooks.json\n   \
          (merged with any \"hooks\" there), then trust it when Codex asks (or in /hooks).\n   \
          When Codex asks about a tab, allow it once: for the session or always would skip\n   \
-         asking about other tabs.\n\n{codex:#}\n\n\
+         asking about other tabs. To be asked only then, as after allowing the server for good\n   \
+         in Claude Code, turn on Settings › Features › Browser › \"Let Codex use the browser\n   \
+         tools without asking each call\".\n\n{codex:#}\n\n\
          Then turn on Settings › Features › Browser › \"Let agents in terminals control\n\
          browser tabs\" in bareframe, and start the agent in a terminal opened after that.",
         endpoint = protocol::ENDPOINT_VAR,
