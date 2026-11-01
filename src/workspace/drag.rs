@@ -277,7 +277,7 @@ impl WorkspaceView {
         }
     }
 
-    /// Follows a file over the middle of pane `id`'s page (`at`), or off it.
+    /// Follows a pane over pane `id`'s tabs (`into`), or off them.
     fn hover_stack(&mut self, id: PaneId, into: bool, cx: &mut Context<Self>) {
         if into != (self.stack_drop == Some(id)) {
             self.stack_drop = into.then_some(id);
@@ -285,6 +285,7 @@ impl WorkspaceView {
         }
     }
 
+    /// Follows a file over the middle of pane `id`'s page (`at`), or off it.
     fn hover_page(&mut self, id: PaneId, at: Option<Point<Pixels>>, cx: &mut Context<Self>) {
         let was = self.page_drop.is_some_and(|(pane, _)| pane == id);
         if at.is_some() || was {

@@ -369,10 +369,7 @@ impl Workspace {
         let shown = self.active_pane();
         match self.stacks.iter_mut().find(|stack| stack.contains(&shown)) {
             Some(stack) => {
-                let at = stack
-                    .iter()
-                    .position(|member| *member == shown)
-                    .unwrap_or(0);
+                let at = index_in(stack, shown);
                 stack.insert(at + 1, pane);
             }
             None => self.stacks.push(vec![shown, pane]),
@@ -387,10 +384,7 @@ impl Workspace {
         let Some(stack) = self.stack(shown) else {
             return false;
         };
-        let at = stack
-            .iter()
-            .position(|member| *member == shown)
-            .unwrap_or(0);
+        let at = index_in(stack, shown);
         let next = if forward {
             stack[(at + 1) % stack.len()]
         } else {
@@ -422,11 +416,7 @@ impl Workspace {
             }
         };
         let stack = &mut self.stacks[index];
-        let at = stack
-            .iter()
-            .position(|member| *member == target)
-            .unwrap_or(0)
-            + 1;
+        let at = index_in(stack, target) + 1;
         stack.splice(at..at, moving);
         // A group left without tabs goes, as after any move.
         self.active_tab = self.tab_of(target).unwrap_or(0);
@@ -471,7 +461,7 @@ impl Workspace {
         // A tab of a place: the next one (else the one before) takes its place if it showed.
         if let Some(at) = self.stacks.iter().position(|stack| stack.contains(&pane)) {
             let stack = &mut self.stacks[at];
-            let gone = stack.iter().position(|member| *member == pane).unwrap_or(0);
+            let gone = index_in(stack, pane);
             stack.remove(gone);
             let next = stack[gone.min(stack.len() - 1)];
             if stack.len() < 2 {
@@ -889,6 +879,11 @@ impl Workspace {
     pub fn panes(&self) -> impl Iterator<Item = PaneId> + '_ {
         (0..self.tabs.len()).flat_map(|index| self.tab_panes(index))
     }
+}
+
+/// Where `pane` is in `stack`, the first place if it isn't there.
+fn index_in(stack: &[PaneId], pane: PaneId) -> usize {
+    stack.iter().position(|member| *member == pane).unwrap_or(0)
 }
 
 #[cfg(test)]

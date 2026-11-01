@@ -77,17 +77,13 @@ unsafe extern "C-unwind" fn key_equivalent(
     event: *mut AnyObject,
 ) -> Bool {
     const COMMAND_OR_CONTROL: usize = (1 << 20) | (1 << 18);
-    // SAFETY: `view` is GPUI's view and `event` the NSEvent; the first responder is checked
-    // to be a view before asking whether it sits inside GPUI's.
+    // SAFETY: `view` is GPUI's view and `event` the NSEvent.
     let page_typing = unsafe {
         let flags: usize = objc2::msg_send![event, modifierFlags];
         let window: *mut AnyObject = objc2::msg_send![view, window];
         flags & COMMAND_OR_CONTROL == 0 && !window.is_null() && {
             let responder: *mut AnyObject = objc2::msg_send![window, firstResponder];
-            let is_view: Bool = objc2::msg_send![responder, isKindOfClass: class!(NSView)];
-            responder != view
-                && is_view.as_bool()
-                && objc2::msg_send![responder, isDescendantOf: view]
+            responder != view && has_keyboard(view.cast())
         }
     };
     if page_typing {
