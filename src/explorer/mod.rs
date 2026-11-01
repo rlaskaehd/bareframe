@@ -152,6 +152,11 @@ impl Explorer {
                 self.expanded.insert(root.clone());
             }
         }
+        // Folders outside the new roots go unwatched: what was read of them may go stale (an
+        // agent writing there while another pane is active), so it is read again when shown.
+        let kept = |dir: &PathBuf| roots.iter().any(|root| dir.starts_with(root));
+        self.listings.retain(|dir, _| kept(dir));
+        self.loading.retain(|dir, _| kept(dir));
         self.roots = roots;
         if self.watcher.is_some() {
             self.watch(cx);
