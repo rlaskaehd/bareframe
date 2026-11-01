@@ -175,7 +175,7 @@ impl TerminalPane {
 
     pub fn paste(&self, cx: &mut Context<Self>) {
         if let Some(terminal) = &self.terminal {
-            terminal.update(cx, |terminal, _| terminal.paste());
+            terminal.update(cx, |terminal, cx| terminal.paste(cx));
         }
     }
 

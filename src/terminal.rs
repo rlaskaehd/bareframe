@@ -12,10 +12,11 @@ use bareframe_core::{
     },
 };
 use gpui::{
-    AppContext, Bounds, Context, DispatchPhase, ElementInputHandler, Entity, EntityInputHandler,
-    EventEmitter, FocusHandle, KeyDownEvent, KeyUpEvent, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, Pixels, Point, ScrollDelta, ScrollWheelEvent, Subscription, Task, UTF16Selection,
-    Window, canvas, div, point, prelude::*, px, size,
+    App, AppContext, Bounds, ClipboardEntry, ClipboardItem, Context, DispatchPhase,
+    ElementInputHandler, Entity, EntityInputHandler, EventEmitter, FocusHandle, KeyDownEvent,
+    KeyUpEvent, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollDelta,
+    ScrollWheelEvent, Subscription, Task, UTF16Selection, Window, canvas, div, point, prelude::*,
+    px, size,
 };
 use gpui_libghostty::{
     __private::{
@@ -24,7 +25,7 @@ use gpui_libghostty::{
     },
     ClipboardOperation, TerminalConfiguration, TerminalOptions, TerminalTheme,
 };
-use std::{ffi::CString, ops::Range};
+use std::{ffi::CString, ops::Range, path::PathBuf};
 
 pub struct GhosttyAdapter {
     key: SessionKey,
@@ -373,9 +374,24 @@ impl GhosttyAdapter {
         }
     }
 
-    /// Ghostty's own paste of the clipboard, with bracketed paste and the unsafe-paste check.
-    pub fn paste(&mut self) {
-        self.binding(c"paste_from_clipboard");
+    /// Pastes the clipboard. Files copied in Finder go in as their paths, escaped for the
+    /// shell as in Ghostty's own app (the clipboard's text is only their names), and an image
+    /// alone (a screenshot) as the path of a copy saved for it: CLIs that take images, such as
+    /// Claude Code and Codex, attach a pasted image path. Text is Ghostty's own paste, with
+    /// bracketed paste and the unsafe-paste check.
+    pub fn paste(&mut self, cx: &App) {
+        match cx
+            .read_from_clipboard()
+            .and_then(|item| pasted_paths(&item))
+        {
+            Some(paths) => {
+                self.send_committed();
+                if let (Some(surface), Ok(paths)) = (&mut self.surface, CString::new(paths)) {
+                    surface.text(&paths);
+                }
+            }
+            None => self.binding(c"paste_from_clipboard"),
+        }
     }
 
     fn binding(&mut self, action: &std::ffi::CStr) {
@@ -384,6 +400,49 @@ impl GhosttyAdapter {
             surface.binding_action(action);
         }
     }
+}
+
+/// The clipboard's files, or its image alone saved as a file, as shell words; none for text.
+fn pasted_paths(item: &ClipboardItem) -> Option<String> {
+    let mut paths = Vec::new();
+    for entry in item.entries() {
+        match entry {
+            ClipboardEntry::ExternalPaths(files) => paths.extend(files.paths().iter().cloned()),
+            ClipboardEntry::Image(image) if item.entries().len() == 1 => {
+                paths.push(saved_image(image)?)
+            }
+            _ => {}
+        }
+    }
+    let words: Vec<String> = paths
+        .iter()
+        .map(|path| shell_escape(&path.to_string_lossy()))
+        .collect();
+    (!words.is_empty()).then(|| words.join(" "))
+}
+
+/// A copy of a pasted image in the user's temporary folder, named after its contents.
+fn saved_image(image: &gpui::Image) -> Option<PathBuf> {
+    let folder = std::env::temp_dir().join("bareframe-paste");
+    std::fs::create_dir_all(&folder).ok()?;
+    let path = folder.join(format!("{:016x}.{}", image.id, image.format.extension()));
+    if !path.exists() {
+        std::fs::write(&path, &image.bytes).ok()?;
+    }
+    Some(path)
+}
+
+/// `text` with the characters a shell treats specially escaped by a backslash, as Ghostty
+/// escapes pasted and dropped file paths.
+fn shell_escape(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len());
+    for c in text.chars() {
+        if " \t\\\"'`!#$&()*;<>?[]{}|~".contains(c) {
+            escaped.push('\\');
+        }
+        escaped.push(c);
+    }
+    escaped
 }
 
 impl Drop for GhosttyAdapter {
@@ -571,7 +630,7 @@ impl Render for GhosttyAdapter {
                 cx.stop_propagation();
             }))
             .on_action(cx.listener(|view, _: &Paste, _, cx| {
-                view.binding(c"paste_from_clipboard");
+                view.paste(cx);
                 cx.stop_propagation();
             }))
             .on_action(cx.listener(|view, _: &TerminalSelectAll, _, _| view.binding(c"select_all")))
@@ -668,6 +727,19 @@ fn trace_input(message: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pasted_paths_are_escaped_as_ghostty_does() {
+        assert_eq!(
+            shell_escape("/Users/a/스크린샷 2026-11-01 오후 5.03.12.png"),
+            "/Users/a/스크린샷\\ 2026-11-01\\ 오후\\ 5.03.12.png"
+        );
+        assert_eq!(
+            shell_escape("/tmp/it's (1)&$x"),
+            "/tmp/it\\'s\\ \\(1\\)\\&\\$x"
+        );
+        assert_eq!(shell_escape("/plain/path-1_a.png"), "/plain/path-1_a.png");
+    }
 
     #[test]
     fn enter_and_tab_type_no_text_so_shift_reaches_ghostty() {
