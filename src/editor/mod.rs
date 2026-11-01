@@ -417,15 +417,15 @@ impl EditorPane {
         let y = at.y - layout.bounds.top() + self.scroll.y;
         let line =
             ((y / layout.line_height).floor().max(0.0) as usize).min(self.buffer.line_count() - 1);
-        let shaped = layout
-            .lines
-            .get(line.checked_sub(layout.first)?)
-            .or(layout.lines.last())?;
         let x = at.x - layout.text_left + self.scroll.x;
-        let column = if line < layout.first + layout.lines.len() {
-            shaped.closest_index_for_x(x)
-        } else {
-            self.buffer.line(line).len()
+        // Lines out of view (a drag past the top or bottom) are taken from their start or end.
+        let column = match line
+            .checked_sub(layout.first)
+            .and_then(|i| layout.lines.get(i))
+        {
+            Some(shaped) => shaped.closest_index_for_x(x),
+            None if line < layout.first => 0,
+            None => self.buffer.line(line).len(),
         };
         Some(self.buffer.clamp(Position::new(line, column)))
     }

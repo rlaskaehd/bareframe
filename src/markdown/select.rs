@@ -4,10 +4,37 @@
 use super::MarkdownPane;
 use crate::theme::hsla;
 use gpui::{
-    ClipboardItem, Context, Hsla, MouseButton, MouseDownEvent, MouseMoveEvent, StyledText,
-    TextLayout, TextRun, div, prelude::*,
+    ClipboardItem, Context, DispatchPhase, Hsla, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, StyledText, TextLayout, TextRun, canvas, div, prelude::*, px,
 };
-use std::ops::Range;
+use std::{ops::Range, time::Duration};
+
+/// Pieces of block `n` are numbered from `n * BLOCK_IDS`, in reading order.
+pub(super) const BLOCK_IDS: usize = 10_000;
+
+/// Follows a selecting drag across the whole window, as the editor does: the pieces see the
+/// mouse only while it is over them, and the button may come up anywhere.
+pub(super) fn drag_listener(cx: &mut Context<MarkdownPane>) -> impl IntoElement {
+    let pane = cx.entity().downgrade();
+    canvas(
+        |_, _, _| {},
+        move |_, _, window, _| {
+            let moved = pane.clone();
+            window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
+                if phase == DispatchPhase::Bubble {
+                    moved.update(cx, |pane, cx| pane.drag_to(event, cx)).ok();
+                }
+            });
+            window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
+                if phase == DispatchPhase::Bubble && event.button == MouseButton::Left {
+                    pane.update(cx, |pane, _| pane.end_selection()).ok();
+                }
+            });
+        },
+    )
+    .absolute()
+    .size_full()
+}
 
 /// A place in the rendered text: a piece and a byte offset in it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -100,10 +127,92 @@ impl MarkdownPane {
             .into_any_element()
     }
 
-    /// The button came up anywhere in the pane.
+    /// The button came up.
     pub(super) fn end_selection(&mut self) {
         if let Some(selection) = self.selection.as_mut() {
             selection.dragging = false;
+        }
+        self.drag = None;
+    }
+
+    /// Above or below the text, a selecting drag scrolls on while the button is held, faster
+    /// the farther out, taking in what comes into view.
+    fn drag_to(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+        if !self
+            .selection
+            .as_ref()
+            .is_some_and(|selection| selection.dragging)
+        {
+            return;
+        }
+        if event.pressed_button != Some(MouseButton::Left) {
+            return self.end_selection();
+        }
+        let view = self.list.viewport_bounds();
+        let y = event.position.y;
+        self.drag = if y < view.top() {
+            Some(y - view.top())
+        } else if y > view.bottom() {
+            Some(y - view.bottom())
+        } else {
+            None
+        };
+        if self.drag.is_some() && !self.autoscrolling {
+            self.autoscrolling = true;
+            cx.spawn(async move |pane, cx| {
+                loop {
+                    cx.background_executor()
+                        .timer(Duration::from_millis(40))
+                        .await;
+                    if !pane
+                        .update(cx, |pane, cx| pane.autoscroll(cx))
+                        .unwrap_or(false)
+                    {
+                        break;
+                    }
+                }
+            })
+            .detach();
+        }
+    }
+
+    fn autoscroll(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(beyond) = self.drag.map(f32::from) else {
+            self.autoscrolling = false;
+            return false;
+        };
+        let down = beyond > 0.0;
+        self.list.scroll_by(px(beyond.signum()
+            * 20.0
+            * (1.0 + beyond.abs() / 40.0).min(10.0)));
+        if let (Some(head), Some(selection)) = (self.edge(down), self.selection.as_mut()) {
+            selection.head = head;
+        }
+        cx.notify();
+        true
+    }
+
+    /// The end of the last piece in view, or the start of the first.
+    fn edge(&self, down: bool) -> Option<Place> {
+        let first = self.list.logical_scroll_top().item_ix;
+        let view = self.list.viewport_bounds();
+        let pieces = self.pieces.borrow();
+        if down {
+            let last = (first..self.blocks.len())
+                .take_while(|&ix| {
+                    self.list
+                        .bounds_for_item(ix)
+                        .is_some_and(|bounds| bounds.top() < view.bottom())
+                })
+                .last()?;
+            let (&piece, text) = pieces.range(..(last + 1) * BLOCK_IDS).next_back()?;
+            Some(Place {
+                piece,
+                offset: text.len(),
+            })
+        } else {
+            let (&piece, _) = pieces.range(first * BLOCK_IDS..).next()?;
+            Some(Place { piece, offset: 0 })
         }
     }
 

@@ -123,6 +123,9 @@ pub struct MarkdownPane {
     /// The text of each piece drawn so far, for copying a selection (see `select`).
     pieces: std::cell::RefCell<std::collections::BTreeMap<usize, String>>,
     selection: Option<select::Selection>,
+    /// How far above (negative) or below the text a selecting drag is, while it is outside.
+    drag: Option<gpui::Pixels>,
+    autoscrolling: bool,
     _watch: Option<Watch>,
     _release: gpui::Subscription,
 }
@@ -182,6 +185,8 @@ impl MarkdownPane {
             _diagrams: None,
             pieces: Default::default(),
             selection: None,
+            drag: None,
+            autoscrolling: false,
             _watch: None,
             _release: cx.on_release_in(window, |pane: &mut Self, window, _| {
                 forget(&mut pane.diagrams, &mut pane.stale, |_| true);
@@ -421,7 +426,7 @@ impl Render for MarkdownPane {
                         return div().into_any_element();
                     };
                     // Ids only need to be unique within a block, which lays out on its own.
-                    let mut ids = index * 10_000;
+                    let mut ids = index * select::BLOCK_IDS;
                     let element = pane.render_block(block, &mut ids, cx);
                     let last = index + 1 == pane.blocks.len();
                     // Centered at a readable width, as one column, the gap below each block.
@@ -465,10 +470,7 @@ impl Render for MarkdownPane {
                 pane.set_zoom(pane.zoom.saturating_sub(1), cx)
             }))
             .on_action(cx.listener(|pane, _: &ResetFontSize, _, cx| pane.set_zoom(ACTUAL_SIZE, cx)))
-            .on_mouse_up(
-                gpui::MouseButton::Left,
-                cx.listener(|pane, _, _, _| pane.end_selection()),
-            )
+            .child(select::drag_listener(cx))
             .child(switch)
             .child(content)
     }
