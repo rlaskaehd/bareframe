@@ -13,10 +13,10 @@ use bareframe_core::{
 };
 use gpui::{
     App, AppContext, Bounds, ClipboardEntry, ClipboardItem, Context, DispatchPhase,
-    ElementInputHandler, Entity, EntityInputHandler, EventEmitter, FocusHandle, KeyDownEvent,
-    KeyUpEvent, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollDelta,
-    ScrollWheelEvent, Subscription, Task, UTF16Selection, Window, canvas, div, point, prelude::*,
-    px, size,
+    ElementInputHandler, Entity, EntityInputHandler, EventEmitter, ExternalPaths, FocusHandle,
+    KeyDownEvent, KeyUpEvent, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point,
+    ScrollDelta, ScrollWheelEvent, Subscription, Task, UTF16Selection, Window, canvas, div, point,
+    prelude::*, px, size,
 };
 use gpui_libghostty::{
     __private::{
@@ -384,13 +384,23 @@ impl GhosttyAdapter {
             .read_from_clipboard()
             .and_then(|item| pasted_paths(&item))
         {
-            Some(paths) => {
-                self.send_committed();
-                if let (Some(surface), Ok(paths)) = (&mut self.surface, CString::new(paths)) {
-                    surface.text(&paths);
-                }
-            }
+            Some(paths) => self.paste_words(&paths),
             None => self.binding(c"paste_from_clipboard"),
+        }
+    }
+
+    /// Files dropped on the terminal (from Finder, or a screenshot's thumbnail) go in as
+    /// their paths, as a paste of them would.
+    fn drop_paths(&mut self, paths: &[PathBuf]) {
+        if let Some(words) = shell_words(paths) {
+            self.paste_words(&words);
+        }
+    }
+
+    fn paste_words(&mut self, words: &str) {
+        self.send_committed();
+        if let (Some(surface), Ok(words)) = (&mut self.surface, CString::new(words)) {
+            surface.text(&words);
         }
     }
 
@@ -416,6 +426,11 @@ fn pasted_paths(item: &ClipboardItem) -> Option<String> {
             _ => {}
         }
     }
+    shell_words(&paths)
+}
+
+/// `paths` escaped for the shell and joined by spaces; none if any has a control character.
+fn shell_words(paths: &[PathBuf]) -> Option<String> {
     let words: Vec<String> = paths
         .iter()
         .map(|path| shell_escape(&path.to_string_lossy()))
@@ -631,6 +646,10 @@ impl Render for GhosttyAdapter {
             .on_action(cx.listener(|view, _: &Copy, _, cx| {
                 view.binding(c"copy_to_clipboard");
                 cx.stop_propagation();
+            }))
+            .on_drop(cx.listener(|view, files: &ExternalPaths, window, cx| {
+                view.focus(window, cx);
+                view.drop_paths(files.paths());
             }))
             .on_action(cx.listener(|view, _: &Paste, _, cx| {
                 view.paste(cx);

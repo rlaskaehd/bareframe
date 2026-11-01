@@ -220,7 +220,7 @@ cursor-style = bar    # block | bar | underline
 | 키 | 동작 |
 | --- | --- |
 | `Cmd+C` | 선택 영역을 클립보드로 복사 |
-| `Cmd+V` | Ghostty의 붙여넣기 경로로 클립보드 입력. Finder에서 복사한 파일은 Ghostty처럼 셸용으로 이스케이프한 전체 경로로, 이미지만 있는 클립보드(스크린샷 복사)는 임시 폴더에 PNG로 저장한 경로로 들어가, Claude Code·Codex 같은 CLI가 이미지로 첨부한다(Claude Code는 `Ctrl+V`로도 클립보드 이미지를 직접 읽는다). 위험한 붙여넣기(bracketed paste가 꺼진 프로그램에 여러 줄, 또는 bracketed paste를 빠져나가는 글자)는 확인 창(`Warning: Potentially Unsafe Paste`)에 붙여넣을 내용을 보여 주고 `Paste`를 눌러야 들어간다. `Esc`나 `Cancel`은 아무것도 넣지 않는다. 확인 창이 떠 있는 동안에는 다른 단축키와 창의 다른 곳 클릭이 막히고, 요청한 탭 번호와 이름·위치가 함께 보인다. 터미널 안 프로그램의 OSC 52 클립보드 읽기·쓰기는 Settings › Features의 `Clipboard access (OSC 52)`를 따른다: `Deny`(기본)는 거부, `Ask`는 같은 확인 창에서 `Allow`를 눌러야 허용, `Allow`는 묻지 않는다 |
+| `Cmd+V` | Ghostty의 붙여넣기 경로로 클립보드 입력. Finder에서 복사한 파일은 Ghostty처럼 셸용으로 이스케이프한 전체 경로로, 이미지만 있는 클립보드(스크린샷 복사)는 임시 폴더에 PNG로 저장한 경로로 들어가, Claude Code·Codex 같은 CLI가 이미지로 첨부한다(Claude Code는 `Ctrl+V`로도 클립보드 이미지를 직접 읽는다). Finder의 파일이나 스크린샷 썸네일을 터미널에 끌어다 놓아도 같은 경로가 들어간다. 위험한 붙여넣기(bracketed paste가 꺼진 프로그램에 여러 줄, 또는 bracketed paste를 빠져나가는 글자)는 확인 창(`Warning: Potentially Unsafe Paste`)에 붙여넣을 내용을 보여 주고 `Paste`를 눌러야 들어간다. `Esc`나 `Cancel`은 아무것도 넣지 않는다. 확인 창이 떠 있는 동안에는 다른 단축키와 창의 다른 곳 클릭이 막히고, 요청한 탭 번호와 이름·위치가 함께 보인다. 터미널 안 프로그램의 OSC 52 클립보드 읽기·쓰기는 Settings › Features의 `Clipboard access (OSC 52)`를 따른다: `Deny`(기본)는 거부, `Ask`는 같은 확인 창에서 `Allow`를 눌러야 허용, `Allow`는 묻지 않는다 |
 | `Cmd+Q` | 앱 종료 |
 | `Cmd+Shift+R` | 시작에 실패한 Pane을 다시 시작 |
 | `Ctrl+C`, `Ctrl+D`, `Ctrl+Z` | 터미널과 셸에 전달 |
