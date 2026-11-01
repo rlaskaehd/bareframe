@@ -470,7 +470,13 @@ mod tests {
         let fresh = workspace.new_tab();
         assert!(fresh.0 > 4, "a new pane id is past the waiting tabs' ids");
         // A stack shown nowhere, shown twice, alone, or reusing a pane is not a place's tabs.
-        for stack in ["stack 2 4", "stack 1 3", "stack 3", "stack 3 2\nstack 1 2"] {
+        for stack in [
+            "stack 2 4",
+            "stack 1 3",
+            "stack 3",
+            "stack 3 2\nstack 1 2",
+            "stack 3 2\nstack 3 4",
+        ] {
             assert!(
                 decode(&format!("{HEADER}\n{tab}\n{stack}\n")).is_err(),
                 "{stack}"

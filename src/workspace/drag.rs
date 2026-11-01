@@ -213,6 +213,19 @@ impl WorkspaceView {
         .on_drop(cx.listener(move |view, dragged: &DraggedTab, window, cx| {
             view.drop_tabs(id, &dragged.tabs, window, cx)
         }))
+        // Files from Finder (or a screenshot's thumbnail) dropped on a terminal type their
+        // paths there, and that pane becomes the active one, as a click on it would.
+        .on_drop(
+            cx.listener(move |view, files: &gpui::ExternalPaths, window, cx| {
+                let Some(terminal) = view.terminal(id).cloned() else {
+                    return;
+                };
+                if view.model.focus(id) {
+                    view.sync(window, cx);
+                }
+                terminal.update(cx, |terminal, cx| terminal.drop_paths(files.paths(), cx));
+            }),
+        )
         .on_drop(
             cx.listener(move |view, dragged: &DraggedEntry, window, cx| {
                 if let Some((_, at)) = view.page_drop.filter(|(pane, _)| *pane == id) {

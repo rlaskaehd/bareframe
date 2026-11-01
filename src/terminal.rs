@@ -13,10 +13,10 @@ use bareframe_core::{
 };
 use gpui::{
     App, AppContext, Bounds, ClipboardEntry, ClipboardItem, Context, DispatchPhase,
-    ElementInputHandler, Entity, EntityInputHandler, EventEmitter, ExternalPaths, FocusHandle,
-    KeyDownEvent, KeyUpEvent, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point,
-    ScrollDelta, ScrollWheelEvent, Subscription, Task, UTF16Selection, Window, canvas, div, point,
-    prelude::*, px, size,
+    ElementInputHandler, Entity, EntityInputHandler, EventEmitter, FocusHandle, KeyDownEvent,
+    KeyUpEvent, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollDelta,
+    ScrollWheelEvent, Subscription, Task, UTF16Selection, Window, canvas, div, point, prelude::*,
+    px, size,
 };
 use gpui_libghostty::{
     __private::{
@@ -391,7 +391,7 @@ impl GhosttyAdapter {
 
     /// Files dropped on the terminal (from Finder, or a screenshot's thumbnail) go in as
     /// their paths, as a paste of them would.
-    fn drop_paths(&mut self, paths: &[PathBuf]) {
+    pub fn drop_paths(&mut self, paths: &[PathBuf]) {
         if let Some(words) = shell_words(paths) {
             self.paste_words(&words);
         }
@@ -646,10 +646,6 @@ impl Render for GhosttyAdapter {
             .on_action(cx.listener(|view, _: &Copy, _, cx| {
                 view.binding(c"copy_to_clipboard");
                 cx.stop_propagation();
-            }))
-            .on_drop(cx.listener(|view, files: &ExternalPaths, window, cx| {
-                view.focus(window, cx);
-                view.drop_paths(files.paths());
             }))
             .on_action(cx.listener(|view, _: &Paste, _, cx| {
                 view.paste(cx);

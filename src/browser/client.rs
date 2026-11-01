@@ -36,6 +36,9 @@ pub enum BrowserEvent {
 pub type Keyboard = Arc<AtomicBool>;
 
 thread_local! {
+    /// Downloads under way, by id, and where each goes: Chromium writes a temporary file
+    /// until the end, so the name it will take must not be given out twice meanwhile.
+    static DOWNLOADING: RefCell<HashMap<u32, PathBuf>> = RefCell::default();
     /// Browsers an agent just right-clicked, and when (see `quiet_menu`).
     static AGENT_MENUS: RefCell<HashMap<i32, Instant>> = RefCell::default();
 }
@@ -101,18 +104,25 @@ wrap_download_handler! {
         fn on_before_download(
             &self,
             _browser: Option<&mut Browser>,
-            _download_item: Option<&mut DownloadItem>,
+            download_item: Option<&mut DownloadItem>,
             suggested_name: Option<&CefString>,
             callback: Option<&mut BeforeDownloadCallback>,
         ) -> ::std::os::raw::c_int {
-            let (Some(name), Some(callback)) = (suggested_name, callback) else {
+            let (Some(item), Some(name), Some(callback)) = (download_item, suggested_name, callback)
+            else {
                 return 0;
             };
             let folder = std::env::var_os("HOME").map(|home| PathBuf::from(home).join("Downloads"));
-            let Some(path) = folder.and_then(|folder| free_name(&folder, &name.to_string())) else {
+            let taken = |path: &Path| {
+                path.exists()
+                    || DOWNLOADING.with_borrow(|downloading| downloading.values().any(|p| p == path))
+            };
+            let Some(path) = folder.and_then(|folder| free_name(&folder, &name.to_string(), taken))
+            else {
                 return 0;
             };
             callback.cont(Some(&CefString::from(path.to_string_lossy().as_ref())), 0);
+            DOWNLOADING.with_borrow_mut(|downloading| downloading.insert(item.id(), path));
             1
         }
 
@@ -122,9 +132,14 @@ wrap_download_handler! {
             download_item: Option<&mut DownloadItem>,
             _callback: Option<&mut DownloadItemCallback>,
         ) {
-            if let Some(item) = download_item
-                && item.is_complete() != 0
-            {
+            let Some(item) = download_item else {
+                return;
+            };
+            let done = item.is_complete() != 0;
+            if done || item.is_canceled() != 0 || item.is_interrupted() != 0 {
+                DOWNLOADING.with_borrow_mut(|downloading| downloading.remove(&item.id()));
+            }
+            if done {
                 mac::download_finished(&CefString::from(&item.full_path()).to_string());
             }
         }
@@ -132,8 +147,8 @@ wrap_download_handler! {
 }
 
 /// Where a download named `name` goes in `folder`: under that name, or numbered as Chrome
-/// does ("a (1).pdf") when it is taken. Folders in the name are dropped.
-fn free_name(folder: &Path, name: &str) -> Option<PathBuf> {
+/// does ("a (1).pdf") when it is `taken`. Folders in the name are dropped.
+fn free_name(folder: &Path, name: &str, taken: impl Fn(&Path) -> bool) -> Option<PathBuf> {
     let name = Path::new(name).file_name()?.to_str()?;
     let (stem, extension) = match name.rsplit_once('.') {
         Some((stem, extension)) if !stem.is_empty() => (stem, format!(".{extension}")),
@@ -141,7 +156,7 @@ fn free_name(folder: &Path, name: &str) -> Option<PathBuf> {
     };
     std::iter::once(folder.join(name))
         .chain((1..1000).map(|n| folder.join(format!("{stem} ({n}){extension}"))))
-        .find(|path| !path.exists())
+        .find(|path| !taken(path))
 }
 
 wrap_context_menu_handler! {
@@ -305,18 +320,32 @@ mod tests {
         let folder =
             std::env::temp_dir().join(format!("bareframe-downloads-{}", std::process::id()));
         std::fs::create_dir_all(&folder).unwrap();
-        assert_eq!(free_name(&folder, "a.pdf"), Some(folder.join("a.pdf")));
+        let exists = |path: &std::path::Path| path.exists();
+        assert_eq!(
+            free_name(&folder, "a.pdf", exists),
+            Some(folder.join("a.pdf"))
+        );
         std::fs::write(folder.join("a.pdf"), "").unwrap();
         std::fs::write(folder.join("a (1).pdf"), "").unwrap();
-        assert_eq!(free_name(&folder, "a.pdf"), Some(folder.join("a (2).pdf")));
         assert_eq!(
-            free_name(&folder, "../../etc/passwd"),
+            free_name(&folder, "a.pdf", exists),
+            Some(folder.join("a (2).pdf"))
+        );
+        // A name another download is still writing to is taken too.
+        let writing = folder.join("a (2).pdf");
+        let busy = |path: &std::path::Path| path.exists() || path == writing;
+        assert_eq!(
+            free_name(&folder, "a.pdf", busy),
+            Some(folder.join("a (3).pdf"))
+        );
+        assert_eq!(
+            free_name(&folder, "../../etc/passwd", exists),
             Some(folder.join("passwd"))
         );
-        assert_eq!(free_name(&folder, ".."), None);
+        assert_eq!(free_name(&folder, "..", exists), None);
         std::fs::write(folder.join("README"), "").unwrap();
         assert_eq!(
-            free_name(&folder, "README"),
+            free_name(&folder, "README", exists),
             Some(folder.join("README (1)"))
         );
         std::fs::remove_dir_all(&folder).unwrap();

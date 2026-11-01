@@ -179,6 +179,12 @@ impl TerminalPane {
         }
     }
 
+    pub fn drop_paths(&self, paths: &[std::path::PathBuf], cx: &mut Context<Self>) {
+        if let Some(terminal) = &self.terminal {
+            terminal.update(cx, |terminal, _| terminal.drop_paths(paths));
+        }
+    }
+
     pub fn type_text(&self, text: &str, cx: &mut Context<Self>) {
         if let Some(terminal) = &self.terminal {
             terminal.update(cx, |terminal, _| terminal.type_text(text));

@@ -172,9 +172,13 @@ impl Workspace {
         let mut unique = panes.clone();
         unique.sort();
         unique.dedup();
-        let stacked: usize = stacks.iter().map(Vec::len).sum();
+        let mut members: Vec<PaneId> = stacks.iter().flatten().copied().collect();
+        let stacked = members.len();
+        members.sort();
+        members.dedup();
         let consistent = !tabs.is_empty()
             && unique.len() == panes.len()
+            && members.len() == stacked
             && unique.len() + stacks.len() == shown.len() + stacked
             && stacks.iter().all(|stack| {
                 stack.len() > 1 && stack.iter().filter(|pane| shown.contains(pane)).count() == 1
@@ -424,7 +428,10 @@ impl Workspace {
             .unwrap_or(0)
             + 1;
         stack.splice(at..at, moving);
+        // A group left without tabs goes, as after any move.
+        self.active_tab = self.tab_of(target).unwrap_or(0);
         self.clear_selection();
+        self.normalize();
         self.focus(pane)
     }
 
@@ -1078,6 +1085,17 @@ mod tests {
         assert_eq!(ws.active().layout.panes(), [first, lone]);
         assert_eq!(ws.stack(other), Some(&[other, beside, first][..]));
         assert!(!ws.stack_onto(beside, first), "already together");
+    }
+
+    #[test]
+    fn a_group_emptied_by_joining_tabs_goes() {
+        let (mut ws, first) = Workspace::new();
+        let grouped = ws.new_tab();
+        let group = ws.new_group(&[1]).unwrap();
+        assert!(ws.stack_onto(grouped, first));
+        assert!(ws.group(group).is_none());
+        assert_eq!(ws.tabs.len(), 1);
+        assert_eq!(ws.active_pane(), grouped);
     }
 
     #[test]
