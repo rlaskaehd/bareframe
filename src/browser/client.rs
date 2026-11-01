@@ -7,6 +7,7 @@ use futures::channel::mpsc::UnboundedSender;
 use std::{
     cell::RefCell,
     collections::HashMap,
+    path::{Path, PathBuf},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -76,7 +77,71 @@ wrap_client! {
         fn context_menu_handler(&self) -> Option<ContextMenuHandler> {
             Some(PaneMenu::new())
         }
+
+        fn download_handler(&self) -> Option<DownloadHandler> {
+            Some(PaneDownload::new())
+        }
     }
+}
+
+wrap_download_handler! {
+    struct PaneDownload;
+
+    // Without a handler Chromium cancels every download.
+    impl DownloadHandler {
+        fn can_download(
+            &self,
+            _browser: Option<&mut Browser>,
+            _url: Option<&CefString>,
+            _request_method: Option<&CefString>,
+        ) -> ::std::os::raw::c_int {
+            1
+        }
+
+        fn on_before_download(
+            &self,
+            _browser: Option<&mut Browser>,
+            _download_item: Option<&mut DownloadItem>,
+            suggested_name: Option<&CefString>,
+            callback: Option<&mut BeforeDownloadCallback>,
+        ) -> ::std::os::raw::c_int {
+            let (Some(name), Some(callback)) = (suggested_name, callback) else {
+                return 0;
+            };
+            let folder = std::env::var_os("HOME").map(|home| PathBuf::from(home).join("Downloads"));
+            let Some(path) = folder.and_then(|folder| free_name(&folder, &name.to_string())) else {
+                return 0;
+            };
+            callback.cont(Some(&CefString::from(path.to_string_lossy().as_ref())), 0);
+            1
+        }
+
+        fn on_download_updated(
+            &self,
+            _browser: Option<&mut Browser>,
+            download_item: Option<&mut DownloadItem>,
+            _callback: Option<&mut DownloadItemCallback>,
+        ) {
+            if let Some(item) = download_item
+                && item.is_complete() != 0
+            {
+                mac::download_finished(&CefString::from(&item.full_path()).to_string());
+            }
+        }
+    }
+}
+
+/// Where a download named `name` goes in `folder`: under that name, or numbered as Chrome
+/// does ("a (1).pdf") when it is taken. Folders in the name are dropped.
+fn free_name(folder: &Path, name: &str) -> Option<PathBuf> {
+    let name = Path::new(name).file_name()?.to_str()?;
+    let (stem, extension) = match name.rsplit_once('.') {
+        Some((stem, extension)) if !stem.is_empty() => (stem, format!(".{extension}")),
+        _ => (name, String::new()),
+    };
+    std::iter::once(folder.join(name))
+        .chain((1..1000).map(|n| folder.join(format!("{stem} ({n}){extension}"))))
+        .find(|path| !path.exists())
 }
 
 wrap_context_menu_handler! {
@@ -228,5 +293,32 @@ wrap_load_handler! {
                 forward: can_go_forward != 0,
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::free_name;
+
+    #[test]
+    fn downloads_never_overwrite_and_stay_in_the_folder() {
+        let folder =
+            std::env::temp_dir().join(format!("bareframe-downloads-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        assert_eq!(free_name(&folder, "a.pdf"), Some(folder.join("a.pdf")));
+        std::fs::write(folder.join("a.pdf"), "").unwrap();
+        std::fs::write(folder.join("a (1).pdf"), "").unwrap();
+        assert_eq!(free_name(&folder, "a.pdf"), Some(folder.join("a (2).pdf")));
+        assert_eq!(
+            free_name(&folder, "../../etc/passwd"),
+            Some(folder.join("passwd"))
+        );
+        assert_eq!(free_name(&folder, ".."), None);
+        std::fs::write(folder.join("README"), "").unwrap();
+        assert_eq!(
+            free_name(&folder, "README"),
+            Some(folder.join("README (1)"))
+        );
+        std::fs::remove_dir_all(&folder).unwrap();
     }
 }

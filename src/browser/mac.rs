@@ -22,6 +22,8 @@ use std::{
 static HANDLING: AtomicBool = AtomicBool::new(false);
 /// GPUI's own `sendEvent:`, called from the replacement.
 static SEND_EVENT: OnceLock<Imp> = OnceLock::new();
+/// GPUI's view's own `performKeyEquivalent:`, called from the replacement.
+static KEY_EQUIVALENT: OnceLock<Imp> = OnceLock::new();
 /// `NSEventTypeApplicationDefined`, and the subtype marking bareframe's own.
 const APPLICATION_DEFINED: u64 = 15;
 const BETWEEN_EVENTS: i16 = 0x6266;
@@ -62,6 +64,86 @@ unsafe extern "C-unwind" fn send_event(app: *mut AnyObject, sel: Sel, event: *mu
         }
     }
     HANDLING.store(was, Ordering::Relaxed);
+}
+
+/// AppKit offers keys with the function flag (arrows, Home, End, F-keys) to every view as
+/// shortcuts before the first responder gets them. GPUI's view took them even while a page
+/// had the keyboard, and passed them to the input method, which typed them into the page as
+/// characters: Left became a blank. With a page holding the keyboard, GPUI is offered only
+/// keys with Command or Control, as all of its shortcuts have; the rest reach the page.
+unsafe extern "C-unwind" fn key_equivalent(
+    view: *mut AnyObject,
+    sel: Sel,
+    event: *mut AnyObject,
+) -> Bool {
+    const COMMAND_OR_CONTROL: usize = (1 << 20) | (1 << 18);
+    // SAFETY: `view` is GPUI's view and `event` the NSEvent; the first responder is checked
+    // to be a view before asking whether it sits inside GPUI's.
+    let page_typing = unsafe {
+        let flags: usize = objc2::msg_send![event, modifierFlags];
+        let window: *mut AnyObject = objc2::msg_send![view, window];
+        flags & COMMAND_OR_CONTROL == 0 && !window.is_null() && {
+            let responder: *mut AnyObject = objc2::msg_send![window, firstResponder];
+            let is_view: Bool = objc2::msg_send![responder, isKindOfClass: class!(NSView)];
+            responder != view
+                && is_view.as_bool()
+                && objc2::msg_send![responder, isDescendantOf: view]
+        }
+    };
+    if page_typing {
+        return Bool::NO;
+    }
+    match KEY_EQUIVALENT.get() {
+        // SAFETY: `original` is the `performKeyEquivalent:` implementation this one replaced.
+        Some(&original) => unsafe {
+            let original: unsafe extern "C-unwind" fn(*mut AnyObject, Sel, *mut AnyObject) -> Bool =
+                std::mem::transmute(original);
+            original(view, sel, event)
+        },
+        None => Bool::NO,
+    }
+}
+
+/// The user's languages in order (System Settings › General › Language & Region), as tags
+/// such as `ko-KR`.
+pub fn preferred_languages() -> Vec<String> {
+    unsafe {
+        let languages: *mut AnyObject = objc2::msg_send![class!(NSLocale), preferredLanguages];
+        if languages.is_null() {
+            return Vec::new();
+        }
+        let count: usize = objc2::msg_send![languages, count];
+        (0..count)
+            .filter_map(|index| {
+                let language: *mut AnyObject = objc2::msg_send![languages, objectAtIndex: index];
+                let text: *const std::ffi::c_char = objc2::msg_send![language, UTF8String];
+                (!text.is_null()).then(|| {
+                    std::ffi::CStr::from_ptr(text)
+                        .to_string_lossy()
+                        .into_owned()
+                })
+            })
+            .collect()
+    }
+}
+
+/// Bounces the Downloads stack in the Dock for the download finished at `path`, as Safari's
+/// and Chrome's do.
+pub fn download_finished(path: &str) {
+    let Ok(path) = std::ffi::CString::new(path) else {
+        return;
+    };
+    unsafe {
+        let path: *mut AnyObject =
+            objc2::msg_send![class!(NSString), stringWithUTF8String: path.as_ptr()];
+        let name: *mut AnyObject = objc2::msg_send![
+            class!(NSString),
+            stringWithUTF8String: c"com.apple.DownloadFileFinished".as_ptr()
+        ];
+        let center: *mut AnyObject =
+            objc2::msg_send![class!(NSDistributedNotificationCenter), defaultCenter];
+        let _: () = objc2::msg_send![center, postNotificationName: name, object: path];
+    }
 }
 
 /// Chromium's message pump requires `NSApp` to implement `CrAppControlProtocol`. GPUI's
@@ -106,6 +188,12 @@ fn teach() -> Result<(), String> {
                 ffi::class_addProtocol(class, protocol);
             }
         }
+        // GPUI's view declares the method itself, so it is replaced in place.
+        let view = AnyClass::get(c"GPUIView").ok_or("GPUI's view class is missing")?;
+        let method = ffi::class_getInstanceMethod(view, sel!(performKeyEquivalent:));
+        let original = ffi::method_getImplementation(method).ok_or("no performKeyEquivalent:")?;
+        KEY_EQUIVALENT.set(original).map_err(|_| "taught twice")?;
+        ffi::method_setImplementation(method.cast_mut(), imp(key_equivalent as *const ()));
     }
     Ok(())
 }

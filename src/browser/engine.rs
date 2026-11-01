@@ -123,6 +123,8 @@ fn start_now(data: &Path, cx: &mut Gpui) -> Result<(), String> {
         eprintln!("bareframe: {}: {error}", data.display());
     }
     let data = CefString::from(data.to_string_lossy().as_ref());
+    // Chromium speaks English otherwise, and pages ask a Korean user which language to use.
+    let languages = mac::preferred_languages();
     let settings = Settings {
         // Pages run in Chromium's sandbox (see bareframe-helper).
         no_sandbox: 0,
@@ -130,6 +132,8 @@ fn start_now(data: &Path, cx: &mut Gpui) -> Result<(), String> {
         external_message_pump: 1,
         root_cache_path: data.clone(),
         cache_path: data,
+        locale: CefString::from(languages.first().map_or("en-US", String::as_str)),
+        accept_language_list: CefString::from(accept_languages(&languages).as_str()),
         ..Default::default()
     };
     let (requests, mut turns) = mpsc::unbounded();
@@ -178,6 +182,20 @@ fn start_now(data: &Path, cx: &mut Gpui) -> Result<(), String> {
     })
     .detach();
     Ok(())
+}
+
+/// What pages are told the user reads (Accept-Language): each of the user's languages, then
+/// its base language, as Chrome sends them ("ko-KR" also says "ko").
+fn accept_languages(preferred: &[String]) -> String {
+    let mut list: Vec<&str> = Vec::new();
+    for tag in preferred {
+        for language in [tag.as_str(), tag.split('-').next().unwrap_or(tag)] {
+            if !language.is_empty() && !list.contains(&language) {
+                list.push(language);
+            }
+        }
+    }
+    list.join(",")
 }
 
 wrap_app! {
@@ -490,4 +508,16 @@ fn shut_down() {
     drop(ENGINE.take());
     DOWN.set(true);
     shutdown();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::accept_languages;
+
+    #[test]
+    fn pages_hear_each_language_then_its_base() {
+        let preferred = ["ko-KR".to_owned(), "en-US".to_owned(), "en-GB".to_owned()];
+        assert_eq!(accept_languages(&preferred), "ko-KR,ko,en-US,en,en-GB");
+        assert_eq!(accept_languages(&[]), "");
+    }
 }
