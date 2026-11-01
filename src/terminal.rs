@@ -403,6 +403,8 @@ impl GhosttyAdapter {
 }
 
 /// The clipboard's files, or its image alone saved as a file, as shell words; none for text.
+/// A name with a control character (a newline, ESC) is left to Ghostty's own paste and its
+/// unsafe-paste check: typed as text here it could run a command or end a bracketed paste.
 fn pasted_paths(item: &ClipboardItem) -> Option<String> {
     let mut paths = Vec::new();
     for entry in item.entries() {
@@ -418,7 +420,8 @@ fn pasted_paths(item: &ClipboardItem) -> Option<String> {
         .iter()
         .map(|path| shell_escape(&path.to_string_lossy()))
         .collect();
-    (!words.is_empty()).then(|| words.join(" "))
+    let safe = !words.iter().any(|word| word.chars().any(char::is_control));
+    (safe && !words.is_empty()).then(|| words.join(" "))
 }
 
 /// A copy of a pasted image in the user's temporary folder, named after its contents.
@@ -739,6 +742,21 @@ mod tests {
             "/tmp/it\\'s\\ \\(1\\)\\&\\$x"
         );
         assert_eq!(shell_escape("/plain/path-1_a.png"), "/plain/path-1_a.png");
+    }
+
+    #[test]
+    fn file_names_with_control_characters_are_not_typed_as_paths() {
+        let item = |path: &str| ClipboardItem {
+            entries: vec![ClipboardEntry::ExternalPaths(gpui::ExternalPaths(
+                [PathBuf::from(path)].into_iter().collect(),
+            ))],
+        };
+        assert_eq!(
+            pasted_paths(&item("/tmp/a b.png")).as_deref(),
+            Some("/tmp/a\\ b.png")
+        );
+        assert_eq!(pasted_paths(&item("/tmp/x\nrm -rf ~\n.png")), None);
+        assert_eq!(pasted_paths(&item("/tmp/\u{1b}[201~.png")), None);
     }
 
     #[test]
