@@ -619,7 +619,8 @@ impl Workspace {
         tab.maximized = !tab.maximized && tab.layout.panes().len() > 1;
     }
 
-    /// Moves to the next or previous pane of the active tab in layout order, wrapping.
+    /// Moves to the next or previous pane of the active tab in layout order, wrapping. A
+    /// maximized tab stays maximized, now on that pane (as `focus_direction`).
     pub fn focus_cycle(&mut self, forward: bool) -> bool {
         let tab = &mut self.tabs[self.active_tab];
         let panes = tab.layout.panes();
@@ -636,17 +637,15 @@ impl Workspace {
             (index + count - 1) % count
         };
         tab.active_pane = panes[next];
-        tab.maximized = false;
         true
     }
 
+    /// Moves to the pane on `direction`'s side; a maximized tab shows that one maximized.
     pub fn focus_direction(&mut self, direction: Direction) -> bool {
         let Some(pane) = self.active().neighbor(direction) else {
             return false;
         };
-        let tab = &mut self.tabs[self.active_tab];
-        tab.active_pane = pane;
-        tab.maximized = false;
+        self.tabs[self.active_tab].active_pane = pane;
         true
     }
 
@@ -882,7 +881,7 @@ mod tests {
     }
 
     #[test]
-    fn maximize_ends_on_any_layout_or_focus_change() {
+    fn maximize_ends_on_layout_changes_and_follows_pane_moves() {
         let (mut ws, first) = Workspace::new();
         ws.toggle_maximized();
         assert!(!ws.active().maximized, "a lone pane has nothing to hide");
@@ -895,8 +894,14 @@ mod tests {
         assert!(!ws.active().maximized);
         ws.toggle_maximized();
         assert!(ws.focus_direction(Direction::Right));
-        assert!(!ws.active().maximized);
-        ws.toggle_maximized();
+        assert!(
+            ws.active().maximized,
+            "moving between panes keeps the tab maximized"
+        );
+        assert_eq!(ws.active().active_pane, right);
+        assert!(ws.focus_cycle(true));
+        assert!(ws.active().maximized);
+        assert_eq!(ws.active().active_pane, first);
         ws.split(Axis::Vertical);
         assert!(!ws.active().maximized);
         ws.toggle_maximized();
