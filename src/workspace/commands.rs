@@ -77,9 +77,24 @@ impl WorkspaceView {
                 }
             }))
             .on_action(cx.listener(|view, _: &NewTab, window, cx| view.new_tab(window, cx)))
-            .on_action(
-                cx.listener(|view, _: &NewBrowserTab, window, cx| view.new_browser_tab(window, cx)),
-            )
+            .on_action(cx.listener(|view, _: &NewBrowserTab, window, cx| {
+                view.new_browser_tab(false, window, cx)
+            }))
+            .on_action(cx.listener(|view, _: &NewPaneTab, window, cx| {
+                if view.settings.flag("pane-tabs") {
+                    view.new_pane_tab(window, cx)
+                }
+            }))
+            .on_action(cx.listener(|view, _: &PreviousPaneTab, window, cx| {
+                if view.model.cycle_pane_tab(false) {
+                    view.sync(window, cx)
+                }
+            }))
+            .on_action(cx.listener(|view, _: &NextPaneTab, window, cx| {
+                if view.model.cycle_pane_tab(true) {
+                    view.sync(window, cx)
+                }
+            }))
             .on_action(cx.listener(|_, _: &Minimize, window, _| window.minimize_window()))
             .on_action(cx.listener(|_, _: &ZoomWindow, window, _| window.zoom_window()))
             .on_action(

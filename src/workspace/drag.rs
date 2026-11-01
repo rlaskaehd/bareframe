@@ -3,6 +3,7 @@
 //! tab of its own).
 use super::{
     PaneView, WorkspaceView,
+    layout::HEADER_HEIGHT,
     sidebar::{tab_label, terminal_icon},
 };
 use crate::{
@@ -135,6 +136,7 @@ impl WorkspaceView {
         self.dragged_file = None;
         self.drop_target = None;
         self.page_drop = None;
+        self.stack_drop = None;
         if std::mem::take(&mut self.drag_frozen) {
             self.set_frozen(false, cx);
         }
@@ -149,17 +151,31 @@ impl WorkspaceView {
         pane: gpui::Div,
         cx: &mut Context<Self>,
     ) -> gpui::Div {
-        let zone = if self.page_drop.is_some_and(|(pane, _)| pane == id) {
-            Some(drop_zone(None, self.theme()))
-        } else {
-            self.drop_target
-                .filter(|(pane, _)| *pane == id)
-                .map(|(_, side)| drop_zone(Some(side), self.theme()))
-        };
+        let zone =
+            if self.page_drop.is_some_and(|(pane, _)| pane == id) || self.stack_drop == Some(id) {
+                Some(drop_zone(None, self.theme()))
+            } else {
+                self.drop_target
+                    .filter(|(pane, _)| *pane == id)
+                    .map(|(_, side)| drop_zone(Some(side), self.theme()))
+            };
         pane.on_drag_move(
             cx.listener(move |view, event: &DragMoveEvent<DraggedPane>, _, cx| {
-                let allowed = event.drag(cx).pane != id;
-                view.hover_drop(id, allowed, event.bounds, event.event.position, cx)
+                let (bounds, at) = (event.bounds, event.event.position);
+                let dragged = event.drag(cx).pane;
+                let allowed = dragged != id;
+                // Over the tabs, the pane joins them; elsewhere it goes beside.
+                let together = view
+                    .model
+                    .stack(id)
+                    .is_some_and(|stack| stack.contains(&dragged));
+                let into = allowed
+                    && !together
+                    && view.shows_pane_tabs(id)
+                    && bounds.contains(&at)
+                    && at.y < bounds.top() + px(HEADER_HEIGHT);
+                view.hover_stack(id, into, cx);
+                view.hover_drop(id, allowed && !into, bounds, at, cx)
             }),
         )
         .on_drag_move(
@@ -186,7 +202,13 @@ impl WorkspaceView {
             }),
         )
         .on_drop(cx.listener(move |view, dragged: &DraggedPane, window, cx| {
-            view.drop_pane(id, dragged.pane, window, cx)
+            if view.stack_drop == Some(id) {
+                view.end_drag(cx);
+                view.model.stack_onto(dragged.pane, id);
+                view.sync(window, cx);
+            } else {
+                view.drop_pane(id, dragged.pane, window, cx)
+            }
         }))
         .on_drop(cx.listener(move |view, dragged: &DraggedTab, window, cx| {
             view.drop_tabs(id, &dragged.tabs, window, cx)
@@ -243,6 +265,13 @@ impl WorkspaceView {
     }
 
     /// Follows a file over the middle of pane `id`'s page (`at`), or off it.
+    fn hover_stack(&mut self, id: PaneId, into: bool, cx: &mut Context<Self>) {
+        if into != (self.stack_drop == Some(id)) {
+            self.stack_drop = into.then_some(id);
+            cx.notify();
+        }
+    }
+
     fn hover_page(&mut self, id: PaneId, at: Option<Point<Pixels>>, cx: &mut Context<Self>) {
         let was = self.page_drop.is_some_and(|(pane, _)| pane == id);
         if at.is_some() || was {

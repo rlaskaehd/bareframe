@@ -128,6 +128,20 @@ impl Layout {
         self.insert(target, side, Self::Pane(new))
     }
 
+    /// Puts `new` in `old`'s place; `false` when `old` is absent.
+    pub(crate) fn replace(&mut self, old: PaneId, new: PaneId) -> bool {
+        match self {
+            Self::Pane(id) if *id == old => {
+                *id = new;
+                true
+            }
+            Self::Pane(_) => false,
+            Self::Split { first, second, .. } => {
+                first.replace(old, new) || second.replace(old, new)
+            }
+        }
+    }
+
     /// Replaces `target` with an even split holding it and `new` on its `side`.
     pub(crate) fn insert(&mut self, target: PaneId, side: Direction, new: Layout) -> bool {
         match self {

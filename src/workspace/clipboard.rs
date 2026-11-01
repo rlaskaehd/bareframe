@@ -138,11 +138,7 @@ impl WorkspaceView {
         // Who is asking, so a background tab can't pass off its request as the active one's.
         // The tab number is ours; the name and location come from the program, so they are
         // shown with nothing hidden.
-        let tab = self
-            .model
-            .tabs
-            .iter()
-            .position(|tab| tab.layout.panes().contains(&prompt.pane));
+        let tab = self.model.tab_of(prompt.pane);
         let source = tab.zip(self.pane(prompt.pane)).map(|(tab, pane)| {
             let name = visible(&pane.name(cx));
             match pane.location(cx) {

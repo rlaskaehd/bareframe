@@ -250,6 +250,16 @@ pub const DEFS: &[Def] = &[
     def(
         Appearance,
         "Tabs",
+        "pane-tabs",
+        "Tabs inside panes",
+        "Each pane gets a tab bar, as in cmux, holding terminals, browser pages and files, one shown at a time: + or Cmd+Option+T adds one, Cmd+Option+[ and ] switch, and a pane's header dropped on the bar joins it.",
+        Toggle,
+        "false",
+        App,
+    ),
+    def(
+        Appearance,
+        "Tabs",
         "preserve-tab-color",
         "Preserve active tab color for new tabs",
         "A new tab takes the color of the tab it was opened from.",

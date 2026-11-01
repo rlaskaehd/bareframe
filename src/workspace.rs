@@ -103,6 +103,8 @@ pub struct WorkspaceView {
     dragged_file: Option<(std::path::PathBuf, bool)>,
     /// The browser pane whose page a dragged file would go into, and where.
     page_drop: Option<(PaneId, gpui::Point<Pixels>)>,
+    /// A dragged pane over pane `id`'s tabs, to join them.
+    stack_drop: Option<PaneId>,
     menu: Option<ContextMenu>,
     clipboard_prompt: Option<clipboard::ClipboardPrompt>,
     /// A quit or window close waiting for answers about unsaved editor changes.
@@ -197,6 +199,7 @@ impl WorkspaceView {
             drag_frozen: false,
             dragged_file: None,
             page_drop: None,
+            stack_drop: None,
             menu: None,
             clipboard_prompt: None,
             pending_exit: None,
@@ -416,6 +419,14 @@ impl WorkspaceView {
         self.sync(window, cx);
     }
 
+    /// A terminal as a tab of the active pane, where the active terminal is.
+    fn new_pane_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let cwd = self.active_cwd(cx);
+        let pane = self.model.add_pane_tab();
+        self.open_pane(pane, cwd, window, cx);
+        self.sync(window, cx);
+    }
+
     fn new_tab_at(&mut self, cwd: std::path::PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         let pane = self.model.new_tab();
         self.open_pane(pane, cwd, window, cx);
@@ -487,8 +498,7 @@ impl WorkspaceView {
     fn close_tabs(&mut self, indices: &[usize], window: &mut Window, cx: &mut Context<Self>) {
         let panes: Vec<PaneId> = indices
             .iter()
-            .filter_map(|&index| self.model.tabs.get(index))
-            .flat_map(|tab| tab.layout.panes())
+            .flat_map(|&index| self.model.tab_panes(index))
             .collect();
         for pane in panes {
             self.close_pane(pane, window, cx);

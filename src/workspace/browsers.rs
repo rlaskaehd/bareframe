@@ -8,22 +8,34 @@ use bareframe_core::layout::{Axis, PaneId};
 use gpui::{AppContext, Context, Entity, Window};
 
 impl WorkspaceView {
-    /// File › New Browser Tab: a blank page waiting for an address.
-    pub(super) fn new_browser_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// File › New Browser Tab: a blank page waiting for an address, in a tab of its own or,
+    /// `in_pane`, as a tab of the active pane.
+    pub(super) fn new_browser_tab(
+        &mut self,
+        in_pane: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         // Chromium can't start inside a run loop pass, as a menu's action runs; it is tried
         // again once the menu is gone.
         if browser::engine::needs_start() && browser::in_run_loop() {
             let (view, mut cx) = (cx.entity().downgrade(), window.to_async(cx));
             let retried = browser::between_events(move || {
-                view.update_in(&mut cx, |view, window, cx| view.new_browser_tab(window, cx))
-                    .ok();
+                view.update_in(&mut cx, |view, window, cx| {
+                    view.new_browser_tab(in_pane, window, cx)
+                })
+                .ok();
             });
             if let Err(error) = retried {
                 eprintln!("bareframe: browser: {error}");
             }
             return;
         }
-        let id = self.model.new_tab();
+        let id = if in_pane {
+            self.model.add_pane_tab()
+        } else {
+            self.model.new_tab()
+        };
         self.insert_browser_pane(id, String::new(), window, cx);
         self.sync(window, cx);
     }

@@ -25,6 +25,8 @@ pub(super) enum MenuAction {
     CloseTabs(Vec<usize>),
     NewTab,
     NewBrowserTab,
+    /// A terminal, or with `true` a browser page, as a tab of the active pane.
+    NewPaneTab(bool),
     NewTabInGroup(GroupId),
     Ungroup(GroupId),
     CloseGroup(GroupId),
@@ -268,7 +270,9 @@ impl WorkspaceView {
             MenuAction::MoveGroup(group, up) => self.model.move_group(group, up),
             MenuAction::CloseTabs(tabs) => self.close_tabs(&tabs, window, cx),
             MenuAction::NewTab => return self.new_tab(window, cx),
-            MenuAction::NewBrowserTab => return self.new_browser_tab(window, cx),
+            MenuAction::NewBrowserTab => return self.new_browser_tab(false, window, cx),
+            MenuAction::NewPaneTab(false) => return self.new_pane_tab(window, cx),
+            MenuAction::NewPaneTab(true) => return self.new_browser_tab(true, window, cx),
             MenuAction::NewTabInGroup(group) => self.new_tab_in_group(group, window, cx),
             MenuAction::Ungroup(group) => {
                 let tabs = self.model.group_tabs(group);
@@ -344,6 +348,28 @@ impl WorkspaceView {
                 MenuAction::Split(Axis::Vertical),
             ),
             (maximize.into(), MenuAction::ToggleMaximize),
+        ];
+        let below = gpui::point(position.x - px(MENU_WIDTH - 12.0), position.y + px(12.0));
+        self.open_menu(below, items, cx);
+    }
+
+    /// The + of a pane's tabs: what the new tab holds.
+    pub(super) fn open_pane_tab_menu(
+        &mut self,
+        id: PaneId,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.model.focus(id) {
+            self.sync(window, cx);
+        }
+        let items = vec![
+            (
+                "New terminal tab\t⌥⌘T".into(),
+                MenuAction::NewPaneTab(false),
+            ),
+            ("New browser tab".into(), MenuAction::NewPaneTab(true)),
         ];
         let below = gpui::point(position.x - px(MENU_WIDTH - 12.0), position.y + px(12.0));
         self.open_menu(below, items, cx);

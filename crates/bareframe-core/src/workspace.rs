@@ -131,6 +131,10 @@ pub struct Workspace {
     pub tabs: Vec<Tab>,
     pub active_tab: usize,
     pub groups: Vec<Group>,
+    /// Panes sharing one place in a layout as tabs within it, as in cmux: the layout holds
+    /// the one shown and the rest wait behind it. Two or more panes each, in tab order; a
+    /// place's stack goes with it wherever the layout moves it.
+    pub stacks: Vec<Vec<PaneId>>,
     next_pane: u64,
     next_group: u64,
     next_tab: u64,
@@ -143,6 +147,7 @@ impl Workspace {
             tabs: vec![Tab::new(TabId(1), pane)],
             active_tab: 0,
             groups: Vec::new(),
+            stacks: Vec::new(),
             next_pane: 2,
             next_group: 1,
             next_tab: 2,
@@ -151,14 +156,29 @@ impl Workspace {
     }
 
     /// Rebuilds a saved workspace. `None` if it is inconsistent: no tabs, a pane used twice,
-    /// an active pane outside its tab, or a tab in a missing group.
-    pub fn from_parts(tabs: Vec<Tab>, groups: Vec<Group>, active_tab: usize) -> Option<Self> {
-        let panes: Vec<PaneId> = tabs.iter().flat_map(|tab| tab.layout.panes()).collect();
+    /// an active pane outside its tab, a tab in a missing group, or a stack not shown in
+    /// exactly one place.
+    pub fn from_parts(
+        tabs: Vec<Tab>,
+        groups: Vec<Group>,
+        active_tab: usize,
+        stacks: Vec<Vec<PaneId>>,
+    ) -> Option<Self> {
+        let shown: Vec<PaneId> = tabs.iter().flat_map(|tab| tab.layout.panes()).collect();
+        let hidden = stacks
+            .iter()
+            .flat_map(|stack| stack.iter().filter(|pane| !shown.contains(pane)));
+        let panes: Vec<PaneId> = shown.iter().copied().chain(hidden.copied()).collect();
         let mut unique = panes.clone();
         unique.sort();
         unique.dedup();
+        let stacked: usize = stacks.iter().map(Vec::len).sum();
         let consistent = !tabs.is_empty()
             && unique.len() == panes.len()
+            && unique.len() + stacks.len() == shown.len() + stacked
+            && stacks.iter().all(|stack| {
+                stack.len() > 1 && stack.iter().filter(|pane| shown.contains(pane)).count() == 1
+            })
             && groups.iter().all(|group| group.color < GROUP_COLORS)
             && tabs.iter().all(|tab| {
                 tab.layout.contains(tab.active_pane)
@@ -178,6 +198,7 @@ impl Workspace {
             active_tab: active_tab.min(tabs.len() - 1),
             tabs,
             groups,
+            stacks,
         };
         workspace.normalize();
         Some(workspace)
@@ -301,8 +322,110 @@ impl Workspace {
         self.active().active_pane
     }
 
+    /// The tab holding `pane`, shown or waiting in its place's stack.
     pub fn tab_of(&self, pane: PaneId) -> Option<usize> {
-        self.tabs.iter().position(|tab| tab.layout.contains(pane))
+        let shown = self.shown(pane);
+        self.tabs.iter().position(|tab| tab.layout.contains(shown))
+    }
+
+    /// The panes sharing `pane`'s place, in tab order, if it has more than one.
+    pub fn stack(&self, pane: PaneId) -> Option<&[PaneId]> {
+        self.stacks
+            .iter()
+            .find(|stack| stack.contains(&pane))
+            .map(Vec::as_slice)
+    }
+
+    /// The pane shown in `pane`'s place: `pane` itself unless it waits in a stack.
+    fn shown(&self, pane: PaneId) -> PaneId {
+        self.stack(pane)
+            .and_then(|stack| {
+                stack
+                    .iter()
+                    .copied()
+                    .find(|member| self.tabs.iter().any(|tab| tab.layout.contains(*member)))
+            })
+            .unwrap_or(pane)
+    }
+
+    /// Every pane of tab `index`, those waiting in stacks included, in layout and tab order.
+    pub fn tab_panes(&self, index: usize) -> Vec<PaneId> {
+        self.tabs.get(index).map_or_else(Vec::new, |tab| {
+            tab.layout
+                .panes()
+                .into_iter()
+                .flat_map(|pane| self.stack(pane).map_or_else(|| vec![pane], <[_]>::to_vec))
+                .collect()
+        })
+    }
+
+    /// A new pane in the active pane's place, as a tab after it, shown and focused.
+    pub fn add_pane_tab(&mut self) -> PaneId {
+        let pane = self.allocate();
+        let shown = self.active_pane();
+        match self.stacks.iter_mut().find(|stack| stack.contains(&shown)) {
+            Some(stack) => {
+                let at = stack
+                    .iter()
+                    .position(|member| *member == shown)
+                    .unwrap_or(0);
+                stack.insert(at + 1, pane);
+            }
+            None => self.stacks.push(vec![shown, pane]),
+        }
+        self.focus(pane);
+        pane
+    }
+
+    /// Shows the next or previous tab of the active pane's place, wrapping.
+    pub fn cycle_pane_tab(&mut self, forward: bool) -> bool {
+        let shown = self.active_pane();
+        let Some(stack) = self.stack(shown) else {
+            return false;
+        };
+        let at = stack
+            .iter()
+            .position(|member| *member == shown)
+            .unwrap_or(0);
+        let next = if forward {
+            stack[(at + 1) % stack.len()]
+        } else {
+            stack[(at + stack.len() - 1) % stack.len()]
+        };
+        self.focus(next)
+    }
+
+    /// Drag and drop onto a pane's tabs: `pane`, with any tabs of its place, joins
+    /// `target`'s place after it, shown and focused. A tab left without panes goes.
+    pub fn stack_onto(&mut self, pane: PaneId, target: PaneId) -> bool {
+        let (Some(from), Some(_)) = (self.tab_of(pane), self.tab_of(target)) else {
+            return false;
+        };
+        let moving = self.stack(pane).map_or_else(|| vec![pane], <[_]>::to_vec);
+        if moving.contains(&target) {
+            return false;
+        }
+        let place = self.shown(pane);
+        if !self.tabs[from].remove_pane(place) {
+            self.take(&[from]);
+        }
+        self.stacks.retain(|stack| !stack.contains(&pane));
+        let index = match self.stacks.iter().position(|stack| stack.contains(&target)) {
+            Some(index) => index,
+            None => {
+                self.stacks.push(vec![target]);
+                self.stacks.len() - 1
+            }
+        };
+        let stack = &mut self.stacks[index];
+        let at = stack
+            .iter()
+            .position(|member| *member == target)
+            .unwrap_or(0)
+            + 1;
+        stack.splice(at..at, moving);
+        self.clear_selection();
+        self.focus(pane)
     }
 
     pub fn group(&self, id: GroupId) -> Option<&Group> {
@@ -338,6 +461,21 @@ impl Workspace {
 
     pub fn close(&mut self, pane: PaneId) -> Option<Closed> {
         let index = self.tab_of(pane)?;
+        // A tab of a place: the next one (else the one before) takes its place if it showed.
+        if let Some(at) = self.stacks.iter().position(|stack| stack.contains(&pane)) {
+            let stack = &mut self.stacks[at];
+            let gone = stack.iter().position(|member| *member == pane).unwrap_or(0);
+            stack.remove(gone);
+            let next = stack[gone.min(stack.len() - 1)];
+            if stack.len() < 2 {
+                self.stacks.remove(at);
+            }
+            let tab = &mut self.tabs[index];
+            if tab.layout.replace(pane, next) && tab.active_pane == pane {
+                tab.active_pane = next;
+            }
+            return Some(Closed::Pane);
+        }
         if self.tabs[index].remove_pane(pane) {
             return Some(Closed::Pane);
         }
@@ -602,13 +740,17 @@ impl Workspace {
         };
     }
 
+    /// Focuses `pane`, showing it in its place if it waited behind another tab there. A
+    /// maximized place stays maximized on any of its tabs.
     pub fn focus(&mut self, pane: PaneId) -> bool {
         let Some(index) = self.tab_of(pane) else {
             return false;
         };
+        let shown = self.shown(pane);
         self.active_tab = index;
         let tab = &mut self.tabs[index];
-        tab.maximized &= tab.active_pane == pane;
+        tab.maximized &= tab.active_pane == shown;
+        tab.layout.replace(shown, pane);
         tab.active_pane = pane;
         true
     }
@@ -736,8 +878,9 @@ impl Workspace {
         placed
     }
 
+    /// Every pane, those waiting in stacks included.
     pub fn panes(&self) -> impl Iterator<Item = PaneId> + '_ {
-        self.tabs.iter().flat_map(|tab| tab.layout.panes())
+        (0..self.tabs.len()).flat_map(|index| self.tab_panes(index))
     }
 }
 
@@ -878,6 +1021,63 @@ mod tests {
             assert!((width - 1.0 / 3.0).abs() < 1e-4, "{width}");
         }
         let _ = second;
+    }
+
+    #[test]
+    fn tabs_in_a_pane_share_its_place_and_close_into_each_other() {
+        let (mut ws, first) = Workspace::new();
+        let right = ws.split(Axis::Horizontal);
+        let second = ws.add_pane_tab();
+        assert_eq!(
+            ws.active().layout.panes(),
+            [first, second],
+            "the new tab shows in place"
+        );
+        assert_eq!(ws.stack(right), Some(&[right, second][..]));
+        assert_eq!(
+            ws.tab_of(right),
+            Some(0),
+            "a waiting tab still belongs to its tab"
+        );
+        assert_eq!(ws.panes().collect::<Vec<_>>(), [first, right, second]);
+        assert!(ws.focus(right));
+        assert_eq!(ws.active().layout.panes(), [first, right]);
+        assert!(ws.cycle_pane_tab(true));
+        assert_eq!(ws.active_pane(), second);
+        assert!(
+            !ws.focus_direction(Direction::Right),
+            "one place, not two panes"
+        );
+        // Closing the shown tab shows its neighbour; one left is a plain pane again.
+        assert_eq!(ws.close(second), Some(Closed::Pane));
+        assert_eq!(ws.active().layout.panes(), [first, right]);
+        assert_eq!(ws.active_pane(), right);
+        assert!(ws.stacks.is_empty());
+        // A waiting tab closes without disturbing the one shown.
+        let third = ws.add_pane_tab();
+        ws.focus(right);
+        assert_eq!(ws.close(third), Some(Closed::Pane));
+        assert_eq!(ws.active().layout.panes(), [first, right]);
+        assert!(ws.stacks.is_empty());
+    }
+
+    #[test]
+    fn a_pane_dropped_on_another_joins_its_tabs() {
+        let (mut ws, first) = Workspace::new();
+        let other = ws.new_tab();
+        let beside = ws.split(Axis::Horizontal);
+        // A pane alone in its tab takes the tab with it.
+        assert!(ws.stack_onto(first, beside));
+        assert_eq!(ws.tabs.len(), 1);
+        assert_eq!(ws.active().layout.panes(), [other, first]);
+        assert_eq!(ws.stack(first), Some(&[beside, first][..]));
+        assert_eq!(ws.active_pane(), first);
+        // A place's own tabs come along, after the target.
+        let lone = ws.split(Axis::Vertical);
+        assert!(ws.stack_onto(first, other));
+        assert_eq!(ws.active().layout.panes(), [first, lone]);
+        assert_eq!(ws.stack(other), Some(&[other, beside, first][..]));
+        assert!(!ws.stack_onto(beside, first), "already together");
     }
 
     #[test]

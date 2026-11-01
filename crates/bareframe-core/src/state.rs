@@ -98,6 +98,11 @@ pub fn encode(state: &SavedState) -> String {
             layout,
         ));
     }
+    // A place's tabs, in order: `stack 3 7`.
+    for stack in &state.workspace.stacks {
+        let ids: Vec<String> = stack.iter().map(|pane| pane.0.to_string()).collect();
+        out.push(format!("stack {}", ids.join(" ")));
+    }
     for (id, pane) in &state.panes {
         out.push(match pane {
             SavedPane::Terminal { cwd } => {
@@ -142,6 +147,7 @@ pub fn decode(input: &str) -> Result<SavedState, String> {
     let (mut review_open, mut review_width) = (false, 520.0);
     let mut active = 0;
     let (mut groups, mut tabs, mut panes) = (Vec::new(), Vec::new(), Vec::new());
+    let mut stacks = Vec::new();
     for (number, line) in lines {
         let fail = |what: &str| format!("line {}: {what}", number + 1);
         let mut words = line.split(' ');
@@ -196,6 +202,11 @@ pub fn decode(input: &str) -> Result<SavedState, String> {
                 tab.title = title;
                 tabs.push(tab);
             }
+            "stack" => {
+                let stack: Option<Vec<PaneId>> =
+                    words.by_ref().map(|id| number_of(id).map(PaneId)).collect();
+                stacks.push(stack.ok_or_else(|| fail("bad stack"))?);
+            }
             "pane" => {
                 let id = PaneId(number_of(next()?).ok_or_else(|| fail("bad pane id"))?);
                 let pane = match next()? {
@@ -233,7 +244,7 @@ pub fn decode(input: &str) -> Result<SavedState, String> {
             other => return Err(fail(&format!("unknown record `{other}`"))),
         }
     }
-    let workspace = Workspace::from_parts(tabs, groups, active)
+    let workspace = Workspace::from_parts(tabs, groups, active, stacks)
         .ok_or_else(|| "inconsistent tabs or groups".to_owned())?;
     Ok(SavedState {
         workspace,
@@ -442,6 +453,29 @@ mod tests {
         let state = sample();
         let text = encode(&state);
         assert_eq!(decode(&text), Ok(state));
+    }
+
+    #[test]
+    fn tabs_inside_a_pane_read_back_and_bad_stacks_are_rejected() {
+        let tab = "tab 1 - 0 - 0 3 - h0.5 p1 p3";
+        let text = format!("{HEADER}\n{tab}\nstack 3 2 4\n");
+        let state = decode(&text).unwrap();
+        assert_eq!(
+            state.workspace.stacks,
+            vec![vec![PaneId(3), PaneId(2), PaneId(4)]]
+        );
+        assert_eq!(state.workspace.panes().count(), 4);
+        assert_eq!(decode(&encode(&state)), Ok(state.clone()));
+        let mut workspace = state.workspace;
+        let fresh = workspace.new_tab();
+        assert!(fresh.0 > 4, "a new pane id is past the waiting tabs' ids");
+        // A stack shown nowhere, shown twice, alone, or reusing a pane is not a place's tabs.
+        for stack in ["stack 2 4", "stack 1 3", "stack 3", "stack 3 2\nstack 1 2"] {
+            assert!(
+                decode(&format!("{HEADER}\n{tab}\n{stack}\n")).is_err(),
+                "{stack}"
+            );
+        }
     }
 
     #[test]

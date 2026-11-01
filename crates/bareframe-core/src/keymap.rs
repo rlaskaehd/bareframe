@@ -70,6 +70,19 @@ pub const ACTIONS: &[Action] = &[
         &["cmd+bracket_right"],
         Window,
     ),
+    action("new_pane_tab", "New tab in pane", &["cmd+alt+t"], Window),
+    action(
+        "goto_pane_tab:previous",
+        "Previous tab in pane",
+        &["cmd+alt+bracket_left"],
+        Window,
+    ),
+    action(
+        "goto_pane_tab:next",
+        "Next tab in pane",
+        &["cmd+alt+bracket_right"],
+        Window,
+    ),
     action(
         "goto_split:left",
         "Focus pane on the left",

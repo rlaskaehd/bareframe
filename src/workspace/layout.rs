@@ -7,22 +7,123 @@ use crate::{
 use bareframe_core::layout::{Axis, Layout, PaneId};
 use gpui::{AnyElement, Context, CursorStyle, MouseButton, canvas, div, prelude::*, px, relative};
 
+/// A pane header's height: a drag over it joins the pane's tabs (see `pane_drop_target`).
+pub(super) const HEADER_HEIGHT: f32 = 28.0;
+
 impl WorkspaceView {
-    /// Shown once a tab is split, as in Warp: the title, a menu and a close button, with a
+    /// Whether pane `id` shows tabs: with Settings › Tabs inside panes, or while it holds
+    /// more than one pane either way.
+    pub(super) fn shows_pane_tabs(&self, id: PaneId) -> bool {
+        self.settings.flag("pane-tabs") || self.model.stack(id).is_some()
+    }
+
+    /// The tabs of the panes sharing pane `id`'s place, as cmux shows them: the shown one lit,
+    /// each with its close button, then + for another and the pane's menu. The bar drags the
+    /// whole place, as the plain header does.
+    fn render_pane_tabs(&self, id: PaneId, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.theme();
+        let focused = id == self.model.active_pane();
+        let members = self.model.stack(id).map_or_else(|| vec![id], <[_]>::to_vec);
+        let tabs: Vec<AnyElement> = members
+            .into_iter()
+            .map(|member| {
+                let shown = member == id;
+                let key = member.0 as usize;
+                div()
+                    .id(("pane-tab", key))
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .h_full()
+                    .min_w(px(72.0))
+                    .max_w(px(200.0))
+                    .pl_3()
+                    .pr_1()
+                    .border_r_1()
+                    .border_color(hsla(theme.border))
+                    .when(shown, |this| this.bg(hsla(theme.tab_active)))
+                    .when(!shown, |this| {
+                        this.hover(|this| this.bg(hsla(theme.tab_hover)))
+                    })
+                    .text_color(hsla(if shown && focused {
+                        theme.text
+                    } else {
+                        theme.text_muted
+                    }))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .child(self.pane_title(member, cx)),
+                    )
+                    .child(
+                        widgets::icon_button(theme, ("pane-tab-close", key), "×").on_click(
+                            cx.listener(move |view, _, window, cx| {
+                                cx.stop_propagation();
+                                view.close_pane(member, window, cx)
+                            }),
+                        ),
+                    )
+                    .on_click(cx.listener(move |view, _, window, cx| {
+                        if view.model.focus(member) {
+                            view.sync(window, cx);
+                        }
+                    }))
+                    .into_any_element()
+            })
+            .collect();
+        let key = id.0 as usize;
+        self.pane_header_base(id, cx)
+            .child(
+                div()
+                    .flex()
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .overflow_hidden()
+                    .children(tabs),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .px(px(6.0))
+                    .child(
+                        widgets::icon_button(theme, ("pane-tab-new", key), "+").on_click(
+                            cx.listener(move |view, event: &gpui::ClickEvent, window, cx| {
+                                cx.stop_propagation();
+                                view.open_pane_tab_menu(id, event.position(), window, cx)
+                            }),
+                        ),
+                    )
+                    .child(
+                        widgets::icon_button(theme, ("pane-menu", key), "⋮").on_click(cx.listener(
+                            move |view, event: &gpui::ClickEvent, window, cx| {
+                                cx.stop_propagation();
+                                view.open_pane_menu(id, event.position(), window, cx)
+                            },
+                        )),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    /// What every pane header shares: dragging it moves the pane, a line under it, and a
     /// corner mark on the focused pane.
-    fn render_pane_header(&self, id: PaneId, cx: &mut Context<Self>) -> AnyElement {
+    fn pane_header_base(&self, id: PaneId, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
         let theme = self.theme();
         let active = id == self.model.active_pane();
-        let title = self.pane_title(id, cx);
-        let key = id.0 as usize;
         let dragged = DraggedPane {
             pane: id,
-            title: title.clone(),
+            title: self.pane_title(id, cx),
             theme,
         };
         let weak = cx.entity().downgrade();
         div()
-            .id(("pane-header", key))
+            .id(("pane-header", id.0 as usize))
             .on_drag(dragged, move |dragged, _, _, cx| {
                 if let Err(error) = weak.update(cx, |view, cx| view.start_drag(Vec::new(), cx)) {
                     eprintln!("bareframe: starting a pane drag: {error}");
@@ -33,14 +134,11 @@ impl WorkspaceView {
             .flex_none()
             .flex()
             .items_center()
-            .justify_center()
-            .h(px(28.0))
-            .px(px(56.0))
+            .h(px(HEADER_HEIGHT))
             .border_b_1()
             .border_color(hsla(theme.border))
             .font_family(theme::UI_FONT)
             .text_size(px(12.0))
-            .text_color(hsla(if active { theme.text } else { theme.text_muted }))
             .when(active, |this| {
                 this.child(
                     gpui::svg()
@@ -52,6 +150,19 @@ impl WorkspaceView {
                         .text_color(hsla(theme.accent)),
                 )
             })
+    }
+
+    /// Shown once a tab is split, as in Warp: the title, a menu and a close button, with a
+    /// corner mark on the focused pane.
+    fn render_pane_header(&self, id: PaneId, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.theme();
+        let active = id == self.model.active_pane();
+        let title = self.pane_title(id, cx);
+        let key = id.0 as usize;
+        self.pane_header_base(id, cx)
+            .justify_center()
+            .px(px(56.0))
+            .text_color(hsla(if active { theme.text } else { theme.text_muted }))
             .child(div().min_w_0().truncate().child(title))
             .child(
                 div()
@@ -93,6 +204,7 @@ impl WorkspaceView {
             Layout::Pane(id) => {
                 let id = *id;
                 let split = self.model.active().layout.panes().len() > 1;
+                let tabs = self.shows_pane_tabs(id);
                 let view = self.pane(id).map(PaneView::view);
                 let terminal = self.terminal(id).is_some();
                 let pane = div()
@@ -110,7 +222,10 @@ impl WorkspaceView {
                             }
                         }),
                     )
-                    .when(split, |this| this.child(self.render_pane_header(id, cx)))
+                    .when(tabs, |this| this.child(self.render_pane_tabs(id, cx)))
+                    .when(split && !tabs, |this| {
+                        this.child(self.render_pane_header(id, cx))
+                    })
                     .child(
                         div()
                             .flex_1()
