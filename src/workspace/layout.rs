@@ -29,8 +29,34 @@ impl WorkspaceView {
             .map(|member| {
                 let shown = member == id;
                 let key = member.0 as usize;
+                let title = self.pane_title(member, cx);
+                let dragged = DraggedPane {
+                    pane: member,
+                    title: title.clone(),
+                    theme,
+                    tab: true,
+                };
+                let weak = cx.entity().downgrade();
                 div()
                     .id(("pane-tab", key))
+                    // One tab drags alone: to a new place among these tabs, another pane's
+                    // tabs, beside a pane, or the sidebar.
+                    .on_drag(dragged, move |dragged, _, _, cx| {
+                        if let Err(error) =
+                            weak.update(cx, |view, cx| view.start_drag(Vec::new(), cx))
+                        {
+                            eprintln!("bareframe: starting a tab drag: {error}");
+                        }
+                        cx.new(|_| dragged.clone())
+                    })
+                    .drag_over::<DraggedPane>(move |style, _, _, _| {
+                        style.border_l_2().border_color(hsla(theme.accent))
+                    })
+                    .on_drop(cx.listener(move |view, dragged: &DraggedPane, window, cx| {
+                        view.end_drag(cx);
+                        view.put_dragged(dragged, id, Some(member));
+                        view.sync(window, cx);
+                    }))
                     .flex()
                     .items_center()
                     .gap_1()
@@ -50,13 +76,7 @@ impl WorkspaceView {
                     } else {
                         theme.text_muted
                     }))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .truncate()
-                            .child(self.pane_title(member, cx)),
-                    )
+                    .child(div().flex_1().min_w_0().truncate().child(title))
                     .child(
                         widgets::icon_button(theme, ("pane-tab-close", key), "×").on_click(
                             cx.listener(move |view, _, window, cx| {
@@ -120,6 +140,7 @@ impl WorkspaceView {
             pane: id,
             title: self.pane_title(id, cx),
             theme,
+            tab: false,
         };
         let weak = cx.entity().downgrade();
         div()

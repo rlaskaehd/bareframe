@@ -458,19 +458,7 @@ impl Workspace {
 
     pub fn close(&mut self, pane: PaneId) -> Option<Closed> {
         let index = self.tab_of(pane)?;
-        // A tab of a place: the next one (else the one before) takes its place if it showed.
-        if let Some(at) = self.stacks.iter().position(|stack| stack.contains(&pane)) {
-            let stack = &mut self.stacks[at];
-            let gone = index_in(stack, pane);
-            stack.remove(gone);
-            let next = stack[gone.min(stack.len() - 1)];
-            if stack.len() < 2 {
-                self.stacks.remove(at);
-            }
-            let tab = &mut self.tabs[index];
-            if tab.layout.replace(pane, next) && tab.active_pane == pane {
-                tab.active_pane = next;
-            }
+        if self.unstack(pane) {
             return Some(Closed::Pane);
         }
         if self.tabs[index].remove_pane(pane) {
@@ -882,6 +870,109 @@ impl Workspace {
 }
 
 /// Where `pane` is in `stack`, the first place if it isn't there.
+impl Workspace {
+    /// Takes `pane` out of its place's tabs: the next tab (else the one before) shows there if
+    /// it showed, and a place left with one is a plain pane again. `false` if it had no tabs.
+    fn unstack(&mut self, pane: PaneId) -> bool {
+        let Some(at) = self.stacks.iter().position(|stack| stack.contains(&pane)) else {
+            return false;
+        };
+        let stack = &mut self.stacks[at];
+        let gone = index_in(stack, pane);
+        stack.remove(gone);
+        let next = stack[gone.min(stack.len() - 1)];
+        if stack.len() < 2 {
+            self.stacks.remove(at);
+        }
+        if let Some(tab) = self.tabs.iter_mut().find(|tab| tab.layout.contains(pane)) {
+            tab.layout.replace(pane, next);
+            if tab.active_pane == pane {
+                tab.active_pane = next;
+            }
+        }
+        true
+    }
+
+    /// Drag and drop of one tab of a place to `side` of `target`; its own place counts as
+    /// the target too, so a tab dragged beside the tabs it left splits off. A place with one
+    /// tab moves as `move_pane` moves it.
+    pub fn move_pane_tab(&mut self, pane: PaneId, target: PaneId, side: Direction) -> bool {
+        let Some(stack) = self.stack(pane) else {
+            return self.move_pane(pane, target, side);
+        };
+        let target = match stack.iter().find(|member| **member != pane) {
+            Some(&rest) if stack.contains(&target) => rest,
+            _ => target,
+        };
+        if self.tab_of(target).is_none() {
+            return false;
+        }
+        self.unstack(pane);
+        self.place(self.shown(target), side, Layout::Pane(pane), pane)
+    }
+
+    /// Drag and drop of one tab onto the sidebar: it leaves its place for a new tab before
+    /// index `to` in `group`. A place with one tab moves as `detach_pane` moves it.
+    pub fn detach_pane_tab(&mut self, pane: PaneId, to: usize, group: Option<GroupId>) -> bool {
+        if self.stack(pane).is_none() {
+            return self.detach_pane(pane, to, group);
+        }
+        if to > self.tabs.len() {
+            return false;
+        }
+        self.unstack(pane);
+        let mut tab = self.fresh_tab(pane);
+        tab.group = group.filter(|id| self.group(*id).is_some());
+        self.tabs.insert(to, tab);
+        self.active_tab = to;
+        self.clear_selection();
+        self.normalize();
+        true
+    }
+
+    /// Drag and drop of one tab onto `place`'s tabs, before `before` or last: a new order
+    /// among its own tabs, or a move into another place (a lone pane's tab goes with it).
+    pub fn put_tab(&mut self, pane: PaneId, place: PaneId, before: Option<PaneId>) -> bool {
+        let (Some(from), Some(_)) = (self.tab_of(pane), self.tab_of(place)) else {
+            return false;
+        };
+        let together =
+            pane == place || self.stack(pane).is_some_and(|stack| stack.contains(&place));
+        if together {
+            // Among its own tabs: only the order changes.
+            let Some(stack) = self.stacks.iter_mut().find(|stack| stack.contains(&pane)) else {
+                return false;
+            };
+            stack.retain(|member| *member != pane);
+            let at = before
+                .filter(|before| stack.contains(before))
+                .map_or(stack.len(), |before| index_in(stack, before));
+            stack.insert(at, pane);
+            return self.focus(pane);
+        }
+        if !self.unstack(pane) && !self.tabs[from].remove_pane(pane) {
+            self.take(&[from]);
+        }
+        let shown = self.shown(place);
+        let index = match self.stacks.iter().position(|stack| stack.contains(&shown)) {
+            Some(index) => index,
+            None => {
+                self.stacks.push(vec![shown]);
+                self.stacks.len() - 1
+            }
+        };
+        let stack = &mut self.stacks[index];
+        let at = before
+            .filter(|before| stack.contains(before))
+            .map_or(stack.len(), |before| index_in(stack, before));
+        stack.insert(at, pane);
+        self.active_tab = self.tab_of(shown).unwrap_or(0);
+        self.clear_selection();
+        self.normalize();
+        self.focus(pane)
+    }
+}
+
 fn index_in(stack: &[PaneId], pane: PaneId) -> usize {
     stack.iter().position(|member| *member == pane).unwrap_or(0)
 }
@@ -1080,6 +1171,36 @@ mod tests {
         assert_eq!(ws.active().layout.panes(), [first, lone]);
         assert_eq!(ws.stack(other), Some(&[other, beside, first][..]));
         assert!(!ws.stack_onto(beside, first), "already together");
+    }
+
+    #[test]
+    fn one_tab_moves_alone_its_order_out_and_into_other_places() {
+        let (mut ws, a) = Workspace::new();
+        let b = ws.add_pane_tab();
+        let c = ws.add_pane_tab();
+        assert_eq!(ws.stack(a), Some(&[a, b, c][..]));
+        // A new order among its own tabs.
+        assert!(ws.put_tab(c, a, Some(a)));
+        assert_eq!(ws.stack(a), Some(&[c, a, b][..]));
+        assert!(ws.put_tab(c, a, None));
+        assert_eq!(ws.stack(a), Some(&[a, b, c][..]));
+        assert_eq!(ws.active().layout.panes(), [c], "the moved tab shows");
+        // Beside its own tabs: it splits off, and the place shows the next tab.
+        assert!(ws.move_pane_tab(c, a, Direction::Right));
+        assert_eq!(ws.active().layout.panes().len(), 2);
+        assert_eq!(ws.stack(a), Some(&[a, b][..]));
+        assert_eq!(ws.stack(c), None);
+        assert_eq!(ws.active_pane(), c);
+        // A lone pane put among another place's tabs leaves its own place.
+        assert!(ws.put_tab(c, b, Some(b)));
+        assert_eq!(ws.stack(a), Some(&[a, c, b][..]));
+        assert_eq!(ws.active().layout.panes(), [c]);
+        // Onto the sidebar: a tab of its own.
+        assert!(ws.detach_pane_tab(a, 1, None));
+        assert_eq!(ws.tabs.len(), 2);
+        assert_eq!(ws.active().layout.panes(), [a]);
+        assert_eq!(ws.stack(c), Some(&[c, b][..]));
+        assert!(!ws.put_tab(a, a, None), "a lone pane onto itself");
     }
 
     #[test]

@@ -26,6 +26,9 @@ pub(super) struct DraggedPane {
     pub(super) pane: PaneId,
     pub(super) title: String,
     pub(super) theme: &'static Theme,
+    /// One tab of a place, taken from its tab bar, rather than the place with all its tabs
+    /// (the header or the bar's empty part).
+    pub(super) tab: bool,
 }
 
 impl Render for DraggedPane {
@@ -162,15 +165,18 @@ impl WorkspaceView {
         pane.on_drag_move(
             cx.listener(move |view, event: &DragMoveEvent<DraggedPane>, _, cx| {
                 let (bounds, at) = (event.bounds, event.event.position);
-                let dragged = event.drag(cx).pane;
-                let allowed = dragged != id;
+                let drag = event.drag(cx);
+                let stack = view.model.stack(id);
+                let own = drag.pane == id || stack.is_some_and(|stack| stack.contains(&drag.pane));
+                // A place can't go beside or into itself; one of its tabs can leave the others
+                // for either (to the end of the bar, or split off).
+                let allowed = if drag.tab {
+                    !own || stack.is_some()
+                } else {
+                    !own
+                };
                 // Over the tabs, the pane joins them; elsewhere it goes beside.
-                let together = view
-                    .model
-                    .stack(id)
-                    .is_some_and(|stack| stack.contains(&dragged));
                 let into = allowed
-                    && !together
                     && view.shows_pane_tabs(id)
                     && bounds.contains(&at)
                     && at.y < bounds.top() + px(HEADER_HEIGHT);
@@ -204,10 +210,10 @@ impl WorkspaceView {
         .on_drop(cx.listener(move |view, dragged: &DraggedPane, window, cx| {
             if view.stack_drop == Some(id) {
                 view.end_drag(cx);
-                view.model.stack_onto(dragged.pane, id);
+                view.put_dragged(dragged, id, None);
                 view.sync(window, cx);
             } else {
-                view.drop_pane(id, dragged.pane, window, cx)
+                view.drop_pane(id, dragged, window, cx)
             }
         }))
         .on_drop(cx.listener(move |view, dragged: &DraggedTab, window, cx| {
@@ -306,11 +312,38 @@ impl WorkspaceView {
         side
     }
 
-    fn drop_pane(&mut self, id: PaneId, pane: PaneId, window: &mut Window, cx: &mut Context<Self>) {
+    fn drop_pane(
+        &mut self,
+        id: PaneId,
+        dragged: &DraggedPane,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(side) = self.take_drop(id, cx) {
-            self.model.move_pane(pane, id, side);
+            if dragged.tab {
+                self.model.move_pane_tab(dragged.pane, id, side);
+            } else {
+                self.model.move_pane(dragged.pane, id, side);
+            }
         }
         self.sync(window, cx);
+    }
+
+    /// A pane dropped on `place`'s tabs, before `before` or last: one tab moves alone, a
+    /// whole place brings its tabs.
+    pub(super) fn put_dragged(
+        &mut self,
+        dragged: &DraggedPane,
+        place: PaneId,
+        before: Option<PaneId>,
+    ) {
+        if dragged.tab {
+            if before != Some(dragged.pane) {
+                self.model.put_tab(dragged.pane, place, before);
+            }
+        } else {
+            self.model.stack_onto(dragged.pane, before.unwrap_or(place));
+        }
     }
 
     fn drop_tabs(
@@ -355,7 +388,11 @@ impl WorkspaceView {
         cx: &mut Context<Self>,
     ) {
         self.end_drag(cx);
-        self.model.detach_pane(dragged.pane, to, group);
+        if dragged.tab {
+            self.model.detach_pane_tab(dragged.pane, to, group);
+        } else {
+            self.model.detach_pane(dragged.pane, to, group);
+        }
         self.sync(window, cx);
     }
 }
