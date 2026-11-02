@@ -869,7 +869,6 @@ impl Workspace {
     }
 }
 
-/// Where `pane` is in `stack`, the first place if it isn't there.
 impl Workspace {
     /// Takes `pane` out of its place's tabs: the next tab (else the one before) shows there if
     /// it showed, and a place left with one is a plain pane again. `false` if it had no tabs.
@@ -973,6 +972,7 @@ impl Workspace {
     }
 }
 
+/// Where `pane` is in `stack`, the first place if it isn't there.
 fn index_in(stack: &[PaneId], pane: PaneId) -> usize {
     stack.iter().position(|member| *member == pane).unwrap_or(0)
 }
