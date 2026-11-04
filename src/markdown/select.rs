@@ -12,8 +12,9 @@ use std::{ops::Range, time::Duration};
 /// Pieces of block `n` are numbered from `n * BLOCK_IDS`, in reading order.
 pub(super) const BLOCK_IDS: usize = 10_000;
 
-/// Follows a selecting drag across the whole window, as the editor does: the pieces see the
-/// mouse only while it is over them, and the button may come up anywhere.
+/// Follows a selecting drag, or a zoomed diagram being moved, across the whole window, as
+/// the editor does: the pieces see the mouse only while it is over them, and the button may
+/// come up anywhere.
 pub(super) fn drag_listener(cx: &mut Context<MarkdownPane>) -> impl IntoElement {
     let pane = cx.entity().downgrade();
     canvas(
@@ -22,7 +23,13 @@ pub(super) fn drag_listener(cx: &mut Context<MarkdownPane>) -> impl IntoElement 
             let moved = pane.clone();
             window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
                 if phase == DispatchPhase::Bubble {
-                    moved.update(cx, |pane, cx| pane.drag_to(event, cx)).ok();
+                    moved
+                        .update(cx, |pane, cx| {
+                            if !pane.pan_to(event, cx) {
+                                pane.drag_to(event, cx)
+                            }
+                        })
+                        .ok();
                 }
             });
             window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
@@ -133,6 +140,7 @@ impl MarkdownPane {
             selection.dragging = false;
         }
         self.drag = None;
+        self.panning = None;
     }
 
     /// Above or below the text, a selecting drag scrolls on while the button is held, faster

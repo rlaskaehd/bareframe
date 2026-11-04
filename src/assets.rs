@@ -30,6 +30,7 @@ const ICONS: &[(&str, &[u8])] = icons!(
     "arrow-right.svg",
     "rotate-cw.svg",
     "stop.svg",
+    "maximize-2.svg",
     "globe.svg",
     "lang/rust.svg",
     "lang/python.svg",

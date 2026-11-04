@@ -14,13 +14,14 @@ use parse::{Block, inlines, mermaid_sources, parse};
 use std::path::{Path, PathBuf};
 
 mod files;
+mod pan;
 mod parse;
 mod render;
 mod select;
 
 pub use files::{Target, is_markdown};
 
-gpui::actions!(markdown, [ToggleRaw, CopySelection]);
+gpui::actions!(markdown, [ToggleRaw, CopySelection, CloseDiagram]);
 
 /// Keys of a Markdown file's pane, rendered or raw.
 pub const KEY_CONTEXT: &str = "Markdown";
@@ -29,6 +30,7 @@ pub fn key_bindings() -> Vec<gpui::KeyBinding> {
     vec![
         gpui::KeyBinding::new("cmd-e", ToggleRaw, Some(KEY_CONTEXT)),
         gpui::KeyBinding::new("cmd-c", CopySelection, Some(KEY_CONTEXT)),
+        gpui::KeyBinding::new("escape", CloseDiagram, Some(KEY_CONTEXT)),
     ]
 }
 
@@ -126,15 +128,19 @@ pub struct MarkdownPane {
     /// How far above (negative) or below the text a selecting drag is, while it is outside.
     drag: Option<gpui::Pixels>,
     autoscrolling: bool,
+    /// A zoomed diagram being dragged around.
+    panning: Option<pan::Panning>,
+    /// The source of the diagram shown over the whole pane.
+    expanded: Option<String>,
     _watch: Option<Watch>,
     _release: gpui::Subscription,
 }
 
-pub(super) enum Diagram {
+enum Diagram {
     Pending,
     /// Drawn off the UI thread and owned by this pane, not GPUI's shared image cache: two
-    /// panes showing one document each let go of their own.
-    Ready(std::sync::Arc<gpui::RenderImage>),
+    /// panes showing one document each let go of their own. Zoomed and moved as `View` says.
+    Ready(std::sync::Arc<gpui::RenderImage>, pan::View),
     Failed(String),
 }
 
@@ -146,7 +152,7 @@ fn forget(
 ) {
     let forgotten = diagrams.extract_if(|source, _| gone(source));
     stale.extend(forgotten.filter_map(|(_, diagram)| match diagram {
-        Diagram::Ready(image) => Some(image),
+        Diagram::Ready(image, _) => Some(image),
         _ => None,
     }));
 }
@@ -187,6 +193,8 @@ impl MarkdownPane {
             selection: None,
             drag: None,
             autoscrolling: false,
+            panning: None,
+            expanded: None,
             _watch: None,
             _release: cx.on_release_in(window, |pane: &mut Self, window, _| {
                 forget(&mut pane.diagrams, &mut pane.stale, |_| true);
@@ -259,7 +267,7 @@ impl MarkdownPane {
                                     .map_err(|error| error.to_string())
                             });
                             let diagram = match diagram {
-                                Ok(image) => Diagram::Ready(image),
+                                Ok(image) => Diagram::Ready(image, Default::default()),
                                 Err(error) => Diagram::Failed(error),
                             };
                             (source, diagram)
@@ -449,6 +457,20 @@ impl Render for MarkdownPane {
             .flex_1()
             .into_any_element(),
         };
+        let expanded = self.expanded.as_ref().and_then(|source| {
+            let Some(Diagram::Ready(image, view)) = self.diagrams.get(source) else {
+                return None;
+            };
+            Some(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .occlude()
+                    .p_4()
+                    .bg(hsla(theme.terminal_background))
+                    .child(self.render_diagram(source, image, *view, 0, true, cx)),
+            )
+        });
         div()
             .size_full()
             .flex()
@@ -462,6 +484,7 @@ impl Render for MarkdownPane {
             .text_color(hsla(theme.text))
             .on_action(cx.listener(|_, _: &ToggleRaw, _, cx| cx.emit(MarkdownEvent::ShowRaw)))
             .on_action(cx.listener(|pane, _: &CopySelection, _, cx| pane.copy_selection(cx)))
+            .on_action(cx.listener(|pane, _: &CloseDiagram, _, cx| pane.close_diagram(cx)))
             // The font size keys zoom this document alone, as in the browser pane.
             .on_action(
                 cx.listener(|pane, _: &IncreaseFontSize, _, cx| pane.set_zoom(pane.zoom + 1, cx)),
@@ -473,5 +496,6 @@ impl Render for MarkdownPane {
             .child(select::drag_listener(cx))
             .child(switch)
             .child(content)
+            .children(expanded)
     }
 }
