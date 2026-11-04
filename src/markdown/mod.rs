@@ -132,6 +132,8 @@ pub struct MarkdownPane {
     panning: Option<pan::Panning>,
     /// The source of the diagram shown over the whole pane.
     expanded: Option<String>,
+    /// Diagrams whose part in view is being drawn again, and for what.
+    sharpening: std::collections::HashMap<String, (pan::Sharp, Task<()>)>,
     _watch: Option<Watch>,
     _release: gpui::Subscription,
 }
@@ -139,8 +141,8 @@ pub struct MarkdownPane {
 enum Diagram {
     Pending,
     /// Drawn off the UI thread and owned by this pane, not GPUI's shared image cache: two
-    /// panes showing one document each let go of their own. Zoomed and moved as `View` says.
-    Ready(std::sync::Arc<gpui::RenderImage>, pan::View),
+    /// panes showing one document each let go of their own.
+    Ready(pan::Drawn),
     Failed(String),
 }
 
@@ -150,11 +152,11 @@ fn forget(
     stale: &mut Vec<std::sync::Arc<gpui::RenderImage>>,
     gone: impl Fn(&str) -> bool,
 ) {
-    let forgotten = diagrams.extract_if(|source, _| gone(source));
-    stale.extend(forgotten.filter_map(|(_, diagram)| match diagram {
-        Diagram::Ready(image, _) => Some(image),
-        _ => None,
-    }));
+    for (_, diagram) in diagrams.extract_if(|source, _| gone(source)) {
+        if let Diagram::Ready(drawn) = diagram {
+            stale.extend(drawn.into_images());
+        }
+    }
 }
 
 /// Whether the theme is dark, judged by its background's brightness.
@@ -195,6 +197,7 @@ impl MarkdownPane {
             autoscrolling: false,
             panning: None,
             expanded: None,
+            sharpening: Default::default(),
             _watch: None,
             _release: cx.on_release_in(window, |pane: &mut Self, window, _| {
                 forget(&mut pane.diagrams, &mut pane.stale, |_| true);
@@ -262,12 +265,13 @@ impl MarkdownPane {
                         .into_iter()
                         .map(|source| {
                             let diagram = crate::diagram::render(&source, dark).and_then(|svg| {
-                                gpui::Image::from_bytes(gpui::ImageFormat::Svg, svg.into_bytes())
-                                    .to_image_data(renderer.clone())
-                                    .map_err(|error| error.to_string())
+                                let image = renderer
+                                    .render_single_frame(svg.as_bytes(), 1.0)
+                                    .map_err(|error| error.to_string())?;
+                                Ok(pan::Drawn::new(image, svg.into()))
                             });
                             let diagram = match diagram {
-                                Ok(image) => Diagram::Ready(image, Default::default()),
+                                Ok(drawn) => Diagram::Ready(drawn),
                                 Err(error) => Diagram::Failed(error),
                             };
                             (source, diagram)
@@ -458,7 +462,7 @@ impl Render for MarkdownPane {
             .into_any_element(),
         };
         let expanded = self.expanded.as_ref().and_then(|source| {
-            let Some(Diagram::Ready(image, view)) = self.diagrams.get(source) else {
+            let Some(Diagram::Ready(drawn)) = self.diagrams.get(source) else {
                 return None;
             };
             Some(
@@ -468,7 +472,7 @@ impl Render for MarkdownPane {
                     .occlude()
                     .p_4()
                     .bg(hsla(theme.terminal_background))
-                    .child(self.render_diagram(source, image, *view, 0, true, cx)),
+                    .child(self.render_diagram(source, drawn, 0, true, cx)),
             )
         });
         div()

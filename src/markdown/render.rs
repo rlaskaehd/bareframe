@@ -168,9 +168,9 @@ impl MarkdownPane {
         let theme = self.theme;
         if language == "mermaid" {
             match self.diagrams.get(text) {
-                Some(Diagram::Ready(image, view)) => {
+                Some(Diagram::Ready(drawn)) => {
                     *ids += 1;
-                    return self.render_diagram(text, image, *view, *ids, false, cx);
+                    return self.render_diagram(text, drawn, *ids, false, cx);
                 }
                 Some(Diagram::Pending) | None => {
                     return div()

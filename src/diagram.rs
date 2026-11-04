@@ -109,9 +109,69 @@ pub fn render(source: &str, dark: bool) -> Result<String, String> {
     }
 }
 
+/// `svg` as drawn by `render`, showing only `part` of it (left, top, width and height as
+/// fractions of the whole) and `size` points across: drawn at the screen's resolution, it
+/// is as sharp as a browser's SVG at any zoom.
+pub fn crop(svg: &str, part: [f32; 4], size: (f32, f32)) -> Option<String> {
+    let start = svg.find("<svg")?;
+    let end = start + svg[start..].find('>')?;
+    let mut root = svg[start..end].to_owned();
+    let [x, y, width, height] = attribute(&root, "viewBox")?
+        .split([' ', ','])
+        .filter(|word| !word.is_empty())
+        .map(str::parse::<f32>)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?[..]
+    else {
+        return None;
+    };
+    // `width="100%"` and a `max-width` style would size the picture by its box.
+    for name in ["width", "height", "viewBox", "style"] {
+        if let Some(value) = attribute(&root, name) {
+            root = root.replacen(&format!(" {name}=\"{value}\""), "", 1);
+        }
+    }
+    let [left, top, across, down] = part;
+    let view_box = format!(
+        "{} {} {} {}",
+        x + left * width,
+        y + top * height,
+        across * width,
+        down * height
+    );
+    Some(format!(
+        "{root} width=\"{}\" height=\"{}\" viewBox=\"{view_box}\"{}",
+        size.0,
+        size.1,
+        &svg[end..]
+    ))
+}
+
+/// The value of the attribute `name` in a start tag (a space before it, so `stroke-width`
+/// is not `width`).
+fn attribute<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
+    let at = tag.find(&format!(" {name}=\""))? + name.len() + 3;
+    Some(&tag[at..at + tag[at..].find('"')?])
+}
+
 #[cfg(test)]
 mod tests {
-    use super::render;
+    use super::{crop, render};
+
+    #[test]
+    fn a_crop_shows_that_part_at_that_size() {
+        let svg = r#"<svg id="m" width="100%" style="max-width:420px" viewBox="0 0 420 200"><rect stroke-width="2"/></svg>"#;
+        assert_eq!(
+            crop(svg, [0.5, 0.25, 0.25, 0.5], (300.0, 400.0)).as_deref(),
+            Some(
+                r#"<svg id="m" width="300" height="400" viewBox="210 50 105 100"><rect stroke-width="2"/></svg>"#
+            )
+        );
+        assert_eq!(
+            crop("<svg id=\"m\"></svg>", [0.0, 0.0, 1.0, 1.0], (1.0, 1.0)),
+            None
+        );
+    }
 
     #[test]
     fn diagrams_render_with_plain_text_labels() {
