@@ -85,6 +85,11 @@ impl WorkspaceView {
                     view.new_pane_tab(window, cx)
                 }
             }))
+            .on_action(cx.listener(|view, _: &NewBrowserPaneTab, window, cx| {
+                if view.settings.flag("pane-tabs") {
+                    view.new_browser_tab(true, window, cx)
+                }
+            }))
             .on_action(cx.listener(|view, _: &PreviousPaneTab, window, cx| {
                 if view.model.cycle_pane_tab(false) {
                     view.sync(window, cx)

@@ -72,6 +72,12 @@ pub const ACTIONS: &[Action] = &[
     ),
     action("new_pane_tab", "New tab in pane", &["cmd+alt+t"], Window),
     action(
+        "new_browser_pane_tab",
+        "New browser tab in pane",
+        &["cmd+alt+shift+t"],
+        Window,
+    ),
+    action(
         "goto_pane_tab:previous",
         "Previous tab in pane",
         &["cmd+alt+bracket_left"],

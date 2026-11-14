@@ -369,7 +369,7 @@ impl WorkspaceView {
                 "New terminal tab\t⌥⌘T".into(),
                 MenuAction::NewPaneTab(false),
             ),
-            ("New browser tab".into(), MenuAction::NewPaneTab(true)),
+            ("New browser tab\t⌥⇧⌘T".into(), MenuAction::NewPaneTab(true)),
         ];
         let below = gpui::point(position.x - px(MENU_WIDTH - 12.0), position.y + px(12.0));
         self.open_menu(below, items, cx);
