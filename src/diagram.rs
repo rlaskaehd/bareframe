@@ -4,25 +4,95 @@ use merman::{
     SvgRequest,
     svg::{SvgPipeline, export::NativeFontContext, export::NativeFontOptions},
 };
-use std::sync::OnceLock;
+use std::{path::PathBuf, sync::OnceLock};
 
 /// A system font with both Latin and Hangul. Labels are measured with it and drawn in it,
 /// so a box fits its text; measuring with stand-in metrics left Korean labels overflowing.
 const FONT_FILE: &str = "/System/Library/Fonts/AppleSDGothicNeo.ttc";
 const FONT_FAMILY: &str = "Apple SD Gothic Neo";
 
-/// Loaded once: reading the font file takes tens of milliseconds.
+/// The weights Mermaid's styles ask for: normal, 600 and bold.
+const WEIGHTS: [u16; 3] = [400, 600, 700];
+
+/// Loaded once: reading the font file takes tens of milliseconds. merman keeps every byte
+/// of the files it is given, and the collection holds eighteen faces in 55MB, so it is
+/// given only `WEIGHTS`, each cut out to a file of its own (about 3MB) and removed once
+/// read. The whole collection if that fails.
 fn fonts() -> Option<&'static NativeFontContext> {
     static FONTS: OnceLock<Option<NativeFontContext>> = OnceLock::new();
     FONTS
         .get_or_init(|| {
-            NativeFontOptions::default()
-                .with_font_file(FONT_FILE)
+            let faces = std::fs::read(FONT_FILE)
+                .map(|collection| write_faces(&collection))
+                .unwrap_or_default();
+            let mut options = NativeFontOptions::default();
+            if faces.is_empty() {
+                options = options.with_font_file(FONT_FILE);
+            }
+            for path in &faces {
+                options = options.with_font_file(path);
+            }
+            let fonts = options
                 .load(&OperationControl::new())
                 .inspect_err(|error| eprintln!("bareframe: diagram font {FONT_FILE}: {error}"))
-                .ok()
+                .ok();
+            for path in &faces {
+                let _ = std::fs::remove_file(path);
+            }
+            fonts
         })
         .as_ref()
+}
+
+/// The `FONT_FAMILY` faces of `collection` in `WEIGHTS`, each written to the temporary
+/// directory as a font of its own.
+fn write_faces(collection: &[u8]) -> Vec<PathBuf> {
+    let count = ttf_parser::fonts_in_collection(collection).unwrap_or(0);
+    (0..count)
+        .filter_map(|index| {
+            let face = ttf_parser::Face::parse(collection, index).ok()?;
+            let weight = face.weight().to_number();
+            // Its names are Mac Roman only, which is ASCII here.
+            let family = face.names().into_iter().any(|name| {
+                name.name_id == ttf_parser::name_id::FAMILY && name.name == FONT_FAMILY.as_bytes()
+            });
+            if !family || !WEIGHTS.contains(&weight) {
+                return None;
+            }
+            let path = std::env::temp_dir().join(format!(
+                "bareframe-diagram-font-{}-{weight}.ttf",
+                std::process::id()
+            ));
+            std::fs::write(&path, face_file(collection, index as usize)?).ok()?;
+            Some(path)
+        })
+        .collect()
+}
+
+/// Face `index` of a font collection as a font file: its table directory, then its tables
+/// (offsets in a collection count from the start of the whole file).
+fn face_file(collection: &[u8], index: usize) -> Option<Vec<u8>> {
+    let number = |at: usize, size: usize| {
+        let bytes = collection.get(at..at + size)?;
+        Some(
+            bytes
+                .iter()
+                .fold(0, |value, &byte| value << 8 | usize::from(byte)),
+        )
+    };
+    let start = number(12 + 4 * index, 4)?;
+    let tables = number(start + 4, 2)?;
+    let mut font = collection.get(start..start + 12 + 16 * tables)?.to_vec();
+    for table in 0..tables {
+        let record = 12 + 16 * table;
+        let offset = number(start + record + 8, 4)?;
+        let length = number(start + record + 12, 4)?;
+        let moved = u32::try_from(font.len()).ok()?;
+        font[record + 8..record + 12].copy_from_slice(&moved.to_be_bytes());
+        font.extend_from_slice(collection.get(offset..offset + length)?);
+        font.resize(font.len().next_multiple_of(4), 0);
+    }
+    Some(font)
 }
 
 /// Mermaid's plain `base` theme in the app's colors, set out the way VS Code and cmux draw
@@ -170,7 +240,20 @@ fn attribute<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{crop, render, width};
+    use super::{FONT_FILE, crop, fonts, render, width};
+
+    #[test]
+    fn diagrams_keep_only_the_weights_they_use() {
+        if !std::path::Path::new(FONT_FILE).exists() {
+            return;
+        }
+        let fonts = fonts().expect("diagram font");
+        assert_eq!(fonts.face_count(), 3);
+        assert!(
+            fonts.resident_font_bytes() < 12 << 20,
+            "not the whole 55MB collection"
+        );
+    }
 
     #[test]
     fn a_crop_shows_that_part_at_that_size() {

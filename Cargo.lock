@@ -939,6 +939,7 @@ dependencies = [
  "raw-window-handle",
  "serde_json",
  "trash",
+ "ttf-parser",
 ]
 
 [[package]]
