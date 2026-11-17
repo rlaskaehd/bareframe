@@ -1,11 +1,34 @@
-//! Small pieces of UI shared across panels: buttons, tree marks, icons, diff counts and
-//! key caps.
+//! Small pieces of UI shared across panels: buttons, tree marks, icons, diff counts, key
+//! caps, and the pictures a pane no longer shows.
 use crate::{
     text_field::TextField,
     theme::{self, Theme, hsla},
 };
 use bareframe_core::keymap::Trigger;
-use gpui::{AnyElement, Div, ElementId, Entity, Stateful, div, prelude::*, px};
+use gpui::{
+    AnyElement, Div, ElementId, Entity, RenderImage, Stateful, Window, div, prelude::*, px,
+};
+use std::sync::Arc;
+
+/// Pictures a pane drew and no longer shows. GPUI keeps each one's texture in the window's
+/// atlas until it is dropped there, so `release` hands them back on the pane's next frame,
+/// and when the pane goes (`on_release_in`), however it is closed.
+#[derive(Default)]
+pub struct Stale(Vec<Arc<RenderImage>>);
+
+impl Stale {
+    pub fn release(&mut self, window: &mut Window) {
+        for image in self.0.drain(..) {
+            let _ = window.drop_image(image);
+        }
+    }
+}
+
+impl Extend<Arc<RenderImage>> for Stale {
+    fn extend<T: IntoIterator<Item = Arc<RenderImage>>>(&mut self, images: T) {
+        self.0.extend(images);
+    }
+}
 
 /// A bordered button; `primary` fills it with the accent. Callers set the padding.
 pub fn button(

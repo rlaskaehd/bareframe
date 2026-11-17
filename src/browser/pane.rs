@@ -93,8 +93,8 @@ pub struct BrowserPane {
     /// The id agents in terminals know this tab by (see control).
     tab: String,
     _events: Option<Task<()>>,
-    /// Snapshots no longer shown; GPUI keeps their textures until the window drops them.
-    stale: Vec<Arc<RenderImage>>,
+    /// Snapshots no longer shown.
+    stale: crate::widgets::Stale,
     _snapshot: Option<Task<()>>,
     _subscriptions: [Subscription; 5],
 }
@@ -123,10 +123,10 @@ impl BrowserPane {
         });
         let release = cx.on_release(|pane: &mut Self, _| pane.close());
         let snapshots = cx.on_release_in(window, |pane: &mut Self, window, _| {
-            if let Frozen::Shot(Some(image)) = std::mem::replace(&mut pane.frozen, Frozen::No) {
-                pane.stale.push(image);
+            if let Frozen::Shot(image) = std::mem::replace(&mut pane.frozen, Frozen::No) {
+                pane.stale.extend(image);
             }
-            pane.drop_stale(window);
+            pane.stale.release(window);
         });
         let page = cx.focus_handle();
         let keyboard = Keyboard::default();
@@ -169,7 +169,7 @@ impl BrowserPane {
             keyboard,
             tab,
             _events: None,
-            stale: Vec::new(),
+            stale: Default::default(),
             _snapshot: None,
             _subscriptions: [entered, release, snapshots, focused, blurred],
         }
@@ -256,8 +256,8 @@ impl BrowserPane {
     /// A menu or prompt is drawn over the panes: the page's view would hide it, so a
     /// snapshot of the page stands in for it, taken over DevTools.
     pub fn set_frozen(&mut self, frozen: bool, cx: &mut Context<Self>) {
-        if let Frozen::Shot(Some(image)) = std::mem::replace(&mut self.frozen, Frozen::No) {
-            self.stale.push(image);
+        if let Frozen::Shot(image) = std::mem::replace(&mut self.frozen, Frozen::No) {
+            self.stale.extend(image);
         }
         if frozen {
             self.frozen = Frozen::Capturing;
@@ -308,12 +308,6 @@ impl BrowserPane {
             // A blank page is waiting for an address.
             self.address
                 .update(cx, |address, cx| address.focus(window, cx));
-        }
-    }
-
-    fn drop_stale(&mut self, window: &mut Window) {
-        for image in self.stale.drain(..) {
-            let _ = window.drop_image(image);
         }
     }
 
@@ -532,7 +526,7 @@ impl BrowserPane {
 
 impl Render for BrowserPane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.drop_stale(window);
+        self.stale.release(window);
         let theme = self.theme;
         let pane = cx.entity().downgrade();
         let page = canvas(

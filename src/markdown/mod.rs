@@ -119,8 +119,8 @@ pub struct MarkdownPane {
     /// theme they were drawn in.
     diagrams: std::collections::HashMap<String, Diagram>,
     diagrams_dark: bool,
-    /// Diagrams no longer shown; GPUI keeps them until the window lets them go.
-    stale: Vec<std::sync::Arc<gpui::RenderImage>>,
+    /// Pictures of diagrams no longer shown.
+    stale: crate::widgets::Stale,
     _diagrams: Option<Task<()>>,
     /// The text of each piece drawn so far, for copying a selection (see `select`).
     pieces: std::cell::RefCell<std::collections::BTreeMap<usize, String>>,
@@ -149,7 +149,7 @@ enum Diagram {
 /// Drops the diagrams whose source `gone` picks, moving their pictures to `stale`.
 fn forget(
     diagrams: &mut std::collections::HashMap<String, Diagram>,
-    stale: &mut Vec<std::sync::Arc<gpui::RenderImage>>,
+    stale: &mut crate::widgets::Stale,
     gone: impl Fn(&str) -> bool,
 ) {
     for (_, diagram) in diagrams.extract_if(|source, _| gone(source)) {
@@ -189,7 +189,7 @@ impl MarkdownPane {
             pictures: Default::default(),
             diagrams: Default::default(),
             diagrams_dark: is_dark(theme),
-            stale: Vec::new(),
+            stale: Default::default(),
             _diagrams: None,
             pieces: Default::default(),
             selection: None,
@@ -201,7 +201,7 @@ impl MarkdownPane {
             _watch: None,
             _release: cx.on_release_in(window, |pane: &mut Self, window, _| {
                 forget(&mut pane.diagrams, &mut pane.stale, |_| true);
-                pane.drop_stale(window);
+                pane.stale.release(window);
             }),
         };
         pane.load();
@@ -289,14 +289,6 @@ impl MarkdownPane {
             })
             .ok();
         }));
-    }
-
-    /// Hands the pictures of forgotten diagrams back: the window's texture atlas keeps
-    /// them otherwise.
-    fn drop_stale(&mut self, window: &mut Window) {
-        for image in self.stale.drain(..) {
-            let _ = window.drop_image(image);
-        }
     }
 
     fn navigate(&mut self, path: PathBuf, cx: &mut Context<Self>) {
@@ -416,7 +408,7 @@ impl MarkdownPane {
 
 impl Render for MarkdownPane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.drop_stale(window);
+        self.stale.release(window);
         let theme = self.theme;
         let switch = view_switch(self.theme, false, {
             let pane = cx.entity().downgrade();
