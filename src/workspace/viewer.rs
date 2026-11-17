@@ -279,7 +279,8 @@ impl WorkspaceView {
             .insert(id, (PaneView::Markdown(pane), Some(events)));
     }
 
-    /// Warp's "insert into terminal": the text goes to a terminal in the viewer's tab
+    /// Warp's "insert into terminal": the text goes to the terminal last used in the
+    /// viewer's tab (the one clicked before the button), else its first shown terminal,
     /// through the clipboard and Ghostty's paste, so bracketed paste and the unsafe-paste
     /// prompt apply and nothing runs until Enter. It stays on the clipboard.
     fn insert_into_terminal(
@@ -292,12 +293,18 @@ impl WorkspaceView {
         let Some(tab) = self.model.tab_of(source) else {
             return;
         };
-        let Some(target) = self.model.tabs[tab]
-            .layout
-            .panes()
-            .into_iter()
-            .find(|pane| self.terminal(*pane).is_some())
-        else {
+        let is_terminal = |pane: &PaneId| self.terminal(*pane).is_some();
+        let used = self
+            .recent
+            .iter()
+            .rev()
+            .copied()
+            .find(|pane| self.model.tab_of(*pane) == Some(tab) && is_terminal(pane));
+        let first = || {
+            let shown = self.model.tabs[tab].layout.panes();
+            shown.into_iter().find(is_terminal)
+        };
+        let Some(target) = used.or_else(first) else {
             return;
         };
         cx.write_to_clipboard(gpui::ClipboardItem::new_string(text.to_owned()));
