@@ -3,14 +3,17 @@
 //! pane. Pinch, or scroll with Option or Cmd held, to zoom; drag to move; double-click to
 //! fit it again; Esc closes the whole-pane view.
 //!
-//! The picture is drawn at twice the diagram's own size. Zoomed past that, it is shown
-//! enlarged while the zoom moves and, once it settles, the part in view is drawn again at
-//! the screen's resolution: only that part, so a far zoom costs one screenful of pixels.
+//! The picture is drawn as wide as the page shows it (the diagram's own width, or the text
+//! column's when that is narrower), at two pixels a point. Zoomed past that, or over the
+//! whole pane, it is shown enlarged while the zoom moves and, once it settles, the part in
+//! view is drawn again at the screen's resolution: only that part, so a far zoom costs one
+//! screenful of pixels.
 use super::{Diagram, MarkdownPane};
 use crate::{theme, widgets};
 use gpui::{
     AnyElement, Bounds, Context, MouseButton, MouseDownEvent, MouseMoveEvent, PinchEvent, Pixels,
-    Point, RenderImage, ScrollWheelEvent, Size, canvas, div, img, prelude::*, px, relative,
+    Point, RenderImage, ScrollWheelEvent, Size, SvgRenderer, canvas, div, img, prelude::*, px,
+    relative,
 };
 use std::{cell::Cell, rc::Rc, sync::Arc, time::Duration};
 
@@ -22,21 +25,46 @@ const SETTLE: Duration = Duration::from_millis(120);
 /// A drawn diagram and how it is being looked at.
 pub(super) struct Drawn {
     image: Arc<RenderImage>,
-    /// Kept to draw the part in view again, sharp.
-    svg: Arc<str>,
+    /// Kept to draw the part in view again, sharp, and the whole again for another column.
+    pub svg: Arc<str>,
+    /// The text column's width, in points, the picture was drawn for.
+    column: f32,
     view: View,
     /// That sharp drawing, with what it was drawn for.
     sharp: Option<(Sharp, Arc<RenderImage>)>,
 }
 
 impl Drawn {
-    pub fn new(image: Arc<RenderImage>, svg: Arc<str>) -> Self {
-        Self {
+    /// `svg` drawn for a text column `column` points wide: no wider than the column, as the
+    /// page shows it. A picture of the diagram's own size, two pixels a point, could be
+    /// several times what is seen, and stays in memory as long as its document is open.
+    pub fn draw(renderer: &SvgRenderer, svg: Arc<str>, column: f32) -> Result<Self, String> {
+        // GPUI draws an SVG at twice the scale it is given: 1 is the diagram's own size.
+        let scale = crate::diagram::width(&svg).map_or(1.0, |width| (column / width).min(1.0));
+        let image = renderer
+            .render_single_frame(svg.as_bytes(), scale)
+            .map_err(|error| error.to_string())?;
+        Ok(Self {
             image,
             svg,
+            column,
             view: View::default(),
             sharp: None,
-        }
+        })
+    }
+
+    /// Whether a column `column` points wide shows the picture at another width than it was
+    /// drawn for (the pane was zoomed).
+    pub fn resized(&self, column: f32) -> bool {
+        crate::diagram::width(&self.svg)
+            .is_some_and(|width| width.min(column) != width.min(self.column))
+    }
+
+    /// Takes the picture `fresh` drew for another column, keeping how this diagram is looked
+    /// at; the old picture comes back, for the window to let go.
+    pub fn take_picture(&mut self, fresh: Drawn) -> Arc<RenderImage> {
+        self.column = fresh.column;
+        std::mem::replace(&mut self.image, fresh.image)
     }
 
     /// The pictures GPUI holds for this diagram, to give back when it goes.
@@ -425,6 +453,33 @@ impl MarkdownPane {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pictures_are_drawn_as_wide_as_the_column_shows_them() {
+        let renderer = SvgRenderer::new(Arc::new(crate::assets::Assets));
+        let svg = |width: u32| -> Arc<str> {
+            format!(
+                r#"<svg xmlns="http://www.w3.org/2000/svg" width="100%" viewBox="0 0 {width} 100"><rect width="{width}" height="100"/></svg>"#
+            )
+            .into()
+        };
+        let wide = Drawn::draw(&renderer, svg(1720), 860.0).unwrap();
+        assert_eq!(
+            wide.shape().1,
+            1720.0,
+            "the column's width, two pixels a point"
+        );
+        assert!(!wide.resized(860.0));
+        assert!(wide.resized(1075.0), "a zoomed pane draws it again");
+        let narrow = Drawn::draw(&renderer, svg(300), 860.0).unwrap();
+        assert_eq!(
+            narrow.shape().1,
+            600.0,
+            "its own width when the column is wider"
+        );
+        assert!(!narrow.resized(1075.0));
+        assert!(narrow.resized(200.0));
+    }
 
     #[test]
     fn zoom_keeps_the_point_under_the_pointer_and_the_box_covered() {

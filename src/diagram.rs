@@ -113,18 +113,9 @@ pub fn render(source: &str, dark: bool) -> Result<String, String> {
 /// fractions of the whole) and `size` points across: drawn at the screen's resolution, it
 /// is as sharp as a browser's SVG at any zoom.
 pub fn crop(svg: &str, part: [f32; 4], size: (f32, f32)) -> Option<String> {
-    let start = svg.find("<svg")?;
-    let end = start + svg[start..].find('>')?;
+    let (start, end) = root(svg)?;
     let mut root = svg[start..end].to_owned();
-    let [x, y, width, height] = attribute(&root, "viewBox")?
-        .split([' ', ','])
-        .filter(|word| !word.is_empty())
-        .map(str::parse::<f32>)
-        .collect::<Result<Vec<_>, _>>()
-        .ok()?[..]
-    else {
-        return None;
-    };
+    let [x, y, width, height] = view_box(&root)?;
     // `width="100%"` and a `max-width` style would size the picture by its box.
     for name in ["width", "height", "viewBox", "style"] {
         if let Some(value) = attribute(&root, name) {
@@ -147,6 +138,29 @@ pub fn crop(svg: &str, part: [f32; 4], size: (f32, f32)) -> Option<String> {
     ))
 }
 
+/// How wide `svg` (as drawn by `render`) is at its own size, in points: its `viewBox`'s.
+pub fn width(svg: &str) -> Option<f32> {
+    let (start, end) = root(svg)?;
+    Some(view_box(&svg[start..end])?[2])
+}
+
+/// Where the root `<svg …` start tag is, its closing `>` left out.
+fn root(svg: &str) -> Option<(usize, usize)> {
+    let start = svg.find("<svg")?;
+    Some((start, start + svg[start..].find('>')?))
+}
+
+/// The left, top, width and height of a start tag's `viewBox`.
+fn view_box(tag: &str) -> Option<[f32; 4]> {
+    let numbers: Vec<f32> = attribute(tag, "viewBox")?
+        .split([' ', ','])
+        .filter(|word| !word.is_empty())
+        .map(str::parse::<f32>)
+        .collect::<Result<_, _>>()
+        .ok()?;
+    numbers.try_into().ok()
+}
+
 /// The value of the attribute `name` in a start tag (a space before it, so `stroke-width`
 /// is not `width`).
 fn attribute<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
@@ -156,10 +170,18 @@ fn attribute<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{crop, render};
+    use super::{crop, render, width};
 
     #[test]
     fn a_crop_shows_that_part_at_that_size() {
+        assert_eq!(
+            width(r#"<svg width="100%" viewBox="-8 -8 1345.5 973"><g/></svg>"#),
+            Some(1345.5)
+        );
+        assert_eq!(
+            width(r#"<svg width="100%"><g viewBox="0 0 9 9"/></svg>"#),
+            None
+        );
         let svg = r#"<svg id="m" width="100%" style="max-width:420px" viewBox="0 0 420 200"><rect stroke-width="2"/></svg>"#;
         assert_eq!(
             crop(svg, [0.5, 0.25, 0.25, 0.5], (300.0, 400.0)).as_deref(),

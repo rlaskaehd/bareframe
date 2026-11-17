@@ -234,8 +234,10 @@ impl MarkdownPane {
         cx.notify();
     }
 
-    /// Draws the document's Mermaid diagrams not drawn yet, in the background. The list is
-    /// laid out again when they arrive, since a picture is taller than its source.
+    /// Draws the document's Mermaid diagrams not drawn yet, in the background, and again
+    /// those drawn for another column width (the pane was zoomed), which show their old
+    /// picture until then. The list is laid out again when they arrive, since a picture is
+    /// taller than its source.
     fn draw_diagrams(&mut self, cx: &mut Context<Self>) {
         let mut sources = Vec::new();
         mermaid_sources(&self.blocks, &mut sources);
@@ -249,7 +251,18 @@ impl MarkdownPane {
             .filter(|source| matches!(self.diagrams.get(*source), None | Some(Diagram::Pending)))
             .map(str::to_owned)
             .collect();
-        if wanted.is_empty() {
+        let column = f32::from(self.size(MAX_WIDTH));
+        let resized: Vec<(String, std::sync::Arc<str>)> = self
+            .diagrams
+            .iter()
+            .filter_map(|(source, diagram)| match diagram {
+                Diagram::Ready(drawn) if drawn.resized(column) => {
+                    Some((source.clone(), drawn.svg.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        if wanted.is_empty() && resized.is_empty() {
             return;
         }
         for source in &wanted {
@@ -258,25 +271,28 @@ impl MarkdownPane {
         let dark = self.diagrams_dark;
         let renderer = cx.svg_renderer();
         self._diagrams = Some(cx.spawn(async move |pane, cx| {
-            let drawn = cx
+            let (drawn, redrawn) = cx
                 .background_executor()
                 .spawn(async move {
-                    wanted
+                    let drawn: Vec<_> = wanted
                         .into_iter()
                         .map(|source| {
-                            let diagram = crate::diagram::render(&source, dark).and_then(|svg| {
-                                let image = renderer
-                                    .render_single_frame(svg.as_bytes(), 1.0)
-                                    .map_err(|error| error.to_string())?;
-                                Ok(pan::Drawn::new(image, svg.into()))
-                            });
+                            let diagram = crate::diagram::render(&source, dark)
+                                .and_then(|svg| pan::Drawn::draw(&renderer, svg.into(), column));
                             let diagram = match diagram {
                                 Ok(drawn) => Diagram::Ready(drawn),
                                 Err(error) => Diagram::Failed(error),
                             };
                             (source, diagram)
                         })
-                        .collect::<Vec<_>>()
+                        .collect();
+                    let redrawn: Vec<_> = resized
+                        .into_iter()
+                        .filter_map(|(source, svg)| {
+                            Some((source, pan::Drawn::draw(&renderer, svg, column).ok()?))
+                        })
+                        .collect();
+                    (drawn, redrawn)
                 })
                 .await;
             pane.update(cx, |pane, cx| {
@@ -284,6 +300,14 @@ impl MarkdownPane {
                     return;
                 }
                 pane.diagrams.extend(drawn);
+                for (source, fresh) in redrawn {
+                    // Not one drawn again from another document's or theme's source meanwhile.
+                    if let Some(Diagram::Ready(shown)) = pane.diagrams.get_mut(&source)
+                        && std::sync::Arc::ptr_eq(&shown.svg, &fresh.svg)
+                    {
+                        pane.stale.extend([shown.take_picture(fresh)]);
+                    }
+                }
                 pane.relayout();
                 cx.notify();
             })
@@ -380,6 +404,8 @@ impl MarkdownPane {
         if zoom != self.zoom {
             self.zoom = zoom;
             self.relayout();
+            // The column, and so the width a diagram is shown at, changed with the zoom.
+            self.draw_diagrams(cx);
             cx.notify();
         }
     }
