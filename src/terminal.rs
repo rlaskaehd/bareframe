@@ -74,7 +74,9 @@ impl GhosttyAdapter {
         // that would end bracketed paste early) and, when set to ask, OSC 52 reads and
         // writes. Returning false defers each to the user (see `ClipboardRequest`);
         // ordinary pastes never reach this callback.
-        options.clipboard_approval = Some(std::sync::Arc::new(|_| false));
+        options.clipboard_approval = Some(std::sync::Arc::new(|request| {
+            allowed_without_asking(request.operation, request.text)
+        }));
         // SAFETY: This entity creates, services and drops its child on GPUI's UI
         // thread. WorkspaceView releases it before its parent NSView is closed.
         #[allow(unsafe_code)]
@@ -702,6 +704,22 @@ fn typed_text(key: &gpui::Keystroke) -> Option<&str> {
         .filter(|text| !text.chars().any(char::is_control))
 }
 
+/// Settings › `Warn before pasting multiple lines`, read where Ghostty asks for approval.
+static PASTE_WARNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+pub fn set_paste_warning(on: bool) {
+    PASTE_WARNING.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// With the warning off, a paste Ghostty holds back for its line breaks goes in, but not one
+/// that would end a bracketed paste early: no copied text needs that, and it is how a page
+/// smuggles a command past a program reading the paste as text.
+fn allowed_without_asking(operation: ClipboardOperation, text: &str) -> bool {
+    operation == ClipboardOperation::Paste
+        && !PASTE_WARNING.load(std::sync::atomic::Ordering::Relaxed)
+        && !text.contains("\x1b[201~")
+}
+
 fn modifiers(value: gpui::Modifiers) -> Modifiers {
     let mut result = Modifiers::empty();
     for (set, flag) in [
@@ -772,6 +790,17 @@ mod tests {
         );
         assert_eq!(pasted_paths(&item("/tmp/x\nrm -rf ~\n.png")), None);
         assert_eq!(pasted_paths(&item("/tmp/\u{1b}[201~.png")), None);
+    }
+
+    #[test]
+    fn the_paste_warning_setting_keeps_the_bracket_escape_check() {
+        let paste = |text| allowed_without_asking(ClipboardOperation::Paste, text);
+        assert!(!paste("ls\nrm -rf ~\n"), "asks while the warning is on");
+        set_paste_warning(false);
+        assert!(paste("ls\nrm -rf ~\n"));
+        assert!(!paste("ok\x1b[201~\nrm -rf ~\n"));
+        assert!(!allowed_without_asking(ClipboardOperation::Read, "secret"));
+        set_paste_warning(true);
     }
 
     #[test]

@@ -9,7 +9,10 @@ use crate::{
     theme::{self, Theme, hsla},
     widgets,
 };
-use bareframe_core::workspace::{GroupId, Tab};
+use bareframe_core::{
+    layout::PaneId,
+    workspace::{GroupId, Tab},
+};
 use gpui::{AnyElement, Context, Hsla, MouseButton, MouseDownEvent, Window, div, prelude::*, px};
 
 impl WorkspaceView {
@@ -227,7 +230,7 @@ impl WorkspaceView {
                 );
             }
             for index in matches {
-                rows.push(self.render_tab_row(index, &self.model.tabs[index], width, cx));
+                self.push_tab_rows(&mut rows, index, &self.model.tabs[index], width, cx);
             }
         } else {
             let mut previous = None;
@@ -243,7 +246,7 @@ impl WorkspaceView {
                     .and_then(|group| self.model.group(group))
                     .is_some_and(|group| group.collapsed);
                 if !collapsed {
-                    rows.push(self.render_tab_row(index, tab, width, cx));
+                    self.push_tab_rows(&mut rows, index, tab, width, cx);
                 }
             }
         }
@@ -330,6 +333,111 @@ impl WorkspaceView {
                             .map(|this| self.tab_drop_target(this, end, None, cx)),
                     ),
             )
+    }
+
+    /// A tab's card and, unfolded, a row for each of its panes.
+    fn push_tab_rows(
+        &self,
+        rows: &mut Vec<AnyElement>,
+        index: usize,
+        tab: &Tab,
+        width: f32,
+        cx: &mut Context<Self>,
+    ) {
+        rows.push(self.render_tab_row(index, tab, width, cx));
+        let panes = self.model.tab_panes(index);
+        if panes.len() > 1 && self.unfolded.contains(&tab.id) {
+            for pane in panes {
+                rows.push(self.render_pane_row(tab, pane, cx));
+            }
+        }
+    }
+
+    /// One pane of an unfolded tab: its icon, name and location. The pane the tab shows
+    /// is marked, and one waiting behind another tab in its place is dimmed. A click goes
+    /// to it; `×` closes it.
+    fn render_pane_row(&self, tab: &Tab, pane: PaneId, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.theme();
+        let Some(view) = self.pane(pane) else {
+            return div().into_any_element();
+        };
+        let focused = tab.active_pane == pane;
+        let waiting = !tab.layout.contains(pane);
+        let (path, color) = match view.icon(cx) {
+            Some(icon) => (icon.path, icon.color.map_or(hsla(theme.text_muted), hsla)),
+            None => ("icons/terminal.svg", hsla(theme.text_muted)),
+        };
+        let hover = format!("tab-pane-{}", pane.0);
+        let id = pane.0 as usize;
+        div()
+            .id(("tab-pane", id))
+            .group(hover.clone())
+            .relative()
+            .flex_shrink_0()
+            .pr(px(6.0))
+            // Under the card's icon, and further in for a tab in a group.
+            .pl(px(if tab.group.is_some() { 30.0 } else { 22.0 }))
+            .py(px(1.0))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .h(px(26.0))
+                    .px(px(8.0))
+                    .rounded_md()
+                    .text_size(px(12.0))
+                    .text_color(hsla(if focused {
+                        theme.text
+                    } else {
+                        theme.text_muted
+                    }))
+                    .map(|this| {
+                        if focused {
+                            this.bg(hsla(theme.tab_active))
+                        } else {
+                            this.group_hover(hover.clone(), |style| style.bg(hsla(theme.tab_hover)))
+                        }
+                    })
+                    .when(waiting, |this| this.opacity(0.6))
+                    .child(
+                        gpui::svg()
+                            .path(path)
+                            .flex_none()
+                            .size(px(12.0))
+                            .text_color(color),
+                    )
+                    .child(div().min_w_0().truncate().child(view.name(cx)))
+                    .children(view.location(cx).map(|location| {
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(px(11.0))
+                            .text_color(hsla(theme.text_muted))
+                            .child(location)
+                    })),
+            )
+            .child(
+                widgets::icon_button(theme, ("tab-pane-close", id), "×")
+                    .absolute()
+                    .top(px(4.0))
+                    .right(px(10.0))
+                    .bg(hsla(theme.chrome))
+                    .invisible()
+                    .group_hover(hover, |style| style.visible())
+                    .on_click(cx.listener(move |view, _, window, cx| {
+                        cx.stop_propagation();
+                        view.close_pane(pane, window, cx)
+                    })),
+            )
+            .on_click(cx.listener(move |view, _, window, cx| {
+                view.model.clear_selection();
+                if view.model.focus(pane) {
+                    view.sync(window, cx)
+                }
+            }))
+            .into_any_element()
     }
 
     fn render_group_header(&self, id: GroupId, cx: &mut Context<Self>) -> AnyElement {
@@ -468,13 +576,19 @@ impl WorkspaceView {
         };
         let lifted = self.dragging.contains(&tab.id);
         let weak = cx.entity().downgrade();
+        // A tab of several panes folds them out below its card.
+        let panes = self.model.tab_panes(index).len();
+        let unfolded = self.unfolded.contains(&tab.id);
+        let tab_id = tab.id;
         // Every card is as tall as a one-line one (Settings): the icon, 8px above and below
         // and the border. A location line fits beside the icon.
         let card = div()
             .flex()
             .items_center()
             .gap(px(10.0))
-            .px(px(10.0))
+            // The wider left side holds the fold mark of a tab with several panes.
+            .pl(px(16.0))
+            .pr(px(10.0))
             .h(px(46.0))
             .rounded_md()
             .border_1()
@@ -505,6 +619,45 @@ impl WorkspaceView {
             .child(match self.rename_field(RenameTarget::Tab(tab.id)) {
                 Some(field) => field,
                 None => tab_label(theme, title, subtitle).into_any_element(),
+            })
+            .when(panes > 1, |this| {
+                this.child(
+                    div()
+                        .flex_none()
+                        .text_size(px(11.0))
+                        .text_color(hsla(theme.text_muted))
+                        .child(panes.to_string()),
+                )
+                // In the card's left padding, so every card's icon stays in line.
+                .child(
+                    div()
+                        .id(("tab-fold", index))
+                        .absolute()
+                        .left_0()
+                        .top_0()
+                        .bottom_0()
+                        .w(px(16.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(
+                            gpui::svg()
+                                .path(if unfolded {
+                                    "icons/chevron-down.svg"
+                                } else {
+                                    "icons/chevron-right.svg"
+                                })
+                                .size(px(10.0))
+                                .text_color(hsla(theme.text_muted)),
+                        )
+                        .on_click(cx.listener(move |view, _, _, cx| {
+                            cx.stop_propagation();
+                            if !view.unfolded.remove(&tab_id) {
+                                view.unfolded.insert(tab_id);
+                            }
+                            cx.notify();
+                        })),
+                )
             })
             .when(group.is_none() && tab.pinned, |this| {
                 this.child(pin_mark(theme))

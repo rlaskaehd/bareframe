@@ -440,6 +440,18 @@ pub const DEFS: &[Def] = &[
     def(
         Features,
         "Terminal",
+        "paste-warning",
+        "Warn before pasting multiple lines",
+        "Asks before text with line breaks goes into a program that would run each line as it \
+         arrives (one without bracketed paste). Off, such pastes go straight in; text that would \
+         break out of a bracketed paste is still asked about.",
+        Toggle,
+        "true",
+        App,
+    ),
+    def(
+        Features,
+        "Terminal",
         "clipboard-access",
         "Clipboard access (OSC 52)",
         "Controls whether programs running in the terminal can read or write your clipboard.",

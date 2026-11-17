@@ -48,7 +48,7 @@ MVP 1의 셸 실행 모드는 zsh를 기준으로 한다. 다른 셸을 지정�
 | `Cmd+Shift+P` | 커맨드 팔레트 열기·닫기(View 메뉴 `Command Palette`와 같음) |
 | `Cmd+Shift+\` | Code review 패널 열기·닫기(상단 바 `± +N −M` 버튼과 같음). Warp의 `⇧⌘+`는 Ghostty에서 글자 크기 키라서 Tools panel(`Cmd+\`)의 반대쪽 짝으로 정했다 |
 
-- 탭은 왼쪽 사이드바에 Warp처럼 원형 아이콘(터미널은 프롬프트 아이콘, 탭 색상을 고르면 같은 색. Settings는 톱니, 파일은 그 언어의 로고), 이름, 위치 순의 카드로 표시된다. Warp처럼 탭 사이에 구분선은 없고, 모든 카드는 한 줄짜리 Settings 카드와 같은 높이다. 분할된 탭은 활성 Pane 하나만 보여 준다.
+- 탭은 왼쪽 사이드바에 Warp처럼 원형 아이콘(터미널은 프롬프트 아이콘, 탭 색상을 고르면 같은 색. Settings는 톱니, 파일은 그 언어의 로고), 이름, 위치 순의 카드로 표시된다. Warp처럼 탭 사이에 구분선은 없고, 모든 카드는 한 줄짜리 Settings 카드와 같은 높이다. 카드는 활성 Pane 하나를 보여 주고, Pane이 둘 이상인 탭(분할이나 Pane 안의 탭)은 카드 오른쪽에 Pane 수와 왼쪽 가장자리에 `▸`가 붙는다. `▸`를 누르면 카드 아래에 그 탭의 Pane이 화면 순서(왼쪽 위부터)대로 아이콘·이름·위치와 함께 펼쳐진다. 탭이 지금 보여 주는 Pane은 강조되고, Pane 안의 탭으로 가려진 Pane은 흐리게 보인다. 줄을 누르면 그 탭의 그 Pane으로 가고(가려진 Pane이면 앞으로 꺼낸다), 마우스를 올리면 나오는 `×`로 그 Pane만 닫는다. 펼침 상태는 앱을 다시 켜면 접힌 상태로 돌아간다.
 - 사이드바 위 `+`를 누르면 `New terminal tab`(`Cmd+T`)과 `New browser tab`(`Cmd+Shift+T`) 중에 고른다. 탭에 마우스를 올리면 오른쪽 위에 `⋮`(우클릭 메뉴와 같음)와 `×`(그 탭의 모든 Pane 닫기)가 나타난다.
 - 사이드바 위 `Search tabs...`에 입력하면 제목이나 위치에 그 글자가 있는 탭만 보인다(한글 입력 가능). `Enter`는 첫 결과로 이동하며 검색을 끝내고, `Esc`는 검색을 지운다.
 - 사이드바 오른쪽 가장자리를 끌어 너비를 바꾼다(기본 248, 최소 200, 최대 창 너비의 절반). 창을 줄이면 사이드바도 창 너비의 절반까지 줄어든다.
@@ -190,7 +190,7 @@ MVP 1의 셸 실행 모드는 zsh를 기준으로 한다. 다른 셸을 지정�
 | Features — General | 시작 시 창·탭·Pane 복원, 자동 업데이트 확인(기본 켬), 마우스 휠 스크롤 배율 |
 | Features — Session | 새 세션의 셸(존재하는 절대 경로일 때), 새 세션의 작업 디렉터리(이전 세션 / 홈), 새 탭 위치(현재 탭 뒤 / 맨 끝) |
 | Features — Keys | 왼쪽·오른쪽 Option을 Meta로 |
-| Features — Terminal | 스크롤백 줄 수(숫자를 입력하고 `Enter`나 바깥 클릭으로 적용. 기본 4096, `-1`은 줄 수 제한 없음. Ghostty는 따로 터미널마다 50MB에서 자르고, 새로 여는 터미널부터 적용), 마우스 리포팅, 선택 시 복사, 더블클릭 단어 경계 문자, 클립보드 접근(OSC 52: Deny / Ask / Allow, 기본 Deny. Ask는 확인 창에서 묻는다) |
+| Features — Terminal | 스크롤백 줄 수(숫자를 입력하고 `Enter`나 바깥 클릭으로 적용. 기본 4096, `-1`은 줄 수 제한 없음. Ghostty는 따로 터미널마다 50MB에서 자르고, 새로 여는 터미널부터 적용), 마우스 리포팅, 선택 시 복사, 더블클릭 단어 경계 문자, 여러 줄 붙여넣기 경고(기본 켬. 끄면 bracketed paste를 빠져나가는 글자가 섞인 경우만 묻는다), 클립보드 접근(OSC 52: Deny / Ask / Allow, 기본 Deny. Ask는 확인 창에서 묻는다) |
 | Keyboard shortcuts | 모든 동작의 단축키 목록과 검색(이름 또는 키, 예: `cmd d`). 줄을 누르면 새 단축키를 녹화하고 `Clear`(단축키 없음)·`Default`(기본값)·`Cancel`·`Save`. 다른 동작이 쓰던 키면 알려 주고, 저장하면 그 키를 이 동작으로 옮긴다. `Esc`는 녹화 취소 |
 | About | 버전과 라이선스 |
 
@@ -223,7 +223,7 @@ cursor-style = bar    # block | bar | underline
 | 키 | 동작 |
 | --- | --- |
 | `Cmd+C` | 선택 영역을 클립보드로 복사 |
-| `Cmd+V` | Ghostty의 붙여넣기 경로로 클립보드 입력. Finder에서 복사한 파일은 Ghostty처럼 셸용으로 이스케이프한 전체 경로로, 이미지만 있는 클립보드(스크린샷 복사)는 임시 폴더에 PNG로 저장한 경로로 들어가, Claude Code·Codex 같은 CLI가 이미지로 첨부한다(Claude Code는 `Ctrl+V`로도 클립보드 이미지를 직접 읽는다). Finder의 파일이나 스크린샷 썸네일을 터미널에 끌어다 놓아도 같은 경로가 들어간다. 위험한 붙여넣기(bracketed paste가 꺼진 프로그램에 여러 줄, 또는 bracketed paste를 빠져나가는 글자)는 확인 창(`Warning: Potentially Unsafe Paste`)에 붙여넣을 내용을 보여 주고 `Paste`를 눌러야 들어간다. `Esc`나 `Cancel`은 아무것도 넣지 않는다. 확인 창이 떠 있는 동안에는 다른 단축키와 창의 다른 곳 클릭이 막히고, 요청한 탭 번호와 이름·위치가 함께 보인다. 터미널 안 프로그램의 OSC 52 클립보드 읽기·쓰기는 Settings › Features의 `Clipboard access (OSC 52)`를 따른다: `Deny`(기본)는 거부, `Ask`는 같은 확인 창에서 `Allow`를 눌러야 허용, `Allow`는 묻지 않는다 |
+| `Cmd+V` | Ghostty의 붙여넣기 경로로 클립보드 입력. Finder에서 복사한 파일은 Ghostty처럼 셸용으로 이스케이프한 전체 경로로, 이미지만 있는 클립보드(스크린샷 복사)는 임시 폴더에 PNG로 저장한 경로로 들어가, Claude Code·Codex 같은 CLI가 이미지로 첨부한다(Claude Code는 `Ctrl+V`로도 클립보드 이미지를 직접 읽는다). Finder의 파일이나 스크린샷 썸네일을 터미널에 끌어다 놓아도 같은 경로가 들어간다. 위험한 붙여넣기(bracketed paste가 꺼진 프로그램에 여러 줄, 또는 bracketed paste를 빠져나가는 글자)는 확인 창(`Warning: Potentially Unsafe Paste`)에 붙여넣을 내용을 보여 주고 `Paste`를 눌러야 들어간다. Settings › Features › Terminal의 `Warn before pasting multiple lines`를 끄면 여러 줄 붙여넣기는 묻지 않고 들어가고, bracketed paste를 빠져나가는 글자(`ESC[201~`)가 섞인 경우만 계속 묻는다. `Esc`나 `Cancel`은 아무것도 넣지 않는다. 확인 창이 떠 있는 동안에는 다른 단축키와 창의 다른 곳 클릭이 막히고, 요청한 탭 번호와 이름·위치가 함께 보인다. 터미널 안 프로그램의 OSC 52 클립보드 읽기·쓰기는 Settings › Features의 `Clipboard access (OSC 52)`를 따른다: `Deny`(기본)는 거부, `Ask`는 같은 확인 창에서 `Allow`를 눌러야 허용, `Allow`는 묻지 않는다 |
 | `Cmd+Q` | 앱 종료 |
 | `Cmd+Shift+R` | 시작에 실패한 Pane을 다시 시작 |
 | `Ctrl+C`, `Ctrl+D`, `Ctrl+Z` | 터미널과 셸에 전달 |

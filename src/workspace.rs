@@ -94,6 +94,8 @@ pub struct WorkspaceView {
     _repo_watch: Option<crate::watch::Watch>,
     /// Tabs being dragged in the sidebar; their rows show an empty slot meanwhile.
     dragging: Vec<TabId>,
+    /// Tabs whose panes the sidebar lists under their card. Not saved: they open folded.
+    unfolded: std::collections::HashSet<TabId>,
     /// Where a dragged pane or tab would land: beside this pane, on that side.
     drop_target: Option<(PaneId, Direction)>,
     /// The terminals were frozen for a drag, so the drop zones can be drawn over them.
@@ -195,6 +197,7 @@ impl WorkspaceView {
             _repo_task: None,
             _repo_watch: None,
             dragging: Vec::new(),
+            unfolded: Default::default(),
             drop_target: None,
             drag_frozen: false,
             dragged_file: None,
@@ -240,7 +243,7 @@ impl WorkspaceView {
             }),
         };
         // Before any terminal starts, so restored ones get the socket too.
-        view.apply_browser_control(cx);
+        view.apply_app_flags(cx);
         crate::browser::control::register_workspace(
             cx.entity().downgrade(),
             window.window_handle(),
