@@ -172,7 +172,7 @@ impl MarkdownPane {
                     *ids += 1;
                     return self.render_diagram(text, drawn, *ids, false, cx);
                 }
-                Some(Diagram::Pending) | None => {
+                Some(Diagram::Pending | Diagram::LetGo(_)) | None => {
                     return div()
                         .text_color(hsla(theme.text_muted))
                         .child("Drawing diagram…")

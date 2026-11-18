@@ -386,6 +386,9 @@ impl WorkspaceView {
                     PaneView::Browser(pane) => {
                         pane.update(cx, |pane, cx| pane.set_visible(shown, cx))
                     }
+                    PaneView::Markdown(pane) => {
+                        pane.update(cx, |pane, cx| pane.set_visible(shown, window, cx))
+                    }
                     _ => {}
                 }
             }

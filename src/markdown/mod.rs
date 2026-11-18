@@ -90,6 +90,8 @@ const ZOOMS: [f32; 13] = [
 const ACTUAL_SIZE: usize = 5;
 /// Readable line length; wider panes center the text, as Warp does.
 const MAX_WIDTH: f32 = 860.0;
+/// How long a pane stays hidden before its diagrams give their pictures back.
+const LET_GO_AFTER: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 
 pub enum MarkdownEvent {
     Open(Target),
@@ -122,6 +124,8 @@ pub struct MarkdownPane {
     /// Pictures of diagrams no longer shown.
     stale: crate::widgets::Stale,
     _diagrams: Option<Task<()>>,
+    /// While the pane is hidden: lets go of its diagrams' pictures every `LET_GO_AFTER`.
+    _let_go: Option<Task<()>>,
     /// The text of each piece drawn so far, for copying a selection (see `select`).
     pieces: std::cell::RefCell<std::collections::BTreeMap<usize, String>>,
     selection: Option<select::Selection>,
@@ -143,6 +147,8 @@ enum Diagram {
     /// Drawn off the UI thread and owned by this pane, not GPUI's shared image cache: two
     /// panes showing one document each let go of their own.
     Ready(pan::Drawn),
+    /// Its picture let go while the pane was hidden; drawn again from this SVG when shown.
+    LetGo(std::sync::Arc<str>),
     Failed(String),
 }
 
@@ -157,6 +163,40 @@ fn forget(
             stale.extend(drawn.into_images());
         }
     }
+}
+
+/// Lets go of the diagrams' pictures, keeping the SVG they are drawn from.
+fn let_go(
+    diagrams: &mut std::collections::HashMap<String, Diagram>,
+    stale: &mut crate::widgets::Stale,
+) {
+    for diagram in diagrams.values_mut() {
+        if let Diagram::Ready(drawn) = diagram {
+            let svg = Diagram::LetGo(drawn.svg.clone());
+            if let Diagram::Ready(drawn) = std::mem::replace(diagram, svg) {
+                stale.extend(drawn.into_images());
+            }
+        }
+    }
+}
+
+/// The diagrams to draw again from their SVG: those let go, and those drawn for another
+/// column width than `column` (the pane was zoomed).
+fn to_redraw(
+    diagrams: &std::collections::HashMap<String, Diagram>,
+    column: f32,
+) -> Vec<(String, std::sync::Arc<str>)> {
+    diagrams
+        .iter()
+        .filter_map(|(source, diagram)| {
+            match diagram {
+                Diagram::Ready(drawn) if drawn.resized(column) => Some(drawn.svg.clone()),
+                Diagram::LetGo(svg) => Some(svg.clone()),
+                _ => None,
+            }
+            .map(|svg| (source.clone(), svg))
+        })
+        .collect()
 }
 
 /// Whether the theme is dark, judged by its background's brightness.
@@ -191,6 +231,7 @@ impl MarkdownPane {
             diagrams_dark: is_dark(theme),
             stale: Default::default(),
             _diagrams: None,
+            _let_go: None,
             pieces: Default::default(),
             selection: None,
             drag: None,
@@ -234,10 +275,34 @@ impl MarkdownPane {
         cx.notify();
     }
 
+    /// Shown, or hidden (another tab, behind a pane tab, another pane maximized). Diagrams
+    /// hidden for `LET_GO_AFTER` give their pictures back, tens of MB in a document with
+    /// many, and are drawn again from their SVG once shown.
+    pub fn set_visible(&mut self, visible: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if visible {
+            if self._let_go.take().is_some() {
+                self.draw_diagrams(cx);
+            }
+        } else if self._let_go.is_none() {
+            self._let_go = Some(cx.spawn_in(window, async move |pane, cx| {
+                loop {
+                    cx.background_executor().timer(LET_GO_AFTER).await;
+                    let gone = pane.update_in(cx, |pane, window, _| {
+                        let_go(&mut pane.diagrams, &mut pane.stale);
+                        pane.stale.release(window);
+                    });
+                    if gone.is_err() {
+                        break;
+                    }
+                }
+            }));
+        }
+    }
+
     /// Draws the document's Mermaid diagrams not drawn yet, in the background, and again
-    /// those drawn for another column width (the pane was zoomed), which show their old
-    /// picture until then. The list is laid out again when they arrive, since a picture is
-    /// taller than its source.
+    /// those let go (see `set_visible`) and those drawn for another column width (the pane
+    /// was zoomed), which show their old picture until then. The list is laid out again
+    /// when they arrive, since a picture is taller than its source.
     fn draw_diagrams(&mut self, cx: &mut Context<Self>) {
         let mut sources = Vec::new();
         mermaid_sources(&self.blocks, &mut sources);
@@ -252,17 +317,8 @@ impl MarkdownPane {
             .map(str::to_owned)
             .collect();
         let column = f32::from(self.size(MAX_WIDTH));
-        let resized: Vec<(String, std::sync::Arc<str>)> = self
-            .diagrams
-            .iter()
-            .filter_map(|(source, diagram)| match diagram {
-                Diagram::Ready(drawn) if drawn.resized(column) => {
-                    Some((source.clone(), drawn.svg.clone()))
-                }
-                _ => None,
-            })
-            .collect();
-        if wanted.is_empty() && resized.is_empty() {
+        let redraw = to_redraw(&self.diagrams, column);
+        if wanted.is_empty() && redraw.is_empty() {
             return;
         }
         for source in &wanted {
@@ -286,7 +342,7 @@ impl MarkdownPane {
                             (source, diagram)
                         })
                         .collect();
-                    let redrawn: Vec<_> = resized
+                    let redrawn: Vec<_> = redraw
                         .into_iter()
                         .filter_map(|(source, svg)| {
                             Some((source, pan::Drawn::draw(&renderer, svg, column).ok()?))
@@ -302,10 +358,19 @@ impl MarkdownPane {
                 pane.diagrams.extend(drawn);
                 for (source, fresh) in redrawn {
                     // Not one drawn again from another document's or theme's source meanwhile.
-                    if let Some(Diagram::Ready(shown)) = pane.diagrams.get_mut(&source)
-                        && std::sync::Arc::ptr_eq(&shown.svg, &fresh.svg)
-                    {
-                        pane.stale.extend([shown.take_picture(fresh)]);
+                    let same = |svg: &std::sync::Arc<str>| std::sync::Arc::ptr_eq(svg, &fresh.svg);
+                    match pane.diagrams.get_mut(&source) {
+                        Some(Diagram::Ready(shown)) if same(&shown.svg) => {
+                            pane.stale.extend([shown.take_picture(fresh)]);
+                        }
+                        Some(diagram) => {
+                            if let Diagram::LetGo(svg) = &*diagram
+                                && same(svg)
+                            {
+                                *diagram = Diagram::Ready(fresh);
+                            }
+                        }
+                        None => {}
                     }
                 }
                 pane.relayout();
@@ -519,5 +584,32 @@ impl Render for MarkdownPane {
             .child(switch)
             .child(content)
             .children(expanded)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Diagram, let_go, pan, to_redraw};
+    use std::{collections::HashMap, sync::Arc};
+
+    #[test]
+    fn hidden_diagrams_let_go_and_are_drawn_again_from_their_svg() {
+        let renderer = gpui::SvgRenderer::new(Arc::new(crate::assets::Assets));
+        let svg: Arc<str> = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 100"><rect width="300" height="100"/></svg>"#.into();
+        let drawn = pan::Drawn::draw(&renderer, svg.clone(), 860.0).unwrap();
+        let mut diagrams = HashMap::from([
+            ("drawn".to_owned(), Diagram::Ready(drawn)),
+            ("drawing".to_owned(), Diagram::Pending),
+        ]);
+        assert!(to_redraw(&diagrams, 860.0).is_empty());
+        let_go(&mut diagrams, &mut Default::default());
+        assert!(matches!(&diagrams["drawn"], Diagram::LetGo(kept) if Arc::ptr_eq(kept, &svg)));
+        assert!(matches!(diagrams["drawing"], Diagram::Pending));
+        let redraw = to_redraw(&diagrams, 860.0);
+        assert_eq!(redraw.len(), 1);
+        assert!(
+            Arc::ptr_eq(&redraw[0].1, &svg),
+            "from the kept SVG, not merman again"
+        );
     }
 }
